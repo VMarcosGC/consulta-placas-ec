@@ -87,6 +87,25 @@ OpenAPI docs en `https://consulta-placas-ec.onrender.com/docs`.
 
 ---
 
+## ⚠️ Limitación crítica: IPs de datacenter
+
+**Hallazgo de producción (mayo 2026)**: los portales gubernamentales ecuatorianos detectan IPs de proveedores cloud (Render, AWS, GCP, etc.) y sirven páginas diferentes o desafíos anti-bot. Resultado:
+
+| Fuente | Local (IP residencial) | Render (IP datacenter) |
+|---|---|---|
+| ANT | ✅ funciona | ✅ funciona |
+| SRI | 📌 reCAPTCHA invisible | 📌 reCAPTCHA invisible |
+| AMT | ✅ funciona | ❌ sirve `inputCode.jsp` (challenge) |
+| FGE | ✅ funciona | ❌ sirve página sin `input#pwd` |
+
+**No es un bug del código** — el código es idéntico, los servidores responden distinto.
+
+Opciones si se necesitan AMT/FGE en producción:
+1. **Aceptar la limitación** para MVP/pruebas: 1 de 4 fuentes públicas + endpoints privados funcionan, base sólida para el dashboard.
+2. **Proxy residencial pago**: Bright Data, Smartproxy, IPRoyal — $50-300/mes según volumen. Cambiar `httpx`/Playwright para enrutar requests por el proxy.
+3. **Arquitectura híbrida**: backend FastAPI en cloud + workers de scraping corriendo localmente (Raspberry, PC) que pushean resultados a la BD. Complejo de orquestar.
+4. **API oficial** con cada institución: proceso administrativo, lento pero definitivo.
+
 ## Limitaciones a anticipar
 
 | Síntoma | Causa | Mitigación |
