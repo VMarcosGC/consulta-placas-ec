@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+debug_*.png
+debug_*.html
+discover_*.png
+discover_*.txt
