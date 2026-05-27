@@ -7,11 +7,23 @@ description: Criterios para hacer scraping a fuentes públicas (ANT, SRI, AMT, F
 
 Las fuentes que consultamos son **servicios públicos del Estado ecuatoriano**. Tratarlas mal nos saca del aire (bloqueos por IP, cambios anti-bot, mala reputación). Este skill define el mínimo no negociable.
 
+## Estado actual de fuentes (mayo 2026)
+
+| Fuente | Local (IP residencial) | Render (IP datacenter) | Notas |
+|---|---|---|---|
+| ANT | ✅ funciona | ✅ funciona | Servicio sin filtrado fuerte de IP. |
+| AMT | ✅ funciona | ❌ sirve `inputCode.jsp` (challenge anti-bot) | Iframe + dropdown nativo + overlay "Consultando". |
+| SRI | 📌 `bloqueado_captcha` | 📌 `bloqueado_captcha` | reCAPTCHA Enterprise invisible, no automatizable sin proxy/servicio captcha. |
+| FGE | ✅ funciona | ❌ sirve página sin `input#pwd` | Acepta cédula, RUC, placa, nombres en mismo input. |
+
+**Implicación**: el MVP en producción solo agrega ANT desde cloud. Para AMT/FGE en producción se requiere proxy residencial pago o arquitectura híbrida (ver [CLAUDE.md §8](../../../CLAUDE.md)).
+
 ## Cuándo usar este skill
 
 - Crear un servicio nuevo en `services/`.
 - Modificar un servicio existente.
 - Cualquier código que haga requests HTTP a sitios externos.
+- Antes de "arreglar" un servicio que falla en cloud pero funciona en local — primero verificar IP origen.
 
 ## Patrón obligatorio para fuentes nuevas/desconocidas
 
@@ -72,8 +84,21 @@ Usar `async with async_playwright() as p:` o `try/finally` para `browser.close()
 Playwright lanza Chromium como subprocess. En Windows, `asyncio` solo soporta subprocess con `WindowsProactorEventLoopPolicy`. Síntoma cuando falla: `NotImplementedError()` al lanzar el navegador.
 
 - Lanzar la app SIEMPRE con [run.py](../../../run.py), nunca con `uvicorn main:app --reload` directo.
-- `run.py` fija la política antes de cargar uvicorn.
+- `run.py` fija la política antes de cargar uvicorn (monkey-patch `uvicorn.loops.asyncio.asyncio_setup`).
 - Si necesitás reload, exportá `UVICORN_RELOAD=1` antes de `python run.py` — y aceptá el riesgo de que en algún worker se pierda la política.
+
+## Cloud (Render Docker) + Playwright
+
+Render free tier con runtime nativo Python **no permite `sudo apt-get`**, y `playwright install --with-deps chromium` lo necesita para libs del sistema (libnss3, libcups2, etc.).
+
+Fix definitivo: **runtime Docker** con imagen oficial de Microsoft:
+
+```dockerfile
+FROM mcr.microsoft.com/playwright/python:v1.48.0-jammy
+# Chromium + libs ya preinstalados.
+```
+
+Ver [Dockerfile](../../../Dockerfile) y [render.yaml](../../../render.yaml). El skill [desplegar-mvp](../desplegar-mvp/SKILL.md) detalla el flujo completo.
 
 ## Lecciones aprendidas (errores reales en este repo)
 
@@ -87,6 +112,9 @@ Playwright lanza Chromium como subprocess. En Windows, `asyncio` solo soporta su
 | Datos parciales en el screenshot | Overlay "Consultando" todavía visible | `wait_for_selector("text=Consultando", state="hidden")` |
 | `NameError`/`KeyError` tras refactor | Referencias muertas a variables/claves viejas | Grep del nombre viejo y eliminar TODAS las apariciones |
 | `consulta_realizada` con datos vacíos | reCAPTCHA invisible bloqueó submission silenciosa | Detectar respuesta vacía → `estado: bloqueado_captcha` |
+| Funciona en local, falla en Render (ej: "Form no encontrado", iframes inesperados) | IP datacenter bloqueada por anti-bot del portal | NO es bug de código. Aceptar la limitación, usar proxy residencial, o cambiar a arquitectura híbrida. Ver CLAUDE.md §8. |
+| `playwright install --with-deps` falla en Render con `sudo: command not found` | Native Python runtime no permite apt-get | Usar runtime Docker con imagen `mcr.microsoft.com/playwright/python`. Ver skill desplegar-mvp. |
+| Build de Docker en Render exit code 1 sin causa clara tras `playwright install` | bcrypt 4 incompatible con passlib | Pinear `bcrypt>=3.2.0,<4.0.0` en requirements.txt. |
 
 ## Anti-patrones detectados
 

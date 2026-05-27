@@ -10,8 +10,9 @@ Este proyecto agrega información de múltiples fuentes públicas. Para que el c
 ## Cuándo usar este skill
 
 - Crear o modificar una función `consultar_<fuente>` en `services/`.
-- Crear o modificar un endpoint en [main.py](../../../main.py).
+- Crear o modificar un endpoint en [main.py](../../../main.py) o en un router de [routers/](../../../routers/).
 - Cambiar el esquema de error.
+- Cambiar lo que devuelven los endpoints autenticados (`/auth/*`, `/vehiculos/*`, `/vehiculos/{id}/duenos`, `/vehiculos/{id}/kilometraje`).
 
 ## Contrato — Servicio externo
 
@@ -80,14 +81,53 @@ Para Fiscalía, `placa` se llama `termino` porque acepta varios identificadores 
 | Código | Cuándo |
 |---|---|
 | **200** | Respuesta normal, **incluso si todas las fuentes fallaron**. El cliente decide qué hacer con cada `estado` interno. |
-| **400** | Validación de input: placa con formato inválido. Único caso de 4xx para validación. |
-| **401** | Auth: token faltante o inválido. |
-| **409** | Conflicto: ej. email ya existe en registro. |
+| **201** | Recursos creados (`POST /auth/registro`, `POST /vehiculos`, etc.). |
+| **204** | Recursos eliminados (`DELETE`). Sin body. |
+| **400** | Validación de input: placa/cédula/VIN con formato inválido. Caso de 4xx para validación de path/query/body. |
+| **401** | Auth: token faltante, inválido o expirado. Endpoints públicos NUNCA devuelven 401. |
+| **404** | Recurso no encontrado o no pertenece al usuario autenticado (importante: NO distinguir entre "no existe" y "es de otro usuario" — siempre 404). |
+| **409** | Conflicto: email duplicado en registro, placa duplicada en el mismo usuario. |
+| **422** | Validación de negocio: lectura de kilometraje menor a la máxima, rango de dueño inválido. |
 | **5xx** | Fallo del propio servidor (BD caída, bug). **NUNCA** por una fuente externa caída. |
+
+## CORS y Frontend
+
+El backend acepta requests cross-origin solo desde orígenes en `CORS_ORIGINS` (env var coma-separada). Default dev: `http://localhost:3000`. En producción se agrega la URL de Vercel.
+
+Reglas:
+- **NO usar `allow_origins=["*"]`** en producción — habilita ataques CSRF si combinás con `allow_credentials=True`.
+- Cuando cambie la URL del frontend (preview de Vercel vs prod), actualizar `CORS_ORIGINS` en Render. El frontend no puede consumir la API si su origen no está en la lista.
+- El middleware vive en [main.py](../../../main.py).
+
+## Endpoints autenticados — contrato resumido
+
+Endpoints implementados en Fase 2. Todos requieren `Authorization: Bearer <jwt>`.
+
+| Recurso | Verbo + Path | Body | Respuesta |
+|---|---|---|---|
+| Usuario | `POST /auth/registro` | `UsuarioCrear` | 201 `UsuarioSalida`; 409 si email duplicado |
+| Sesión | `POST /auth/login` | form-data `username` (email) + `password` | 200 `Token`; 401 si credenciales mal |
+| Perfil | `GET /auth/me` | — | 200 `UsuarioSalida` |
+| Vehículo | `POST /vehiculos` | `VehiculoCrear` | 201 `VehiculoSalidaCompleta`; 409 si placa duplicada por usuario |
+| Vehículo | `GET /vehiculos` | — | 200 `VehiculoSalidaCompleta[]` (filtrados por `usuario_id`, sin eliminados) |
+| Vehículo | `GET /vehiculos/{id}` | — | 200 `VehiculoSalidaCompleta`; 404 si no es del usuario |
+| Vehículo | `PATCH /vehiculos/{id}` | `VehiculoActualizar` (parcial) | 200 `VehiculoSalidaCompleta` |
+| Vehículo | `DELETE /vehiculos/{id}` | — | 204 (soft delete con `eliminado_en`) |
+| Dueño | `POST /vehiculos/{id}/duenos` | `DuenoHistoricoCrear` | 201; si `hasta=None` cierra al activo previo |
+| Dueño | `GET /vehiculos/{id}/duenos` | — | 200 lista ordenada por `desde` desc |
+| Dueño | `PATCH /vehiculos/{id}/duenos/{id_dueno}` | `DuenoHistoricoActualizar` | 200 |
+| Dueño | `DELETE /vehiculos/{id}/duenos/{id_dueno}` | — | 204 (hard delete) |
+| Kilometraje | `POST /vehiculos/{id}/kilometraje` | `KilometrajeLecturaCrear` | 201; 422 si menor a máxima |
+| Kilometraje | `GET /vehiculos/{id}/kilometraje` | — | 200 lista ordenada por `fecha_lectura` desc |
+| Kilometraje | `DELETE /vehiculos/{id}/kilometraje/{id_lectura}` | — | 204 |
+
+Autorización transversal: usar `Depends(vehiculo_propio)` (en [auth/dependencies.py](../../../auth/dependencies.py)) para todos los endpoints anidados bajo `/vehiculos/{id}/...`. La dependency ya resuelve `Vehiculo` filtrado por `usuario_id` y excluye soft-deleted.
 
 ## Anti-patrones
 
 - ❌ Lanzar `HTTPException(503)` porque ANT está caído. Las fuentes externas se reportan en su propio `estado`.
-- ❌ Cambiar el nombre de un campo del resumen sin coordinarlo con el frontend.
+- ❌ Cambiar el nombre de un campo del resumen sin coordinarlo con el frontend ([repo consulta-placas-web](https://github.com/VMarcosGC/consulta-placas-web), `src/types/api.ts` espeja los schemas).
 - ❌ Devolver `datos: {}` en lugar de `datos: null` cuando no hay resultados.
 - ❌ Inyectar campos extra en la respuesta del servicio sin documentarlos en este skill.
+- ❌ Devolver `Vehiculo` o `DuenoHistorico` sin pasar por su schema Pydantic — perdés el control de visibilidad (VIN sin ofuscar, etc.).
+- ❌ Distinguir 404 (no existe) vs 403 (no es tuyo) — siempre 404 para no filtrar IDs ajenos.

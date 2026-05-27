@@ -7,11 +7,23 @@ description: Validar y normalizar identificadores ecuatorianos (placa, cédula, 
 
 Todos los validadores viven en [utils/validators.py](../../../utils/validators.py). Una función por tipo, con la convención `validar_<tipo>(valor: str) -> str` que devuelve el valor **normalizado** o lanza `ValueError` con un mensaje en español.
 
+## Estado actual
+
+| Validador | Estado | Ubicación |
+|---|---|---|
+| `validar_placa(placa)` | ✅ implementado | [utils/validators.py](../../../utils/validators.py) |
+| `validar_cedula(cedula)` | ✅ implementado (con checksum módulo 10) | [utils/validators.py](../../../utils/validators.py) |
+| `validar_vin(vin)` | ✅ implementado (ISO 3779/3780) | [utils/validators.py](../../../utils/validators.py) |
+| `validar_ruc(ruc)` | ⏳ pendiente | (cuando se necesite) |
+
+Funciones de ofuscación/decoding del VIN viven aparte en [utils/ofuscacion.py](../../../utils/ofuscacion.py).
+
 ## Cuándo usar este skill
 
 - Agregar un nuevo validador.
 - Modificar un validador existente.
 - Cualquier endpoint que reciba un identificador como path/query/body.
+- Schemas Pydantic que necesiten validar formato antes de persistir (ver `VehiculoCrear` con `field_validator`).
 
 ## Identificadores soportados
 
@@ -102,6 +114,32 @@ try:
 except ValueError as e:
     raise HTTPException(status_code=400, detail=str(e))
 ```
+
+## Uso desde schemas Pydantic
+
+Cuando un schema acepta input que necesita normalización/validación de formato, integrar el validador con `field_validator`:
+
+```python
+from pydantic import BaseModel, field_validator
+from utils.validators import validar_placa, validar_vin
+
+class VehiculoCrear(BaseModel):
+    placa: str
+    vin: str | None = None
+
+    @field_validator("placa")
+    @classmethod
+    def _placa_valida(cls, v: str) -> str:
+        return validar_placa(v)
+
+    @field_validator("vin")
+    @classmethod
+    def _vin_valido(cls, v: str | None) -> str | None:
+        if v is None: return None
+        return validar_vin(v)
+```
+
+Pydantic mapea el `ValueError` a 422 Unprocessable Entity automáticamente — el endpoint no tiene que envolver en `try/except`.
 
 ## Anti-patrones
 

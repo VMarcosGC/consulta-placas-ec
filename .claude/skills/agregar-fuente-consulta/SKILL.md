@@ -9,15 +9,27 @@ Este skill aplica al proyecto [consulta_placas_ec](../../../CLAUDE.md). Lee `CLA
 
 ## Cuándo usar este skill
 
-El usuario pide integrar una fuente nueva: Registro Civil, otra municipalidad, etc.
+El usuario pide integrar una fuente nueva: Registro Civil, otra municipalidad, IESS, etc.
 
 ## Pasos
+
+### 0. Descubrimiento (obligatorio antes de codear)
+
+Antes de escribir una sola línea del scraper:
+
+1. Investigar la URL exacta. Si la fuente es un portal grande, verificar **a qué subpath redirige** desde el botón "Consultar".
+2. Si es página dinámica/JS, correr [scripts/discover.py](../../../scripts/discover.py) actualizando la URL en `main()`. Devuelve `discover_<fuente>.png` y `discover_<fuente>.txt` con frames + selectores reales.
+3. Leer ambos archivos (Read tool acepta PNG). Identificar: iframes, dropdowns nativos vs custom, inputs, botones, captchas, overlays.
+4. **Solo entonces** escribir el scraper.
+
+Saltar este paso costó ~6 iteraciones en AMT antes de descubrir el iframe + dropdown nativo. Ver [scraping-respetuoso](../scraping-respetuoso/SKILL.md) — tabla de lecciones aprendidas.
 
 ### 1. Decidir el método de acceso
 
 - **¿La fuente tiene API pública o HTML estático?** → usar `httpx` (más rápido, menos frágil).
 - **¿La fuente exige JavaScript, sesión, captcha?** → usar Playwright async, como [services/ant.py](../../../services/ant.py).
 - Por defecto, intentar primero `httpx`. Solo escalar a Playwright si es necesario.
+- **Verificar si la fuente filtra por IP**: si funciona en local pero no desde Render/cloud, casi seguro que sí. Ver [CLAUDE.md §8](../../../CLAUDE.md). Considerá la limitación antes de prometer disponibilidad en producción.
 
 ### 2. Crear el archivo del servicio
 
@@ -61,13 +73,23 @@ En [main.py](../../../main.py):
 3. Agregar al dict de respuesta: `"<fuente>": resultado_<fuente>`.
 4. Si aporta indicadores agregables (citaciones, multas, denuncias), actualizar `resumen` con los flags correspondientes y subir `fuentes_consultadas`.
 
-### 5. Aplicar el skill `scraping-respetuoso`
+### 5. Reflejar la fuente en el frontend
 
-Si la fuente es web, revisar el skill [scraping-respetuoso](../scraping-respetuoso/SKILL.md): timeouts, headless, reintentos, screenshots de debug, paso de descubrimiento previo obligatorio.
+El frontend ([consulta-placas-web](https://github.com/VMarcosGC/consulta-placas-web)) consume los campos de `/consultar/{placa}`. Para que la nueva fuente aparezca:
 
-### 6. Documentar particularidades
+1. Agregar tipos a [`src/types/api.ts`](../../../../consulta-placas-web/src/types/api.ts): `Datos<Fuente>`, agregar la fuente al union de `FuenteRespuesta.fuente`, agregar campos al `ResumenConsulta`.
+2. Agregar la card a [`src/components/ResultadoConsulta.tsx`](../../../../consulta-placas-web/src/components/ResultadoConsulta.tsx).
+3. Si suma un valor agregable al resumen, agregar la `Metrica` correspondiente.
 
-Si la fuente tiene cobertura limitada (ej: AMT solo Quito, Fiscalía acepta varios identificadores), anotarlo en un comentario corto al inicio del archivo del servicio.
+Si el frontend ya está deployado en Vercel, el push al repo dispara el rebuild automático.
+
+### 6. Aplicar el skill `scraping-respetuoso`
+
+Si la fuente es web, revisar el skill [scraping-respetuoso](../scraping-respetuoso/SKILL.md): timeouts, headless, reintentos, screenshots de debug, paso de descubrimiento previo obligatorio, manejo de IP datacenter.
+
+### 7. Documentar particularidades
+
+Si la fuente tiene cobertura limitada (ej: AMT solo Quito, Fiscalía acepta varios identificadores, alguna fuente solo funciona desde IP residencial), anotarlo en un comentario corto al inicio del archivo del servicio.
 
 ## Anti-patrones
 
