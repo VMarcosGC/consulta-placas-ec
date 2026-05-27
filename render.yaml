@@ -1,25 +1,27 @@
 # Blueprint para desplegar en Render con un solo click.
 # https://render.com/docs/blueprint-spec
 #
+# Runtime: Docker. La imagen base (mcr.microsoft.com/playwright/python) trae
+# Chromium + libs del sistema ya instalados. Esto evita el problema del native
+# Python runtime de Render que NO permite sudo apt-get y por ende NO puede
+# correr `playwright install --with-deps`.
+#
 # Uso:
 # 1. Push del repo a GitHub.
 # 2. En Render: New → Blueprint → conectar el repo.
-# 3. Render lee este archivo y crea el servicio web + base de datos.
-# 4. Antes del primer deploy: agregar a Environment las variables marcadas como `sync: false` abajo (JWT_SECRET_KEY).
+# 3. Render lee este archivo y crea el servicio web (Docker) + base de datos.
+# 4. Antes del primer deploy: configurar JWT_SECRET_KEY y CORS_ORIGINS en el dashboard.
 
 services:
   - type: web
     name: consulta-placas-ec
-    runtime: python
+    runtime: docker
     plan: free
     region: oregon
     branch: main
-    buildCommand: "./build.sh"
-    startCommand: "alembic upgrade head && python run.py"
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.0
       - key: HOST
         value: 0.0.0.0
       - key: DATABASE_URL
@@ -31,9 +33,9 @@ services:
       - key: JWT_ALGORITHM
         value: HS256
       - key: JWT_EXPIRA_MINUTOS
-        value: 1440
+        value: "1440"
       - key: CACHE_TTL_MINUTOS
-        value: 30
+        value: "30"
       - key: CORS_ORIGINS
         sync: false   # configurar con la URL del frontend Next.js cuando exista
 

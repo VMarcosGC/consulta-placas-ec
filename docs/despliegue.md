@@ -1,6 +1,16 @@
-# Despliegue — Render (free tier)
+# Despliegue — Render (free tier) con Docker
 
 Guía para desplegar el backend de `consulta_placas_ec` en [Render](https://render.com) gratis. Pensado para pruebas / medición de funcionalidad con tráfico bajo.
+
+---
+
+## Por qué Docker (y no native Python runtime)
+
+Render free tier ofrece dos runtimes para Python:
+- **Native Python**: pip install, pero **NO permite `sudo apt-get`**. Playwright necesita libs del sistema (libnss3, libcups2, etc.) que solo se instalan vía apt → falla `playwright install --with-deps`.
+- **Docker**: corremos nuestra propia imagen con las libs preinstaladas. Único camino confiable para Playwright en Render.
+
+El [Dockerfile](../Dockerfile) usa `mcr.microsoft.com/playwright/python:v1.48.0-jammy` (imagen oficial de Microsoft con Chromium + libs ya dentro).
 
 ---
 
@@ -8,7 +18,7 @@ Guía para desplegar el backend de `consulta_placas_ec` en [Render](https://rend
 
 | Componente | Plan | Limitaciones |
 |---|---|---|
-| **Web Service** (FastAPI + Playwright) | Free | 512 MB RAM · 0.1 CPU · duerme tras 15 min sin tráfico (cold start ~30s) · 750h/mes |
+| **Web Service** (Docker, FastAPI + Playwright) | Free | 512 MB RAM · 0.1 CPU · duerme tras 15 min sin tráfico (cold start ~30s) · 750h/mes |
 | **PostgreSQL** | Free | 1 GB storage · **expira en 90 días** (después: $7/mes o migrar a Supabase/Neon) |
 
 Para BD sin caducidad ver sección [Alternativa BD](#alternativa-bd-supabase--neon).
@@ -28,7 +38,7 @@ Para BD sin caducidad ver sección [Alternativa BD](#alternativa-bd-supabase--ne
      python -c "import secrets; print(secrets.token_urlsafe(64))"
      ```
    - `CORS_ORIGINS` — URL del frontend Next.js, ej: `https://mi-frontend.vercel.app,http://localhost:3000`.
-5. Render corre [build.sh](../build.sh) (instala deps + Chromium para Playwright) y luego `alembic upgrade head && python run.py`.
+5. Render hace `docker build` con [Dockerfile](../Dockerfile) (descarga la imagen base de Playwright ~1GB la primera vez, luego cachea) y corre el `CMD` definido: `alembic upgrade head && python run.py`.
 
 Si todo va bien: `https://consulta-placas-ec.onrender.com/health` devuelve `{"status":"ok"}`.
 
@@ -40,19 +50,17 @@ Si no querés usar `render.yaml`:
 
 1. **Crear PostgreSQL en Render**: Dashboard → New → PostgreSQL → plan Free. Guardá la "Internal Database URL".
 2. **Crear Web Service**: New → Web Service → conectar repo.
-   - Runtime: Python.
-   - Build command: `./build.sh`.
-   - Start command: `alembic upgrade head && python run.py`.
+   - **Runtime: Docker** (NO Python).
+   - Dockerfile Path: `./Dockerfile` (default).
    - Health check path: `/health`.
    - Environment variables (todas las del `render.yaml`, manualmente):
-     - `DATABASE_URL` = (Internal Database URL del paso 1; ajustar prefijo a `postgresql+psycopg://...`).
+     - `DATABASE_URL` = (Internal Database URL del paso 1; `database.py` reescribe el prefijo automáticamente).
      - `JWT_SECRET_KEY` = (generada como arriba).
      - `JWT_ALGORITHM` = `HS256`.
      - `JWT_EXPIRA_MINUTOS` = `1440`.
      - `CACHE_TTL_MINUTOS` = `30`.
      - `CORS_ORIGINS` = `https://<frontend>,http://localhost:3000`.
      - `HOST` = `0.0.0.0`.
-     - `PYTHON_VERSION` = `3.12.0`.
 
 ---
 
@@ -83,10 +91,12 @@ OpenAPI docs en `https://consulta-placas-ec.onrender.com/docs`.
 
 | Síntoma | Causa | Mitigación |
 |---|---|---|
+| Build de Docker tarda 5-10 min la primera vez | Descarga de imagen base de Playwright (~1 GB) | Esperado. Builds posteriores son rápidos (cachea capas). |
 | Primer request tras 15 min de inactividad tarda 20-40s | Cold start del free tier | Cron externo (UptimeRobot, GitHub Actions) que toque `/health` cada 10 min. |
-| Playwright se queda sin memoria al lanzar Chromium | 512MB es tight | Lanzar Chromium con `--single-process --no-zygote` (no implementado aún). Si pasa seguido: pagar plan Starter ($7/mes, 512MB→0.5GB y sin sleep). |
+| Playwright se queda sin memoria al lanzar Chromium | 512MB es tight | Lanzar Chromium con `--single-process --no-zygote` (no implementado aún). Si pasa seguido: pagar plan Starter ($7/mes). |
 | Postgres expira a los 90 días | Política de Render | Migrar a Supabase (gratis 500MB, sin caducidad) o Neon. Cambiar `DATABASE_URL`. |
 | Logs de scraping (debug_*.png) no persisten | Disco efímero en Render | Aceptable: son diagnóstico, no datos. Para persistir: S3/R2 (extra trabajo). |
+| `ModuleNotFoundError: No module named 'psycopg2'` | Render emite URL como `postgresql://` (espera psycopg2) | RESUELTO: `database.py` reescribe a `postgresql+psycopg://` automáticamente. |
 
 ---
 

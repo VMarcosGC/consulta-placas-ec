@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.git
+.gitignore
+debug_*.png
+debug_*.html
+discover_*.png
+discover_*.txt
+.vscode/
+.idea/

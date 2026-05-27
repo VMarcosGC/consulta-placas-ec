@@ -10,6 +10,12 @@ DATABASE_URL = os.getenv(
     "postgresql+psycopg://postgres:postgres@localhost:5432/consulta_placas"
 )
 
+# Render (y otros hostings) emiten URLs como `postgresql://...`, pero psycopg 3
+# requiere el driver explícito `postgresql+psycopg://...`. Si llega sin driver,
+# reescribimos para evitar `ModuleNotFoundError: No module named 'psycopg2'`.
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+
 CACHE_TTL_MINUTOS = int(os.getenv("CACHE_TTL_MINUTOS", "30"))
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")

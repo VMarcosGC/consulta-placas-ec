@@ -154,7 +154,7 @@ curl http://localhost:8000/consultar/ABC1234
 
 El backend se despliega en **Render free tier** para pruebas/medición de funcionalidad. Plan documentado en [docs/despliegue.md](docs/despliegue.md). Resumen:
 
-- **Backend**: Render web service, plan free. Build con [build.sh](build.sh) (instala deps + Chromium). Start: `alembic upgrade head && python run.py`. Health check en `/health`.
+- **Backend**: Render web service, plan free, **runtime Docker** (no native Python). Imagen base `mcr.microsoft.com/playwright/python` que trae Chromium + libs preinstalados; native runtime no permite `sudo apt-get` y por eso fallaba `playwright install --with-deps`. Ver [Dockerfile](Dockerfile). Start (CMD del Dockerfile): `alembic upgrade head && python run.py`. Health check en `/health`.
 - **BD**: PostgreSQL en Render free (90 días) o Supabase/Neon free (sin caducidad).
 - **Frontend**: Next.js en Vercel free, consume API vía `NEXT_PUBLIC_API_URL`. Origen permitido vía `CORS_ORIGINS` env var.
 - **Blueprint**: [render.yaml](render.yaml) define todo el stack para deploy de un click.
