@@ -1,6 +1,8 @@
 from datetime import datetime
+from decimal import Decimal
 from sqlalchemy import (
-    String, Integer, DateTime, BigInteger, ForeignKey, func, UniqueConstraint,
+    String, Integer, DateTime, BigInteger, Boolean, Numeric,
+    ForeignKey, func, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,6 +37,15 @@ class Vehiculo(Base):
     transmision: Mapped[str | None] = mapped_column(String(30), nullable=True)
     tipo_motor: Mapped[str | None] = mapped_column(String(50), nullable=True)
     ciudad_registro: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Marketplace público (Fase 4). Un auto aparece en /marketplace solo si
+    # en_venta es True y precio_venta_usd > 0 (regla de negocio 10.6).
+    en_venta: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
+    precio_venta_usd: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=12, scale=2), nullable=True
+    )
+    url_externa: Mapped[str | None] = mapped_column(String(500), nullable=True)
     creado_en: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -60,6 +71,10 @@ class Vehiculo(Base):
         cascade="all, delete-orphan",
     )
     mantenimientos: Mapped[list["Mantenimiento"]] = relationship(  # noqa: F821
+        back_populates="vehiculo",
+        cascade="all, delete-orphan",
+    )
+    enlaces_compartidos: Mapped[list["EnlaceCompartido"]] = relationship(  # noqa: F821
         back_populates="vehiculo",
         cascade="all, delete-orphan",
     )

@@ -11,6 +11,7 @@ una instancia del modelo SQLAlchemy.
 """
 
 from datetime import datetime
+from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from utils.validators import validar_placa, validar_vin
@@ -31,6 +32,11 @@ class VehiculoCrear(BaseModel):
     transmision: str | None = Field(default=None, max_length=30)
     tipo_motor: str | None = Field(default=None, max_length=50)
     ciudad_registro: str | None = Field(default=None, max_length=100)
+    en_venta: bool = False
+    precio_venta_usd: Decimal | None = Field(
+        default=None, ge=0, max_digits=12, decimal_places=2
+    )
+    url_externa: str | None = Field(default=None, max_length=500)
 
     @field_validator("placa")
     @classmethod
@@ -57,6 +63,11 @@ class VehiculoActualizar(BaseModel):
     transmision: str | None = Field(default=None, max_length=30)
     tipo_motor: str | None = Field(default=None, max_length=50)
     ciudad_registro: str | None = Field(default=None, max_length=100)
+    en_venta: bool | None = None
+    precio_venta_usd: Decimal | None = Field(
+        default=None, ge=0, max_digits=12, decimal_places=2
+    )
+    url_externa: str | None = Field(default=None, max_length=500)
 
     @field_validator("vin")
     @classmethod
@@ -97,6 +108,9 @@ class VehiculoSalidaCompleta(_VehiculoBase):
     vin: str | None
     numero_motor: str | None
     numero_chasis: str | None
+    en_venta: bool
+    precio_venta_usd: Decimal | None
+    url_externa: str | None
     actualizado_en: datetime
 
 
@@ -137,3 +151,35 @@ class VehiculoSalidaCompartida(_VehiculoBase):
 class VehiculoSalidaPublica(_VehiculoBase):
     """Vista mínima: sin VIN/motor/chasis. Para listados anónimos o resúmenes."""
     pass
+
+
+class VehiculoSalidaMarketplace(_VehiculoBase):
+    """Vista pública del Marketplace (regla 10.6).
+
+    Nunca expone el VIN completo (solo país de origen, nivel `oculto`) ni el
+    nombre del dueño. Publica características del auto, precio, url de contacto y
+    un indicador de cuán documentado está el historial (conteo de mantenimientos).
+    """
+    precio_venta_usd: Decimal
+    url_externa: str | None
+    vin: IdentificadorOfuscado
+    total_mantenimientos: int
+
+    @classmethod
+    def desde_modelo(cls, vehiculo) -> "VehiculoSalidaMarketplace":
+        return cls(
+            id=vehiculo.id,
+            placa=vehiculo.placa,
+            marca=vehiculo.marca,
+            modelo=vehiculo.modelo,
+            anio=vehiculo.anio,
+            color=vehiculo.color,
+            transmision=vehiculo.transmision,
+            tipo_motor=vehiculo.tipo_motor,
+            ciudad_registro=vehiculo.ciudad_registro,
+            creado_en=vehiculo.creado_en,
+            precio_venta_usd=vehiculo.precio_venta_usd,
+            url_externa=vehiculo.url_externa,
+            vin=IdentificadorOfuscado(**ofuscar_vin(vehiculo.vin, nivel="oculto")),
+            total_mantenimientos=len(vehiculo.mantenimientos),
+        )
