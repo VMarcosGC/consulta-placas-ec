@@ -38,17 +38,7 @@ def crear_vehiculo(
     sesion: Session = Depends(obtener_sesion),
     usuario: Usuario = Depends(usuario_actual),
 ):
-    vehiculo = Vehiculo(
-        usuario_id=usuario.id,
-        placa=datos.placa,
-        vin=datos.vin,
-        numero_motor=datos.numero_motor,
-        numero_chasis=datos.numero_chasis,
-        marca=datos.marca,
-        modelo=datos.modelo,
-        anio=datos.anio,
-        color=datos.color,
-    )
+    vehiculo = Vehiculo(usuario_id=usuario.id, **datos.model_dump())
     sesion.add(vehiculo)
     try:
         sesion.commit()

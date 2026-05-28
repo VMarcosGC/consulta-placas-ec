@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database import obtener_sesion
-from models import Usuario
+from models import Usuario, TransaccionToken
+from models.usuario import SALDO_INICIAL_TOKENS
 from schemas.auth import UsuarioCrear, UsuarioSalida, Token
 from auth.security import hashear_password, verificar_password, crear_token_acceso
 from auth.dependencies import usuario_actual
@@ -33,6 +34,10 @@ def registrar_usuario(
         email=datos.email,
         password_hash=hashear_password(datos.password),
         nombre=datos.nombre,
+    )
+    # Audita el saldo de cortesía inicial para que el ledger cuadre con el saldo.
+    usuario.transacciones_tokens.append(
+        TransaccionToken(monto=SALDO_INICIAL_TOKENS, motivo="saldo_inicial")
     )
     sesion.add(usuario)
     sesion.commit()

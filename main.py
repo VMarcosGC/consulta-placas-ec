@@ -20,6 +20,8 @@ from routers import auth as auth_router
 from routers import vehiculos as vehiculos_router
 from routers import duenos as duenos_router
 from routers import kilometraje as kilometraje_router
+from routers import tokens as tokens_router
+from routers import favoritos as favoritos_router
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,8 @@ app.include_router(auth_router.router)
 app.include_router(vehiculos_router.router)
 app.include_router(duenos_router.router)
 app.include_router(kilometraje_router.router)
+app.include_router(tokens_router.router)
+app.include_router(favoritos_router.router)
 
 
 async def consultar_con_cache(

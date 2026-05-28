@@ -16,7 +16,24 @@ class UsuarioSalida(BaseModel):
     id: int
     email: EmailStr
     nombre: str | None
+    saldo_tokens: int
     creado_en: datetime
+
+
+class TransaccionTokenSalida(BaseModel):
+    """Vista de una transacción de tokens (auditoría). `monto` positivo = crédito,
+    negativo = débito."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    monto: int
+    motivo: str
+    fecha: datetime
+
+
+class SaldoTokens(BaseModel):
+    """Saldo actual de la billetera del usuario."""
+    saldo_tokens: int
 
 
 class Token(BaseModel):

@@ -28,6 +28,9 @@ class VehiculoCrear(BaseModel):
     modelo: str | None = Field(default=None, max_length=100)
     anio: int | None = Field(default=None, ge=1900, le=2100)
     color: str | None = Field(default=None, max_length=50)
+    transmision: str | None = Field(default=None, max_length=30)
+    tipo_motor: str | None = Field(default=None, max_length=50)
+    ciudad_registro: str | None = Field(default=None, max_length=100)
 
     @field_validator("placa")
     @classmethod
@@ -51,6 +54,9 @@ class VehiculoActualizar(BaseModel):
     modelo: str | None = Field(default=None, max_length=100)
     anio: int | None = Field(default=None, ge=1900, le=2100)
     color: str | None = Field(default=None, max_length=50)
+    transmision: str | None = Field(default=None, max_length=30)
+    tipo_motor: str | None = Field(default=None, max_length=50)
+    ciudad_registro: str | None = Field(default=None, max_length=100)
 
     @field_validator("vin")
     @classmethod
@@ -72,6 +78,9 @@ class _VehiculoBase(BaseModel):
     modelo: str | None
     anio: int | None
     color: str | None
+    transmision: str | None
+    tipo_motor: str | None
+    ciudad_registro: str | None
     creado_en: datetime
 
 
@@ -107,6 +116,9 @@ class VehiculoSalidaCompartida(_VehiculoBase):
             modelo=vehiculo.modelo,
             anio=vehiculo.anio,
             color=vehiculo.color,
+            transmision=vehiculo.transmision,
+            tipo_motor=vehiculo.tipo_motor,
+            ciudad_registro=vehiculo.ciudad_registro,
             creado_en=vehiculo.creado_en,
             vin=IdentificadorOfuscado(**ofuscar_vin(vehiculo.vin, nivel="origen")),
             numero_motor=IdentificadorOfuscado(

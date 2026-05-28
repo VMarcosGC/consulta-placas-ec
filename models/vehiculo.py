@@ -32,6 +32,9 @@ class Vehiculo(Base):
     modelo: Mapped[str | None] = mapped_column(String(100), nullable=True)
     anio: Mapped[int | None] = mapped_column(Integer, nullable=True)
     color: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    transmision: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    tipo_motor: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    ciudad_registro: Mapped[str | None] = mapped_column(String(100), nullable=True)
     creado_en: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
