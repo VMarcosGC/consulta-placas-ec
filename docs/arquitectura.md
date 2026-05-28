@@ -16,7 +16,7 @@ graph TD
     Web[Next.js<br/><i>Vercel free</i>]:::wip
 
     API[FastAPI<br/>main.py + routers/<br/><i>Render free</i>]
-    Cache[(PostgreSQL<br/>Render/Supabase)]
+    Cache[(PostgreSQL<br/>Neon)]
     ANT[Servicio ANT<br/>services/ant.py]
     SRI[Servicio SRI<br/>services/sri.py<br/><i>bloqueado_captcha</i>]:::limitado
     AMT[Servicio AMT<br/>services/amt.py]
@@ -30,7 +30,7 @@ graph TD
     Usuario --> Web
     Usuario -->|/consultar/&#123;placa&#125; · ANT+SRI+AMT+FGE| API
     Usuario -->|/consultar-judicial/&#123;cedula&#125; · FGE| API
-    Usuario -->|/auth/* · /vehiculos/* · duenos · kilometraje| API
+    Usuario -->|/auth/* · /vehiculos/* · duenos · kilometraje<br/>mantenimientos · /tokens · /favoritos| API
     Web -.->|fetch + JWT Bearer<br/>CORS| API
 
     API --> Cache
@@ -65,9 +65,10 @@ sequenceDiagram
     C->>API: POST /auth/registro<br/>{email, password, nombre?}
     API->>Sec: hashear_password(password)
     Sec-->>API: bcrypt hash
-    API->>DB: INSERT INTO usuarios
+    API->>DB: INSERT INTO usuarios (saldo_tokens=5)
+    API->>DB: INSERT INTO transacciones_tokens<br/>(+5, "saldo_inicial")
     DB-->>API: usuario.id
-    API-->>C: 201 {id, email, nombre, creado_en}
+    API-->>C: 201 {id, email, nombre, saldo_tokens, creado_en}
 
     Note over C,API: Login
     C->>API: POST /auth/login<br/>(form-data username/password)
@@ -161,8 +162,17 @@ erDiagram
         string email UK
         string password_hash
         string nombre
+        int saldo_tokens
         timestamptz creado_en
         timestamptz actualizado_en
+    }
+
+    transacciones_tokens {
+        bigint id PK
+        bigint usuario_id FK
+        int monto
+        string motivo
+        timestamptz fecha
     }
 
     vehiculos {
@@ -176,9 +186,20 @@ erDiagram
         string modelo
         int anio
         string color
+        string transmision
+        string tipo_motor
+        string ciudad_registro
         timestamptz creado_en
         timestamptz actualizado_en
         timestamptz eliminado_en
+    }
+
+    vehiculos_favoritos {
+        bigint id PK
+        bigint usuario_id FK
+        string placa
+        string nota
+        timestamptz creado_en
     }
 
     duenos_historico {
@@ -203,9 +224,10 @@ erDiagram
         bigint vehiculo_id FK
         string tipo
         date fecha
-        int kilometros
+        int kilometraje_relacionado
         string taller
         numeric costo
+        timestamptz creado_en
     }
 
     enlaces_compartidos {
@@ -217,6 +239,8 @@ erDiagram
     }
 
     usuarios ||--o{ vehiculos : tiene
+    usuarios ||--o{ transacciones_tokens : audita
+    usuarios ||--o{ vehiculos_favoritos : sigue
     vehiculos ||--o{ duenos_historico : registra
     vehiculos ||--o{ kilometraje_lecturas : acumula
     vehiculos ||--o{ mantenimientos : recibe
@@ -227,7 +251,10 @@ erDiagram
 - `consultas` → existe (migración `0001`).
 - `usuarios`, `vehiculos`, `duenos_historico`, `kilometraje_lecturas` → existen (migración `0002`, Fase 2 — Bloque 1).
 - `vehiculos.numero_motor` y `vehiculos.numero_chasis` → agregados en migración `0003` con soporte de ofuscación (ver [utils/ofuscacion.py](../utils/ofuscacion.py)).
-- `mantenimientos`, `enlaces_compartidos` → planeadas (Fases 3 y 4).
+- `vehiculos.transmision/tipo_motor/ciudad_registro`, `usuarios.saldo_tokens` y `transacciones_tokens` → agregados en migración `0004` (Fase 3 — perfil + billetera).
+- `vehiculos_favoritos` → migración `0005`; placa como `String` (no FK), única por usuario+placa.
+- `mantenimientos` → migración `0006`; `fecha` y `kilometraje_relacionado` monotónicos.
+- `enlaces_compartidos` → planeada (Fase 4). El campo `vehiculos_favoritos.placa` no es FK a propósito (se puede seguir una placa inexistente).
 
 ---
 
@@ -250,12 +277,15 @@ flowchart LR
         F2D[Bloque 4<br/>Dueños + kilometraje<br/><b>✅</b>]
     end
 
-    subgraph F3["Fase 3"]
-        F3A[mantenimientos]
+    subgraph F3["Fase 3 — Billetera + Favoritos + Mantenimientos"]
+        F3A[Billetera de tokens<br/>+ auditoría<br/><b>✅</b>]
+        F3B[Favoritos<br/>por placa<br/><b>✅</b>]
+        F3C[Mantenimientos<br/>monotónicos<br/><b>✅</b>]
     end
 
-    subgraph F4["Fase 4"]
-        F4A[enlaces_compartidos<br/>token compra-venta]
+    subgraph F4["Fase 4 — Compra-venta"]
+        F4A[enlaces_compartidos<br/>token privado]
+        F4B[Marketplace público<br/>en_venta + precio]
     end
 
     subgraph F5["Fase 5"]
@@ -266,12 +296,12 @@ flowchart LR
         F6A[App móvil + web]
     end
 
-    B1 --> B2 --> B3 --> B4 --> B5 --> F2A --> F2B --> F2C --> F2D --> F3A --> F4A --> F5A --> F6A
+    B1 --> B2 --> B3 --> B4 --> B5 --> F2A --> F2B --> F2C --> F2D --> F3A --> F3B --> F3C --> F4A --> F4B --> F5A --> F6A
 
     classDef done fill:#dcfce7,stroke:#16a34a;
     classDef wip fill:#fef9c3,stroke:#ca8a04;
     classDef limitado fill:#fee2e2,stroke:#dc2626;
-    class B1,B2,B3,B4,F2A,F2B,F2C,F2D done
+    class B1,B2,B3,B4,F2A,F2B,F2C,F2D,F3A,F3B,F3C done
     class B5 limitado
 ```
 

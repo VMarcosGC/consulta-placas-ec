@@ -21,7 +21,7 @@ Plataforma (móvil + web) para que cualquier persona en Ecuador conozca el **est
 |---|---|---|
 | **Backend** (FastAPI + Playwright en Docker) | [consulta-placas-ec.onrender.com](https://consulta-placas-ec.onrender.com) | Render free tier |
 | **Frontend** (Next.js 16 + Tailwind 4) | [consulta-placas-web.vercel.app](https://consulta-placas-web.vercel.app) | Vercel free |
-| **PostgreSQL** | (interna) | Render |
+| **PostgreSQL 16** | (cadena de conexión externa) | Neon |
 | **Repo backend** | [VMarcosGC/consulta-placas-ec](https://github.com/VMarcosGC/consulta-placas-ec) | GitHub |
 | **Repo frontend** | [VMarcosGC/consulta-placas-web](https://github.com/VMarcosGC/consulta-placas-web) | GitHub |
 
@@ -53,11 +53,19 @@ Ver detalle de deploy en [docs/despliegue.md](docs/despliegue.md) y skill [despl
 - **Deploy**: Docker (imagen oficial de Playwright) en Render + Vercel para el frontend.
 - **Frontend**: Next.js 16 App Router + Tailwind 4 + tema oscuro con gradient brand. Landing comercial + consulta pública + auth + mi-garage + precios. Vive en repo separado [consulta-placas-web](https://github.com/VMarcosGC/consulta-placas-web).
 
+### Fase 3 — Billetera + Favoritos + Mantenimientos ✅ cerrada
+- **BD en Neon** (PostgreSQL 16, externa). Migraciones `0004`–`0006`. El Postgres de Render ya no se usa.
+- [models/usuario.py](models/usuario.py) — `Usuario.saldo_tokens` (default 5, CHECK `>= 0`, constante `SALDO_INICIAL_TOKENS`) + modelo `TransaccionToken` (auditoría inmutable). Migración `0004`.
+- [models/vehiculo.py](models/vehiculo.py) — campos de perfil `transmision`, `tipo_motor`, `ciudad_registro`. Migración `0004`.
+- [routers/tokens.py](routers/tokens.py) — `GET /tokens/saldo`, `GET /tokens/transacciones` (lectura). El registro graba la transacción `saldo_inicial` (+5).
+- [models/vehiculo_favorito.py](models/vehiculo_favorito.py) + [routers/favoritos.py](routers/favoritos.py) — `POST/GET/DELETE /favoritos`; placa como `String` (no FK), validada con `validar_placa`, única por usuario+placa. Migración `0005`.
+- [models/mantenimiento.py](models/mantenimiento.py) + [routers/mantenimientos.py](routers/mantenimientos.py) — `POST/GET/DELETE /vehiculos/{id}/mantenimientos`; inmutables, con validación monotónica de `fecha` y `kilometraje_relacionado` (422) y propiedad por JWT. Migración `0006`.
+- **Pendiente del débito real**: el servicio que descuenta tokens (con `422` por saldo insuficiente) se implementará junto a la primera función de pago. Por ahora la billetera es solo lectura + auditoría inicial.
+
 ### Próximas fases
 | Fase | Objetivo | Entregables clave |
 |---|---|---|
-| **3** | Billetera, Favoritos y Mantenimientos | Tabla `transacciones_tokens` (auditoría de saldo); tabla `vehiculos_favoritos` (placa como `String`); tabla `mantenimientos`: tipo, `fecha`, `kilometraje_relacionado`, taller, costo, adjuntos. |
-| **4** | Compra-venta: token + Marketplace | Token privado: tabla `enlaces_compartidos` (token, vehículo, expiración, scope), usa `VehiculoSalidaCompartida` (ya implementado). Marketplace público: columnas `en_venta` + `precio_venta_usd` + `url_externa` en `vehiculos`, endpoint `GET /marketplace`. |
+| **4** | Compra-venta: token + Marketplace | Token privado: tabla `enlaces_compartidos` (token, vehículo, expiración, scope), usa `VehiculoSalidaCompartida` (ya implementado). Marketplace público: columnas `en_venta` + `precio_venta_usd` + `url_externa` en `vehiculos`, endpoint `GET /marketplace` con `selectinload`. |
 | **5** | OCR / foto | Endpoint que recibe imagen → extrae placa (Tesseract o servicio cloud) → flujo normal. |
 | **6** | Mobile + features de pago | App móvil, integración con gateway local (PlaceToPay/MercadoPago). |
 
