@@ -9,8 +9,13 @@
 # Uso:
 # 1. Push del repo a GitHub.
 # 2. En Render: New → Blueprint → conectar el repo.
-# 3. Render lee este archivo y crea el servicio web (Docker) + base de datos.
-# 4. Antes del primer deploy: configurar JWT_SECRET_KEY y CORS_ORIGINS en el dashboard.
+# 3. Render lee este archivo y crea el servicio web (Docker).
+# 4. Antes del primer deploy, configurar manualmente en el dashboard:
+#    DATABASE_URL (cadena de Neon, secreta), JWT_SECRET_KEY y CORS_ORIGINS.
+#
+# La BD es externa (Neon, PostgreSQL 16+). No se provisiona Postgres en Render
+# (el plan free expira a 90 días). La DATABASE_URL es secreta → sync: false,
+# nunca se commitea aquí.
 
 services:
   - type: web
@@ -25,9 +30,7 @@ services:
       - key: HOST
         value: 0.0.0.0
       - key: DATABASE_URL
-        fromDatabase:
-          name: consulta-placas-db
-          property: connectionString
+        sync: false   # cadena de conexión a Neon. Configurar en el dashboard (secreta).
       - key: JWT_SECRET_KEY
         sync: false   # configurar manualmente en el dashboard (más seguro)
       - key: JWT_ALGORITHM
@@ -38,9 +41,3 @@ services:
         value: "30"
       - key: CORS_ORIGINS
         sync: false   # configurar con la URL del frontend Next.js cuando exista
-
-databases:
-  - name: consulta-placas-db
-    plan: free
-    region: oregon
-    postgresMajorVersion: 16

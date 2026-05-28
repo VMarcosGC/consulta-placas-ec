@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+/debug/
 debug_*.png
 debug_*.html
 discover_*.png
