@@ -299,6 +299,21 @@ erDiagram
         timestamptz fecha_expiracion
     }
 
+    cola_scraping {
+        bigint id PK
+        string identificador
+        string fuente
+        string estado
+        int intentos
+        int max_intentos
+        jsonb payload
+        text error
+        timestamptz disponible_en
+        timestamptz tomado_en
+        timestamptz creado_en
+        timestamptz actualizado_en
+    }
+
     usuarios ||--o{ vehiculos : tiene
     usuarios ||--o{ transacciones_tokens : audita
     usuarios ||--o{ vehiculos_favoritos : sigue
@@ -307,6 +322,8 @@ erDiagram
     vehiculos ||--o{ mantenimientos : recibe
     vehiculos ||--o{ enlaces_compartidos : genera
 ```
+
+> `cola_scraping` (migración `0009`) es independiente del árbol del usuario: la API encola trabajos de AMT/FGE y el worker híbrido (IP residencial) los procesa y guarda el resultado en `consultas`. Ver [arquitectura_hibrida.md](arquitectura_hibrida.md).
 
 **Estado**:
 - `consultas` → existe (migración `0001`).

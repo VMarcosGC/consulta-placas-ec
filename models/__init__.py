@@ -6,6 +6,7 @@ from models.dueno_historico import DuenoHistorico
 from models.kilometraje_lectura import KilometrajeLectura
 from models.mantenimiento import Mantenimiento
 from models.enlace_compartido import EnlaceCompartido
+from models.cola_scraping import ColaScraping
 
 __all__ = [
     "Consulta",
@@ -17,4 +18,5 @@ __all__ = [
     "KilometrajeLectura",
     "Mantenimiento",
     "EnlaceCompartido",
+    "ColaScraping",
 ]
