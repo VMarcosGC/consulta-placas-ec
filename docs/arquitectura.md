@@ -23,8 +23,8 @@ graph TD
     FGE[Servicio Fiscalía<br/>services/fiscalia.py]
     OCR[Servicio OCR<br/>services/vision.py]
 
-    Worker[worker.py · IP residencial<br/><i>Fase arquitectura — diseño</i>]:::futuro
-    Cola[(cola_scraping<br/><i>planeado</i>)]:::futuro
+    Worker[worker.py · IP residencial<br/>pull-only]
+    Cola[(cola_scraping<br/>Neon)]
 
     ANTWeb[(consultaweb.ant.gob.ec)]
     SRIWeb[(srienlinea.sri.gob.ec)]
@@ -43,23 +43,20 @@ graph TD
     API --> Cache
     API --> ANT
     API --> SRI
-    API --> AMT
-    API --> FGE
     API --> OCR
+    API -->|cache miss AMT/FGE · encola| Cola
 
     ANT -->|Playwright| ANTWeb
     SRI -->|Playwright| SRIWeb
-    AMT -->|Playwright| AMTWeb
-    FGE -->|Playwright| FGEWeb
     OCR -->|REST + API key| VisionWeb
 
-    API -.->|cache miss AMT/FGE · encola| Cola
-    Worker -.->|poll FOR UPDATE SKIP LOCKED| Cola
-    Worker -.->|Playwright · IP residencial| AMTWeb
-    Worker -.->|Playwright · IP residencial| FGEWeb
-    Worker -.->|guarda resultados| Cache
+    Worker -->|poll FOR UPDATE SKIP LOCKED| Cola
+    Worker -->|ejecuta · IP residencial| AMT
+    Worker -->|ejecuta · IP residencial| FGE
+    AMT -->|Playwright| AMTWeb
+    FGE -->|Playwright| FGEWeb
+    Worker -->|guarda en consultas| Cache
 
-    classDef futuro stroke-dasharray: 5 5, stroke:#888;
     classDef wip stroke-dasharray: 5 5, stroke:#d97706, color:#d97706;
     classDef limitado stroke:#dc2626, color:#dc2626;
 ```
@@ -114,6 +111,12 @@ sequenceDiagram
 ## 2b. Flujo del endpoint `GET /consultar/{placa}`
 
 Secuencia con el caché ya integrado.
+
+> **Nota (worker híbrido):** el flujo síncrono de abajo aplica a **ANT y SRI**. Desde el
+> cableado del worker, **AMT y FGE** no se scrapean en la API: en cache miss se encolan en
+> `cola_scraping` y la fuente devuelve `estado: en_proceso` (`datos: null`), dentro del mismo
+> 200. El worker (IP residencial) las procesa y llena `consultas`; el cliente reintenta.
+> Ver [arquitectura_hibrida.md](arquitectura_hibrida.md).
 
 ```mermaid
 sequenceDiagram
@@ -373,7 +376,7 @@ flowchart LR
     end
 
     subgraph FH["Arquitectura — Worker híbrido"]
-        FHA[cola_scraping + worker.py<br/>IP residencial<br/>📐 diseño]
+        FHA[cola_scraping + worker.py + API cableada<br/>AMT/FGE → en_proceso<br/><b>código ✅ · falta desplegar worker</b>]
     end
 
     subgraph F6["Fase 6"]
@@ -390,7 +393,7 @@ flowchart LR
     class B1,B2,B3,B4,F2A,F2B,F2C,F2D,F3A,F3B,F3C,F4A,F4B done
     class B5 limitado
     class F5A wip
-    class FHA futuro
+    class FHA wip
 ```
 
 ---

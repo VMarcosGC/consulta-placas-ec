@@ -13,9 +13,8 @@ from database import obtener_sesion, CACHE_TTL_MINUTOS, CORS_ORIGINS
 from utils.validators import validar_placa, validar_cedula
 from services.ant import consultar_ant
 from services.sri import consultar_sri
-from services.amt import consultar_amt
-from services.fiscalia import consultar_fiscalia
 from services.cache import obtener_consulta_reciente, guardar_consulta
+from services.cola import encolar_scraping
 from routers import auth as auth_router
 from routers import vehiculos as vehiculos_router
 from routers import duenos as duenos_router
@@ -28,6 +27,11 @@ from routers import compartidos as compartidos_router
 from routers import ocr as ocr_router
 
 logger = logging.getLogger(__name__)
+
+# Fuentes que se sirven vía worker híbrido: AMT y FGE bloquean IPs de datacenter
+# (ver docs/arquitectura_hibrida.md). La API no las scrapea; encola y responde
+# en_proceso. El worker (IP residencial) las procesa y llena la caché `consultas`.
+ESTADO_EN_PROCESO = "en_proceso"
 
 app = FastAPI(title="Consulta de Placas Ecuador")
 
@@ -81,6 +85,41 @@ async def consultar_con_cache(
     return respuesta
 
 
+def consultar_via_worker(
+    sesion: Session,
+    identificador: str,
+    fuente: str,
+    campo_id: str = "placa",
+) -> dict:
+    """Devuelve la respuesta cacheada si existe; si no, encola para el worker.
+
+    A diferencia de `consultar_con_cache`, NUNCA invoca Playwright: estas fuentes
+    (AMT/FGE) se scrapean desde una IP residencial vía el worker híbrido. En cache
+    miss inserta un trabajo `pendiente` (idempotente) y devuelve `en_proceso` con
+    `datos: null`. El cliente reintenta hasta que el worker llena la caché.
+    """
+    try:
+        cacheada = obtener_consulta_reciente(sesion, identificador, fuente, CACHE_TTL_MINUTOS)
+        if cacheada is not None:
+            return {**cacheada, "_cache": True}
+    except Exception as e:
+        logger.warning("Cache lookup falló para %s/%s: %r", fuente, identificador, e)
+        sesion.rollback()
+
+    try:
+        encolar_scraping(sesion, identificador, fuente)
+    except Exception as e:
+        logger.warning("Encolado falló para %s/%s: %r", fuente, identificador, e)
+        sesion.rollback()
+
+    return {
+        "fuente": fuente,
+        campo_id: identificador,
+        "estado": ESTADO_EN_PROCESO,
+        "datos": None,
+    }
+
+
 @app.get("/")
 def inicio():
     return {"mensaje": "API de consulta de placas activa"}
@@ -101,9 +140,8 @@ async def consultar_judicial(cedula: str, sesion: Session = Depends(obtener_sesi
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    resultado = await consultar_con_cache(
-        sesion, cedula_limpia, "FGE", consultar_fiscalia
-    )
+    # FGE vía worker híbrido (encolado + en_proceso), no Playwright directo.
+    resultado = consultar_via_worker(sesion, cedula_limpia, "FGE", campo_id="termino")
 
     datos = resultado.get("datos") or {}
     denuncias = datos.get("denuncias") or {}
@@ -114,6 +152,7 @@ async def consultar_judicial(cedula: str, sesion: Session = Depends(obtener_sesi
         "fge": resultado,
         "resumen": {
             "fge_consultado": resultado.get("estado") == "consulta_realizada",
+            "fge_en_proceso": resultado.get("estado") == ESTADO_EN_PROCESO,
             "total_denuncias": total,
             "tiene_denuncias": total > 0,
         },
@@ -129,8 +168,9 @@ async def consultar_placa(placa: str, sesion: Session = Depends(obtener_sesion))
 
     resultado_ant = await consultar_con_cache(sesion, placa_limpia, "ANT", consultar_ant)
     resultado_sri = await consultar_con_cache(sesion, placa_limpia, "SRI", consultar_sri)
-    resultado_amt = await consultar_con_cache(sesion, placa_limpia, "AMT", consultar_amt)
-    resultado_fge = await consultar_con_cache(sesion, placa_limpia, "FGE", consultar_fiscalia)
+    # AMT y FGE se sirven vía worker híbrido (encolado + en_proceso), no Playwright.
+    resultado_amt = consultar_via_worker(sesion, placa_limpia, "AMT")
+    resultado_fge = consultar_via_worker(sesion, placa_limpia, "FGE", campo_id="termino")
 
     datos_ant = resultado_ant.get("datos") or {}
     citaciones_ant = datos_ant.get("citaciones") or {}
@@ -171,6 +211,8 @@ async def consultar_placa(placa: str, sesion: Session = Depends(obtener_sesion))
             "sri_consultado": resultado_sri.get("estado") == "consulta_realizada",
             "amt_consultado": resultado_amt.get("estado") == "consulta_realizada",
             "fge_consultado": resultado_fge.get("estado") == "consulta_realizada",
+            "amt_en_proceso": resultado_amt.get("estado") == ESTADO_EN_PROCESO,
+            "fge_en_proceso": resultado_fge.get("estado") == ESTADO_EN_PROCESO,
             "tiene_citaciones_pendientes_ant": pendientes_ant > 0,
             "total_citaciones_ant": total_citaciones_ant,
             "valor_pendiente_sri": total_sri,

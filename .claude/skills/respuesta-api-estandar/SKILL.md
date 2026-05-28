@@ -39,6 +39,7 @@ Para Fiscalía, `placa` se llama `termino` porque acepta varios identificadores 
 | `pendiente_integracion` | La fuente está stub (no se usa actualmente; todas las fuentes están integradas). |
 | `error` | Cualquier fallo (timeout, parser, conexión). Incluir `"error": "..."` con `repr(e)`. |
 | `bloqueado_captcha` | reCAPTCHA invisible bloqueó silenciosamente. Caso SRI. |
+| `en_proceso` | La fuente (AMT/FGE) se encoló para el worker híbrido; aún no hay resultado. `datos: null`, sin `error`. No se cachea. El cliente reintenta hasta ver `consulta_realizada`. Ver [arquitectura_hibrida.md](../../../docs/arquitectura_hibrida.md). |
 
 ### Reglas
 - `datos` es `null` cuando `estado != "consulta_realizada"`.
