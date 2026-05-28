@@ -1,181 +1,114 @@
-# Proyecto Snapshot — consulta_placas_ec
-
+# Proyecto Snapshot — consulta_placas_ec (backend)
 **Generado:** 2026-05-28
-**Herramienta origen:** Claude Code (VS Code, Windows 11)
-**Propósito de este archivo:** Subir a Gemini AI Studio (u otro LLM) para continuar la planificación TO-BE sin re-explicar contexto.
-**Rama git:** `main` · **Último commit:** `c91f915 docs: cerrar Fase 3 en CLAUDE.md y actualizar diagramas`
-**Working tree:** limpio (Fase 3 commiteada; nada pusheado al remoto todavía).
+**Herramienta origen:** Claude Code / VS Code
+**Propósito de este archivo:** Subir a Gemini para continuar planificación TO-BE
 
 ---
 
 ## 1. ¿Qué es este proyecto?
 
-Plataforma (web + futura app móvil) para que cualquier persona en Ecuador conozca el **estado integral de un vehículo** a partir de su placa, sus características o una foto. El backend agrega información de cuatro fuentes oficiales (ANT, SRI, AMT Quito, Fiscalía General del Estado), gestiona auth JWT y mantiene un historial privado de cada vehículo (dueños, kilometraje, mantenimientos), más una billetera de tokens y favoritos. Cuatro pilares: **consulta pública por placa**, **consulta por foto** (OCR, futuro), **historial privado del vehículo** (solo dueño autenticado), y **compra-venta** (token privado + marketplace público, Fase 4).
-
-Dominio: información vehicular pública ecuatoriana + CRM personal de vehículos. Usuarios finales: dueños de vehículos, compradores potenciales, talleres.
+Backend de una plataforma (móvil + web) para que cualquier persona en Ecuador conozca el **estado integral de un vehículo** a partir de su placa, sus características o una foto. Agrega información de fuentes oficiales (ANT, SRI, AMT Quito, Fiscalía/FGE) y permite a usuarios autenticados llevar el historial privado del auto (kilometraje, dueños, mantenimientos), una billetera de tokens, favoritos y un modo compra-venta (marketplace público + enlaces temporales). Este repo es el **backend FastAPI + Playwright**; el frontend Next.js vive en un repo separado (`consulta-placas-web`).
 
 ## 2. Stack tecnológico
 
-**Backend (este repo)**
-- Python 3.11+ (en producción: imagen Docker con Python 3.10 vía Playwright official `mcr.microsoft.com/playwright/python:v1.48.0-jammy`).
-- FastAPI + uvicorn (routers organizados en `routers/`).
-- Playwright async + Chromium para todo el scraping.
-- **PostgreSQL 16 en Neon** (externa, serverless) + SQLAlchemy 2 + Alembic (migraciones manuales).
-- Pydantic 2.
-- Auth: `passlib[bcrypt]` con `bcrypt<4.0` pineado + `python-jose` (JWT HS256).
-- Driver BD: `psycopg[binary]>=3.2.0` (psycopg 3).
-
-**Frontend (repo separado [consulta-placas-web](https://github.com/VMarcosGC/consulta-placas-web))**
-- Next.js 16 (App Router, Turbopack, RSC) + React 19 + Tailwind CSS 4.
-- JWT en localStorage. Dark mode con gradient `violet-500 → pink-500 → amber-500`.
-
-**Deploy**
-- Backend en **Render free tier** con runtime **Docker**.
-- BD en **Neon** (ya no se provisiona Postgres en Render; expiraba a 90 días). `DATABASE_URL` se setea manualmente en el dashboard de Render (secreta).
-- Frontend en **Vercel free**.
+- **Lenguaje:** Python 3.11+ (prod: imagen Docker Playwright con Python 3.10).
+- **API:** FastAPI con routers en `routers/`; Pydantic 2 para validación/serialización.
+- **Scraping:** Playwright async (Chromium) en `services/<fuente>.py`.
+- **BD:** PostgreSQL 16 en **Neon** (externa, serverless). JSONB para respuestas crudas y para `scope` de enlaces.
+- **ORM/Migraciones:** SQLAlchemy 2 + Alembic (migraciones **manuales**, `0001`–`0008`).
+- **Auth:** `passlib[bcrypt]` (con `bcrypt<4.0` pineado) + `python-jose` (JWT HS256).
+- **Deploy:** Docker en Render (backend) + Vercel (frontend). Cron externo (UptimeRobot) contra `/health` por el cold start del free tier.
 
 ## 3. Estado actual — AS-IS
 
-### Completado
+### ✅ Completado
+- **Fase 1 — Consultas públicas + caché:** endpoints `/consultar/{placa}`, `/consultar-judicial/{cedula}`, `/health`. ANT/AMT/FGE funcionan en local; SRI bloqueado por reCAPTCHA invisible. Caché en Postgres con TTL (solo cachea `consulta_realizada`/`sin_resultados`).
+- **Fase 2 — Auth + dominio + deploy:** registro/login JWT, CRUD de vehículos (VIN/motor/chasis con 3 niveles de visibilidad y ofuscación), histórico de dueños, kilometraje monotónico. Desplegado en Render + Vercel.
+- **Fase 3 — Billetera + Favoritos + Mantenimientos:** `saldo_tokens` (default 5, CHECK ≥ 0) + `transacciones_tokens` (auditoría); favoritos por placa (String, no FK); mantenimientos inmutables con validación monotónica. Migraciones `0004`–`0006`. BD migrada a Neon.
+- **Fase 4 — Compra-venta:** Marketplace público y token de enlace compartido. Migraciones `0007`–`0008` aplicadas a Neon (head = `0008`).
+  - `GET /marketplace` (anónimo): lista autos con `en_venta = True AND precio_venta_usd > 0`, no eliminados. `selectinload(mantenimientos)` para derivar `total_mantenimientos` sin N+1. Salida `VehiculoSalidaMarketplace`: VIN nivel `oculto` (solo país), **sin nombre del dueño**.
+  - `POST /vehiculos/{id}/compartir` (dueño, TTL ≤ 7 días) + `GET /compartido/{token}` (público) → `VehiculoSalidaCompartida` ofuscado. `token` único (UK), `scope` JSONB opt-in. Token inexistente/expirado → 404.
 
-**Fase 1 — Consultas estables + caché**
-- `GET /consultar/{placa}` (ANT+SRI+AMT+FGE en paralelo, con `resumen`), `GET /consultar-judicial/{cedula}` (FGE), `GET /health`.
-- Caché en PostgreSQL con TTL ([services/cache.py](services/cache.py)). Solo cachea `consulta_realizada` y `sin_resultados`.
-- 5 servicios en `services/` con contrato unificado.
+### 🔄 En progreso / pendiente acotado
+- **Débito real de tokens:** el servicio que descuenta saldo (422 por saldo insuficiente) se implementará junto a la primera función de pago. Hoy la billetera es solo lectura + auditoría inicial.
+- **`scope` del enlace:** se persiste y valida (claves `kilometraje`/`mantenimientos`/`duenos_historico`), pero la vista compartida actual solo muestra características del auto; el gateo de esas secciones se cableará cuando se agreguen a `VehiculoSalidaCompartida`.
 
-**Fase 2 — Auth + dominio + deploy**
-- JWT (registro/login/me), CRUD de vehículos, dueños históricos, kilometraje monotónico.
-- Ofuscación VIN/motor/chasis en 3 niveles. Validadores EC (placa, cédula, VIN).
-- MVP desplegado: backend en Render, frontend en Vercel.
-
-**Fase 3 — Billetera + Favoritos + Mantenimientos ✅ (recién cerrada)**
-- **Migración de BD a Neon** (PostgreSQL 16). Migraciones `0004`–`0006` aplicadas; head=`0006`.
-- **Billetera**: `Usuario.saldo_tokens` (default 5, CHECK `>= 0`, constante `SALDO_INICIAL_TOKENS`) + modelo `TransaccionToken` (auditoría inmutable). Endpoints `GET /tokens/saldo` y `GET /tokens/transacciones`. El registro graba la transacción `saldo_inicial` (+5) para que el ledger cuadre con el saldo.
-- **Perfil de vehículo ampliado**: `transmision`, `tipo_motor`, `ciudad_registro`.
-- **Favoritos**: tabla `vehiculos_favoritos`, placa como `String` (no FK), validada con `validar_placa`, única por usuario+placa. CRUD en `/favoritos`.
-- **Mantenimientos**: tabla `mantenimientos` (`tipo`, `fecha`, `kilometraje_relacionado`, `taller`, `costo`), anidada en `/vehiculos/{id}/mantenimientos`, inmutable, con validación monotónica fecha+km (422) y propiedad por JWT.
-- **Contrato de errores reconciliado**: validación de negocio → **422**, propiedad ajena → **404** (no 403), formato → 400, conflictos → 409.
-
-### En progreso / pendiente
-
-- **Débito de tokens real**: el servicio que descuenta tokens (con `SaldoInsuficiente` → 422) se implementará junto a la primera función de pago (ej. "consultar placa cuesta 1 token"). Hoy la billetera es solo lectura + grant inicial auditado.
-- **Fase 4 no iniciada**: token de compra-venta (`enlaces_compartidos`) + Marketplace público (`en_venta`, `precio_venta_usd`, `url_externa`, `GET /marketplace` con `selectinload`).
-- El frontend Next.js (repo separado) aún no consume los endpoints nuevos de Fase 3.
-
-### Problemas y deuda técnica
-
-| Síntoma | Causa | Estado |
-|---|---|---|
-| SRI siempre `bloqueado_captcha` | reCAPTCHA Enterprise invisible | Estructural (local y cloud) |
-| AMT/FGE bloqueados en Render | IPs de datacenter detectadas | Solo en cloud; local funciona |
-| Cold start ~30s | Render free duerme | Mitigable con UptimeRobot a `/health` |
-
-- Sin tests automatizados (descansa en disciplina + skills + smoke tests manuales).
-- Sin README.md público.
-- `.env` con valores reales en local, gitignored (verificado). **La contraseña de Neon quedó en el historial del chat de la sesión — conviene rotarla.**
-- Mantenimientos sin PATCH a propósito (editar fecha/km rompería la monotonía); para corregir, borrar y re-registrar.
-- `adjuntos` de mantenimientos omitido (requiere storage de archivos; va en fase posterior).
+### ⚠️ Problemas / deuda técnica / decisiones
+- **SRI bloqueado por reCAPTCHA Enterprise invisible** (local y cloud). No es bug; requiere anti-captcha o API oficial.
+- **AMT y FGE bloqueados en cloud por IP de datacenter** (Render). Funcionan desde IP residencial (local). Aislar contenedores en otra red NO lo resuelve.
+- **Decisión 2026-05-28:** estrategia de scraping cloud = **worker híbrido con IP residencial** (backend en Render, worker scraping en máquina residencial que empuja a Neon). Resuelve AMT/FGE a ~$0; SRI pospuesto (2captcha si hace falta). Aún no implementado.
+- **Seguridad pendiente:** rotar la contraseña de Neon (quedó expuesta en historial de chat de una sesión previa). Vive solo en `.env` (gitignored) y en el dashboard de Render (`sync: false`).
+- **Nada pusheado al remoto** todavía: los commits de Fases 3 y 4 están solo en local.
 
 ## 4. Estructura de archivos actual
 
 ```
 consulta_placas_ec/
-├── main.py                       # FastAPI: endpoints públicos + include_router (auth, vehiculos, duenos, kilometraje, tokens, favoritos, mantenimientos)
-├── database.py                   # engine, sesiones, env vars (DATABASE_URL→Neon, JWT_SECRET_KEY)
-├── run.py                        # Launcher (WindowsProactorEventLoopPolicy)
-├── requirements.txt
-├── Dockerfile                    # Base playwright/python:v1.48.0-jammy
-├── render.yaml                   # Render web Docker; DATABASE_URL sync:false (Neon, externa)
-├── CLAUDE.md                     # Fuente de verdad (15 secciones; sección 10 = reglas MVP Fases 3-4)
-├── .claude/skills/               # 6 skills propios
-├── alembic/versions/
-│   ├── 0001_crear_tabla_consultas.py
-│   ├── 0002_usuarios_vehiculos_duenos_kilometraje.py
-│   ├── 0003_motor_y_chasis_en_vehiculos.py
-│   ├── 0004_perfil_vehiculo_billetera.py    # Fase 3
-│   ├── 0005_favoritos.py                     # Fase 3
-│   └── 0006_mantenimientos.py                # Fase 3
-├── auth/                         # security.py (bcrypt+JWT), dependencies.py (usuario_actual, vehiculo_propio)
-├── routers/
-│   ├── auth.py                   # + grant saldo_inicial en registro
-│   ├── vehiculos.py              # POST usa model_dump (persiste todos los campos)
-│   ├── duenos.py
-│   ├── kilometraje.py
-│   ├── tokens.py                 # Fase 3: GET /tokens/saldo, /tokens/transacciones
-│   ├── favoritos.py              # Fase 3: CRUD /favoritos
-│   └── mantenimientos.py         # Fase 3: CRUD /vehiculos/{id}/mantenimientos
-├── services/                     # ant, sri, amt, fiscalia, cache (Playwright; SOLO lectura, no tocados por CRUD)
-├── models/
-│   ├── consulta.py · usuario.py (+TransaccionToken, SALDO_INICIAL_TOKENS) · vehiculo.py (+perfil)
-│   ├── vehiculo_favorito.py      # Fase 3
-│   ├── dueno_historico.py · kilometraje_lectura.py
-│   └── mantenimiento.py          # Fase 3
-├── schemas/
-│   ├── auth.py (+saldo_tokens, TransaccionTokenSalida, SaldoTokens)
-│   ├── vehiculo.py (+perfil) · dueno_historico.py · kilometraje.py
-│   ├── favorito.py               # Fase 3
-│   └── mantenimiento.py          # Fase 3
-├── utils/                        # validators.py, ofuscacion.py
-├── scripts/discover.py
-├── docs/
-│   ├── arquitectura.md           # diagramas Mermaid (actualizados a Fase 3)
-│   └── despliegue.md
-└── debug/                        # PNGs de scraping (gitignored)
+├── main.py                 # FastAPI: endpoints públicos + include_router
+├── run.py                  # launcher (WindowsProactorEventLoopPolicy)
+├── database.py             # engine, SessionLocal, Base, env vars
+├── alembic/versions/       # 0001..0008 (migraciones manuales)
+├── auth/                   # security.py (bcrypt+JWT), dependencies.py
+├── models/                 # consulta, usuario(+TransaccionToken), vehiculo,
+│                           # vehiculo_favorito, dueno_historico,
+│                           # kilometraje_lectura, mantenimiento, enlace_compartido
+├── schemas/                # auth, vehiculo, dueno_historico, kilometraje,
+│                           # favorito, mantenimiento, enlace_compartido
+├── routers/                # auth, vehiculos, duenos, kilometraje, tokens,
+│                           # favoritos, mantenimientos, marketplace, compartidos
+├── services/               # ant, sri, amt, fiscalia, cache (Playwright)
+├── utils/                  # validators.py, ofuscacion.py
+├── scripts/discover.py     # descubrimiento de selectores para scraping
+├── docs/                   # arquitectura.md (Mermaid), despliegue.md
+├── Dockerfile · render.yaml · requirements.txt
+└── .claude/skills/         # 6 skills del proyecto
 ```
-
-(Sin `node_modules/`, `__pycache__/`, ni `.venv/` — gitignored.)
 
 ## 5. Skills y herramientas configuradas
 
-**Skills propios** (en `.claude/skills/`): `agregar-fuente-consulta`, `desplegar-mvp`, `modelo-dominio-vehiculo`, `respuesta-api-estandar`, `scraping-respetuoso`, `validacion-datos-ec`.
+- **CLAUDE.md** presente (workspace + proyecto): fuente de verdad, fases, reglas de negocio 10.x.
+- **Skills del proyecto** (`.claude/skills/`): `agregar-fuente-consulta`, `desplegar-mvp`, `modelo-dominio-vehiculo`, `respuesta-api-estandar`, `scraping-respetuoso`, `validacion-datos-ec`.
+- **Diagramas vivos** en `docs/arquitectura.md` (topología, auth, secuencia de consulta, ER, roadmap) — actualizados tras cada bloque.
 
-**Bibliotecas a nivel workspace** (en `porpuestas_code/`): `marketingskills/` (42 skills), `ui-ux-pro-max-skill/` (7 sub-skills + CLI `search.py`).
+## 6. Decisiones técnicas tomadas
 
-## 6. Decisiones técnicas clave
+- **Migraciones manuales** (no autogenerate a ciegas), nombre descriptivo por archivo.
+- **Separación CRUD ↔ scraping:** el CRUD del MVP toca solo la BD propia; nunca invoca Playwright.
+- **Contrato de error:** 422 validación de negocio, 404 propiedad (no 403), 400 input, 409 conflicto, 201/204 en create/delete; nunca 500 por fuente externa caída.
+- **Idioma español estricto** en tablas, columnas, rutas y variables.
+- **Privacidad por niveles:** `completo` (dueño), `origen` (token compra-venta), `oculto` (público). VIN/motor/chasis nunca completos a terceros.
+- **Marketplace:** `selectinload` obligatorio; nunca expone VIN completo ni nombre del dueño.
+- **BD:** se eligió Neon sobre el Postgres free de Render (que expira a los 90 días).
 
-- **Idioma español** en todo identificador (tablas, columnas, rutas, variables).
-- **Separación CRUD ↔ scraping**: Billetera/Favoritos/Mantenimientos/Marketplace tocan solo la BD; nunca invocan Playwright.
-- **Migraciones manuales** (no autogenerate a ciegas), nombre descriptivo (`0004_perfil_vehiculo_billetera.py`).
-- **Billetera**: saldo inicial 5, nunca negativo (CHECK + futura validación de débito), toda alteración auditada en `transacciones_tokens`. El grant inicial se audita en el registro.
-- **Favoritos**: placa como `String` (no FK) → se puede seguir una placa inexistente.
-- **Mantenimientos**: inmutables; monotonía de fecha+km validada en el router (comparando con el máximo); propiedad por `vehiculo_propio`.
-- **Compra-venta (Fase 4)**: token privado y Marketplace público **coexisten** (no se reemplazan).
-- **Contrato de error**: 422 negocio / 404 propiedad / 400 formato / 409 conflicto / nunca 500 por fuente externa.
-- **BD en Neon** (Render free Postgres expiraba a 90 días).
-- **`JWT_SECRET_KEY`** es el nombre real de la variable del JWT (el spec lo llamó `SECRET_KEY`).
-- `run.py` en vez de `uvicorn --reload` (event loop policy en Windows). Pin `bcrypt<4.0`. Docker en Render. Contrato `consultar_<fuente>` unificado.
-
-## 7. Últimos cambios (commits de esta sesión)
+## 7. Últimos cambios (git log)
 
 ```
+c00bb6c docs: cerrar Fase 4 en CLAUDE.md y actualizar diagramas
+ae540bf feat: Fase 4 - marketplace publico y token de compra-venta
+bf6a2e4 docs: regenerar snapshot del proyecto tras cierre de Fase 3
 c91f915 docs: cerrar Fase 3 en CLAUDE.md y actualizar diagramas
 4e09776 feat: Fase 3 - mantenimientos del vehiculo
 ab10270 feat: Fase 3 - billetera de tokens, favoritos y perfil de vehiculo ampliado
 11d4505 chore: limpieza de debug y backend apuntando a BD externa (Neon)
-c83c259 docs: reglas de negocio MVP (Fases 3 y 4) + snapshot del proyecto
-9551220 docs: actualizar CLAUDE.md y skills tras cierre de Fase 2 + MVP en produccion
 ```
+Working tree limpio. Rama `main`. Nada pusheado al remoto.
 
 ## 8. Para continuar en Gemini — instrucciones
 
 > Eres un asistente de arquitectura y planificación de software.
->
-> Tienes el contexto completo del proyecto `consulta_placas_ec`: backend FastAPI + Playwright en Docker (Render), BD PostgreSQL 16 en Neon, frontend Next.js separado (Vercel). **Fases 1, 2 y 3 cerradas** (consultas+caché; auth+CRUD vehículos/dueños/kilometraje; billetera de tokens + favoritos + mantenimientos + perfil de vehículo ampliado). **Fase 4 pendiente**: token de compra-venta (`enlaces_compartidos`) + Marketplace público (`en_venta`, `precio_venta_usd`, `url_externa`, `GET /marketplace` con `selectinload`). Fases 5 (OCR) y 6 (móvil) más adelante.
->
-> Cuando el usuario describa qué quiere hacer, responde con: (1) impacto sobre lo existente, (2) archivos a crear/modificar con rutas exactas, (3) skills a activar, (4) estructura sugerida (entidades, endpoints, migración Alembic), (5) riesgos/dependencias.
->
-> **Reglas duras** (sección 10 de CLAUDE.md): todo en español; no saltar fases; módulos CRUD no invocan Playwright; migraciones manuales con nombre descriptivo; Marketplace con `selectinload`; tokens (saldo 5, ≥0, auditar en `transacciones_tokens`); favoritos placa `String` + `validar_placa`; mantenimientos monotónicos + propiedad JWT; Marketplace solo `en_venta=True AND precio_venta_usd>0`, nunca VIN completo ni nombre del dueño; errores de negocio → 422, propiedad → 404, nunca 500 por fuente externa.
+> Tienes el contexto completo del proyecto arriba.
+> El usuario quiere planificar el TO-BE: próximos pasos, mejoras, nuevas funcionalidades.
+> Cuando el usuario describa qué quiere hacer, responde con:
+> 1. Evaluación de impacto sobre lo existente
+> 2. Archivos a crear o modificar
+> 3. Skills de Claude Code a activar
+> 4. Estructura sugerida de la solución
+> 5. Posibles riesgos o dependencias
 
 ## 9. Próximos pasos sugeridos
 
-1. **Fase 4 — Token de compra-venta**. Tabla `enlaces_compartidos` (`token UK`, `vehiculo_id FK`, `scope JSONB`, `fecha_expiracion`). Endpoint público `GET /compartido/{token}` → `VehiculoSalidaCompartida` (ya existe). TTL ≤ 7 días, scope opt-in. Migración `0007`.
-2. **Fase 4 — Marketplace público**. Columnas `en_venta`, `precio_venta_usd`, `url_externa` en `vehiculos` (migración). `GET /marketplace` con `selectinload`, filtro `en_venta=True AND precio_venta_usd>0`, salida con VIN ofuscado y sin nombre del dueño.
-3. **Servicio de débito de tokens** (`ajustar_saldo` + `SaldoInsuficiente`→422) cuando se introduzca la primera función de pago que consuma tokens.
-4. **Rotar la contraseña de Neon** (quedó en el historial del chat) y confirmar `DATABASE_URL` en Render.
-5. **Frontend**: consumir los endpoints de Fase 3 (billetera, favoritos, mantenimientos) en el repo `consulta-placas-web`.
-6. **Cron externo** (UptimeRobot) contra `/health` para evitar cold start.
-7. **Tests de parser con HTML fixtures** y un README.md público mínimo.
-
----
-
-**Nota de privacidad**: este snapshot no incluye contraseñas, JWT secrets ni datos personales. El `.env` con valores reales está fuera de git.
+1. **Seguridad inmediata:** rotar la contraseña de Neon y actualizar `DATABASE_URL` en `.env` local y en Render.
+2. **Push al remoto:** subir los commits de Fases 3 y 4 a GitHub y verificar el deploy en Render (migraciones `0007`/`0008` ya están en Neon).
+3. **Implementar Fase 5 — OCR/foto:** endpoint que reciba imagen → extraiga placa (Tesseract o servicio cloud) → dispare el flujo de consulta normal.
+4. **Worker híbrido de scraping** (decisión ya tomada): worker en IP residencial que empuje resultados a Neon, desbloqueando AMT/FGE en producción.
+5. **Cablear el débito de tokens y el `scope` del enlace** cuando llegue la primera función de pago y se amplíe la vista compartida.
