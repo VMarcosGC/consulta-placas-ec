@@ -62,10 +62,14 @@ Ver detalle de deploy en [docs/despliegue.md](docs/despliegue.md) y skill [despl
 - [models/mantenimiento.py](models/mantenimiento.py) + [routers/mantenimientos.py](routers/mantenimientos.py) — `POST/GET/DELETE /vehiculos/{id}/mantenimientos`; inmutables, con validación monotónica de `fecha` y `kilometraje_relacionado` (422) y propiedad por JWT. Migración `0006`.
 - **Pendiente del débito real**: el servicio que descuenta tokens (con `422` por saldo insuficiente) se implementará junto a la primera función de pago. Por ahora la billetera es solo lectura + auditoría inicial.
 
+### Fase 4 — Compra-venta: Marketplace + token ✅ cerrada
+- **Marketplace público** (migración `0007`): columnas `en_venta` (bool, default `false`), `precio_venta_usd` (Numeric 12,2) y `url_externa` (String 500) en `vehiculos`. [routers/marketplace.py](routers/marketplace.py) — `GET /marketplace` anónimo; lista solo `en_venta = True AND precio_venta_usd > 0` y no eliminados. Usa `selectinload(Vehiculo.mantenimientos)` para derivar `total_mantenimientos` sin N+1. Vista pública `VehiculoSalidaMarketplace` (en [schemas/vehiculo.py](schemas/vehiculo.py)): nunca expone VIN completo (nivel `oculto`, solo país) ni nombre del dueño.
+- **Token de compra-venta** (migración `0008`): [models/enlace_compartido.py](models/enlace_compartido.py) — `enlaces_compartidos` con `token` único (UK, índice único), `scope` JSONB opt-in (claves válidas: `kilometraje`, `mantenimientos`, `duenos_historico`) y `fecha_expiracion`. [routers/compartidos.py](routers/compartidos.py) — `POST /vehiculos/{id}/compartir` (dueño vía `vehiculo_propio`, TTL ≤ 7 días) y `GET /compartido/{token}` (público) que devuelve `VehiculoSalidaCompartida` ofuscado. Token inexistente o expirado → `404` (no se distingue de "no es tuyo").
+- **Pendiente**: el `scope` se persiste y valida, pero la vista compartida actual (`VehiculoSalidaCompartida`) solo muestra características del auto; el gateo de kilometraje/mantenimientos/dueños se cableará cuando esas secciones se agreguen a la vista compartida.
+
 ### Próximas fases
 | Fase | Objetivo | Entregables clave |
 |---|---|---|
-| **4** | Compra-venta: token + Marketplace | Token privado: tabla `enlaces_compartidos` (token, vehículo, expiración, scope), usa `VehiculoSalidaCompartida` (ya implementado). Marketplace público: columnas `en_venta` + `precio_venta_usd` + `url_externa` en `vehiculos`, endpoint `GET /marketplace` con `selectinload`. |
 | **5** | OCR / foto | Endpoint que recibe imagen → extrae placa (Tesseract o servicio cloud) → flujo normal. |
 | **6** | Mobile + features de pago | App móvil, integración con gateway local (PlaceToPay/MercadoPago). |
 

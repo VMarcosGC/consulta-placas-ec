@@ -30,7 +30,8 @@ graph TD
     Usuario --> Web
     Usuario -->|/consultar/&#123;placa&#125; · ANT+SRI+AMT+FGE| API
     Usuario -->|/consultar-judicial/&#123;cedula&#125; · FGE| API
-    Usuario -->|/auth/* · /vehiculos/* · duenos · kilometraje<br/>mantenimientos · /tokens · /favoritos| API
+    Usuario -->|/auth/* · /vehiculos/* · duenos · kilometraje<br/>mantenimientos · /tokens · /favoritos · /compartir| API
+    Usuario -->|/marketplace · /compartido/&#123;token&#125; · público| API
     Web -.->|fetch + JWT Bearer<br/>CORS| API
 
     API --> Cache
@@ -189,6 +190,9 @@ erDiagram
         string transmision
         string tipo_motor
         string ciudad_registro
+        bool en_venta
+        numeric precio_venta_usd
+        string url_externa
         timestamptz creado_en
         timestamptz actualizado_en
         timestamptz eliminado_en
@@ -235,6 +239,7 @@ erDiagram
         bigint vehiculo_id FK
         string token UK
         jsonb scope
+        timestamptz creado_en
         timestamptz fecha_expiracion
     }
 
@@ -254,7 +259,9 @@ erDiagram
 - `vehiculos.transmision/tipo_motor/ciudad_registro`, `usuarios.saldo_tokens` y `transacciones_tokens` → agregados en migración `0004` (Fase 3 — perfil + billetera).
 - `vehiculos_favoritos` → migración `0005`; placa como `String` (no FK), única por usuario+placa.
 - `mantenimientos` → migración `0006`; `fecha` y `kilometraje_relacionado` monotónicos.
-- `enlaces_compartidos` → planeada (Fase 4). El campo `vehiculos_favoritos.placa` no es FK a propósito (se puede seguir una placa inexistente).
+- `vehiculos.en_venta/precio_venta_usd/url_externa` → migración `0007` (Fase 4 — Marketplace). Un auto se lista en `GET /marketplace` solo si `en_venta` y `precio_venta_usd > 0`.
+- `enlaces_compartidos` → migración `0008` (Fase 4 — token de compra-venta). `token` único (UK), TTL ≤ 7 días vía `fecha_expiracion`, `scope` JSONB opt-in. `GET /compartido/{token}` devuelve `VehiculoSalidaCompartida` (ofuscado).
+- El campo `vehiculos_favoritos.placa` no es FK a propósito (se puede seguir una placa inexistente).
 
 ---
 
@@ -284,8 +291,8 @@ flowchart LR
     end
 
     subgraph F4["Fase 4 — Compra-venta"]
-        F4A[enlaces_compartidos<br/>token privado]
-        F4B[Marketplace público<br/>en_venta + precio]
+        F4A[enlaces_compartidos<br/>token privado<br/><b>✅</b>]
+        F4B[Marketplace público<br/>en_venta + precio<br/><b>✅</b>]
     end
 
     subgraph F5["Fase 5"]
@@ -301,7 +308,7 @@ flowchart LR
     classDef done fill:#dcfce7,stroke:#16a34a;
     classDef wip fill:#fef9c3,stroke:#ca8a04;
     classDef limitado fill:#fee2e2,stroke:#dc2626;
-    class B1,B2,B3,B4,F2A,F2B,F2C,F2D,F3A,F3B,F3C done
+    class B1,B2,B3,B4,F2A,F2B,F2C,F2D,F3A,F3B,F3C,F4A,F4B done
     class B5 limitado
 ```
 
