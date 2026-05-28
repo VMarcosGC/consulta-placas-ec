@@ -56,12 +56,12 @@ Ver detalle de deploy en [docs/despliegue.md](docs/despliegue.md) y skill [despl
 ### Próximas fases
 | Fase | Objetivo | Entregables clave |
 |---|---|---|
-| **3** | Mantenimientos | Tabla `mantenimientos`: tipo, fecha, kilometraje, taller, costo, adjuntos. |
-| **4** | Compra-venta con token | Tabla `enlaces_compartidos`: token, vehículo, expiración, scope. Usa `VehiculoSalidaCompartida` (ya implementado). |
+| **3** | Billetera, Favoritos y Mantenimientos | Tabla `transacciones_tokens` (auditoría de saldo); tabla `vehiculos_favoritos` (placa como `String`); tabla `mantenimientos`: tipo, `fecha`, `kilometraje_relacionado`, taller, costo, adjuntos. |
+| **4** | Compra-venta: token + Marketplace | Token privado: tabla `enlaces_compartidos` (token, vehículo, expiración, scope), usa `VehiculoSalidaCompartida` (ya implementado). Marketplace público: columnas `en_venta` + `precio_venta_usd` + `url_externa` en `vehiculos`, endpoint `GET /marketplace`. |
 | **5** | OCR / foto | Endpoint que recibe imagen → extrae placa (Tesseract o servicio cloud) → flujo normal. |
 | **6** | Mobile + features de pago | App móvil, integración con gateway local (PlaceToPay/MercadoPago). |
 
-No saltar fases. Cada una asume las anteriores estables.
+No saltar fases. Cada una asume las anteriores estables. Las reglas de negocio inmutables de las fases 3 y 4 están en la sección 10.
 
 ---
 
@@ -195,7 +195,51 @@ Reglas duras:
 
 ---
 
-## 10. Cómo correr localmente (Windows + PowerShell)
+## 10. Reglas de Negocio del MVP (Fases 3 y 4)
+
+Reglas arquitectónicas **inmutables** para Billetera, Favoritos, Mantenimientos y Marketplace. Aplican a todo código nuevo de estas fases; no se negocian sin acordarlo explícitamente. Se agrupan en tres bloques: infraestructura (requisitos previos), arquitectura/código y reglas de negocio.
+
+### 10.1 Infraestructura (requisitos previos antes de codear las fases 3 y 4)
+- **Base de datos definitiva**: el Postgres de Render free expira a los 90 días (ver sección 8 y 12). El MVP debe construirse sobre el proveedor definitivo — **Supabase o Neon** (PostgreSQL 16+). Crear el proyecto, obtener la `DATABASE_URL` y colocarla en el `.env` local y en las variables de entorno de Render.
+- **`.env` jamás se sube a Git** (ya está en `.gitignore`). Toda config sensible va por env var (ver sección 11 y 12).
+- **Variables requeridas del MVP**:
+  - `DATABASE_URL` — cadena de conexión a la BD definitiva (Supabase/Neon).
+  - `JWT_SECRET_KEY` — secreto de firma de los JWT. (El spec lo llamó `SECRET_KEY`; el nombre real en el código es `JWT_SECRET_KEY`, ver [database.py](database.py) y [auth/security.py](auth/security.py). No renombrar sin un refactor acordado.)
+  - `CORS_ORIGINS` — orígenes permitidos para que el frontend en Vercel hable con el backend.
+
+### 10.2 Arquitectura y código (restricciones técnicas)
+- **Separación CRUD ↔ scraping**: las operaciones **CRUD del MVP** (Billetera, Favoritos, Mantenimientos, Marketplace) tocan **única y exclusivamente** la BD propia (PostgreSQL). **Bajo ningún concepto invocan ni alteran los servicios de Playwright** (`services/ant.py`, `services/sri.py`, etc.). El scraping sigue siendo de solo lectura.
+  - **Por qué**: el scraping es lento, frágil y dependiente de IP (ver sección 8); acoplarlo a un CRUD haría que un portal caído rompa operaciones que no lo necesitan.
+- **Migraciones manuales** (SQLAlchemy 2 + Alembic): no usar `--autogenerate` a ciegas. Cada archivo en `alembic/versions/` se revisa a mano y lleva nombre descriptivo (ej. `0004_billetera.py`). Ver skill [modelo-dominio-vehiculo](.claude/skills/modelo-dominio-vehiculo/SKILL.md).
+- **Eager loading en Marketplace**: las consultas de SQLAlchemy que carguen vehículos con sus relaciones para el Marketplace deben usar **`selectinload`** para evitar el problema N+1 y optimizar el listado.
+- **Idioma español estricto** (ver sección 5): tablas (`mantenimientos`, `vehiculos_favoritos`, `transacciones_tokens`), columnas (`kilometraje_relacionado`, `precio_venta_usd`, `url_externa`, `en_venta`), rutas (`/favoritos`, `/marketplace`) y variables.
+- **Contrato de API estándar** (ver sección 6 y skill [respuesta-api-estandar](.claude/skills/respuesta-api-estandar/SKILL.md)): todo error de negocio se maneja elegantemente con un JSON estructurado — **nunca un crash / HTTP 500**. Códigos según el precedente del proyecto: **422** para validación de negocio (ej. "no tienes tokens suficientes", igual que kilometraje no monotónico), **404** para "no es tu vehículo" (no distinguir 403 de 404, para no filtrar IDs ajenos), **400** para formato de input inválido, **409** para conflictos (placa/email duplicado).
+
+### 10.3 Reglas de negocio — Billetera de tokens
+- **Saldo inicial**: todo usuario nuevo nace con **5 tokens** por defecto (saldo de cortesía).
+- **Límite inferior**: el saldo **nunca puede ser negativo** (`>= 0`). Toda operación de débito valida saldo suficiente antes de aplicar; si no alcanza, rechaza la operación con error de negocio (ver contrato HTTP en 10.2).
+- **Auditoría**: toda alteración del saldo genera un registro **obligatorio** en la tabla `transacciones_tokens`.
+
+### 10.4 Reglas de negocio — Favoritos (`vehiculos_favoritos`)
+- **Desacoplamiento**: la tabla guarda la **placa como `String`**, **no** como clave foránea (FK) a `vehiculos`. Un usuario puede agregar a favoritos una placa que NO existe en nuestra BD ni le pertenece.
+- **Validación**: toda placa que entre a `vehiculos_favoritos` debe aprobar **`validar_placa`** (formato ecuatoriano válido, de [utils/validators.py](utils/validators.py)) y guardarse normalizada.
+
+### 10.5 Reglas de negocio — Mantenimientos
+- **Inmutabilidad monotónica**: al registrar un mantenimiento, la `fecha` y el `kilometraje_relacionado` deben ser **iguales o mayores** al último registro de ese vehículo. No se puede retroceder en el tiempo ni bajar el odómetro.
+  - **Por qué**: el historial debe ser coherente y creciente, igual que las lecturas de kilometraje de Fase 2 ([routers/kilometraje.py](routers/kilometraje.py)).
+- **Propiedad**: un usuario solo puede registrar mantenimientos sobre un `vehiculo_id` que le pertenezca, validado por el token JWT (`Depends(vehiculo_propio)`, ver sección 9).
+
+### 10.6 Reglas de negocio — Marketplace (público) y token de compra-venta
+Coexisten dos mecanismos de compra-venta:
+
+- **Token privado** (modelo de la Fase 4 original): enlace temporal (`enlaces_compartidos`, `VehiculoSalidaCompartida`) que un comprador puntual ve sin cuenta, con scope explícito y expiración ≤ 7 días (ver secciones 7 y 9). No es un listado público.
+- **Marketplace público** (`GET /marketplace`):
+  - **Condición de venta**: un auto aparece en el listado solo si `en_venta` es `True` **y** `precio_venta_usd` es mayor a `0`.
+  - **Privacidad**: el listado **nunca** expone el **VIN completo** (usar nivel `oculto` u `origen`, ver sección 7) ni el **nombre real del dueño**. Solo se publican las características del auto y la `url_externa` de contacto.
+
+---
+
+## 11. Cómo correr localmente (Windows + PowerShell)
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -226,7 +270,7 @@ npm run dev      # http://localhost:3000
 
 ---
 
-## 11. Despliegue (MVP en cloud)
+## 12. Despliegue (MVP en cloud)
 
 Ver guía completa en [docs/despliegue.md](docs/despliegue.md). Resumen:
 
@@ -246,7 +290,7 @@ Skill paso a paso: [desplegar-mvp](.claude/skills/desplegar-mvp/SKILL.md).
 
 ---
 
-## 12. Diagramas de arquitectura
+## 13. Diagramas de arquitectura
 
 Diagramas vivos del sistema en [docs/arquitectura.md](docs/arquitectura.md) (Mermaid). Renderizan nativos en VSCode, GitHub y GitLab. Mantener actualizados:
 - Cada vez que cierre un bloque del roadmap → marcar el nodo correspondiente.
@@ -255,7 +299,7 @@ Diagramas vivos del sistema en [docs/arquitectura.md](docs/arquitectura.md) (Mer
 
 ---
 
-## 13. Disciplina de iteración (anti trial-and-error)
+## 14. Disciplina de iteración (anti trial-and-error)
 
 Cada iteración fallida cuesta tiempo del usuario. Reglas obligatorias antes de proponer código nuevo de scraping o parsing:
 
@@ -271,7 +315,7 @@ Aplicación práctica: para AMT terminamos en ~6 rondas porque saltamos estos pa
 
 ---
 
-## 14. Qué NO hacer
+## 15. Qué NO hacer
 
 - No reescribir nombres al inglés.
 - No mockear las fuentes en tests de integración — usar fixtures HTML guardados.
