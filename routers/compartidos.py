@@ -21,9 +21,16 @@ from models import Vehiculo, EnlaceCompartido
 from schemas.enlace_compartido import EnlaceCompartidoCrear, EnlaceCompartidoSalida
 from schemas.vehiculo import VehiculoSalidaCompartida
 from auth.dependencies import vehiculo_propio
+from services.tokens import debitar_tokens, SaldoInsuficiente
 
 
 router = APIRouter(tags=["compartir"])
+
+# Costo en tokens de generar un enlace de compra-venta.
+# MVP: 0 (gratis) para no poner fricción a la captación de usuarios; el mecanismo
+# de débito ya queda cableado y atómico. Subir esta constante activa el cobro sin
+# más cambios. Ver reglas de negocio 10.3 (CLAUDE.md).
+COSTO_COMPARTIR_TOKENS = 0
 
 
 @router.post(
@@ -36,6 +43,17 @@ def crear_enlace_compartido(
     vehiculo: Vehiculo = Depends(vehiculo_propio),
     sesion: Session = Depends(obtener_sesion),
 ):
+    # Débito + creación del enlace se persisten en un solo commit (atómico): si el
+    # saldo no alcanza, no se crea el enlace; si algo falla, el rollback revierte ambos.
+    try:
+        debitar_tokens(
+            sesion, vehiculo.usuario, COSTO_COMPARTIR_TOKENS, motivo="compartir_enlace"
+        )
+    except SaldoInsuficiente as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        )
+
     enlace = EnlaceCompartido(
         vehiculo_id=vehiculo.id,
         token=secrets.token_urlsafe(32),
