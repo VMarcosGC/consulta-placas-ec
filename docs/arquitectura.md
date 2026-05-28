@@ -21,15 +21,21 @@ graph TD
     SRI[Servicio SRI<br/>services/sri.py<br/><i>bloqueado_captcha</i>]:::limitado
     AMT[Servicio AMT<br/>services/amt.py]
     FGE[Servicio Fiscalía<br/>services/fiscalia.py]
+    OCR[Servicio OCR<br/>services/vision.py]
+
+    Worker[worker.py · IP residencial<br/><i>Fase arquitectura — diseño</i>]:::futuro
+    Cola[(cola_scraping<br/><i>planeado</i>)]:::futuro
 
     ANTWeb[(consultaweb.ant.gob.ec)]
     SRIWeb[(srienlinea.sri.gob.ec)]
     AMTWeb[(servicios.axiscloud.ec<br/>portal AXIS - AMT)]
     FGEWeb[(gestiondefiscalias.gob.ec<br/>SIAF Noticias del Delito)]
+    VisionWeb[(vision.googleapis.com<br/>Cloud Vision TEXT_DETECTION)]
 
     Usuario --> Web
     Usuario -->|/consultar/&#123;placa&#125; · ANT+SRI+AMT+FGE| API
     Usuario -->|/consultar-judicial/&#123;cedula&#125; · FGE| API
+    Usuario -->|/consultar-foto · foto → OCR → consulta| API
     Usuario -->|/auth/* · /vehiculos/* · duenos · kilometraje<br/>mantenimientos · /tokens · /favoritos · /compartir| API
     Usuario -->|/marketplace · /compartido/&#123;token&#125; · público| API
     Web -.->|fetch + JWT Bearer<br/>CORS| API
@@ -39,11 +45,19 @@ graph TD
     API --> SRI
     API --> AMT
     API --> FGE
+    API --> OCR
 
     ANT -->|Playwright| ANTWeb
     SRI -->|Playwright| SRIWeb
     AMT -->|Playwright| AMTWeb
     FGE -->|Playwright| FGEWeb
+    OCR -->|REST + API key| VisionWeb
+
+    API -.->|cache miss AMT/FGE · encola| Cola
+    Worker -.->|poll FOR UPDATE SKIP LOCKED| Cola
+    Worker -.->|Playwright · IP residencial| AMTWeb
+    Worker -.->|Playwright · IP residencial| FGEWeb
+    Worker -.->|guarda resultados| Cache
 
     classDef futuro stroke-dasharray: 5 5, stroke:#888;
     classDef wip stroke-dasharray: 5 5, stroke:#d97706, color:#d97706;
@@ -138,6 +152,48 @@ sequenceDiagram
         end
         API->>API: armar resumen (indicadores agregados)
         API-->>C: 200 OK<br/>{placa, ant, sri, amt, fge, resumen}
+    end
+```
+
+---
+
+## 2c. Flujo del endpoint `POST /consultar-foto` (Fase 5 — OCR)
+
+El usuario sube una foto; se extrae la placa con Cloud Vision y se encadena con la
+lógica de `GET /consultar/{placa}`. Fallos de lectura → 400 (nunca 500).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Cliente
+    participant API as routers/ocr.py
+    participant Vis as services/vision.py
+    participant CV as Cloud Vision (REST)
+    participant Pl as validar_placa
+    participant Cons as consultar_placa<br/>(main.py)
+
+    C->>API: POST /consultar-foto<br/>(UploadFile: foto)
+    alt no es imagen / vacía / > 8MB
+        API-->>C: 400 Bad Request
+    else imagen válida
+        API->>Vis: extraer_placa_de_imagen(bytes)
+        alt falta GOOGLE_VISION_API_KEY
+            Vis-->>API: estado=no_configurado
+            API-->>C: 503 OCR no configurado
+        else
+            Vis->>CV: images:annotate (TEXT_DETECTION)
+            CV-->>Vis: texto detectado
+            Vis->>Pl: validar_placa(candidato)
+            alt sin placa válida o error técnico
+                Vis-->>API: estado=sin_placa / error
+                API-->>C: 400 "No se detectó una placa<br/>ecuatoriana válida en la imagen"
+            else placa detectada
+                Vis-->>API: estado=placa_detectada, placa
+                API->>Cons: consultar_placa(placa)<br/>(reusa flujo 2b: caché + fuentes)
+                Cons-->>API: {placa, ant, sri, amt, fge, resumen}
+                API-->>C: 200 {placa_detectada, consulta}
+            end
+        end
     end
 ```
 
@@ -295,8 +351,12 @@ flowchart LR
         F4B[Marketplace público<br/>en_venta + precio<br/><b>✅</b>]
     end
 
-    subgraph F5["Fase 5"]
-        F5A[OCR de placa<br/>desde foto]
+    subgraph F5["Fase 5 — OCR"]
+        F5A[POST /consultar-foto<br/>Cloud Vision<br/><b>endpoint ✅ · live pend.</b>]
+    end
+
+    subgraph FH["Arquitectura — Worker híbrido"]
+        FHA[cola_scraping + worker.py<br/>IP residencial<br/>📐 diseño]
     end
 
     subgraph F6["Fase 6"]
@@ -304,12 +364,16 @@ flowchart LR
     end
 
     B1 --> B2 --> B3 --> B4 --> B5 --> F2A --> F2B --> F2C --> F2D --> F3A --> F3B --> F3C --> F4A --> F4B --> F5A --> F6A
+    B5 -.->|AMT/FGE bloqueados en cloud| FHA
 
     classDef done fill:#dcfce7,stroke:#16a34a;
     classDef wip fill:#fef9c3,stroke:#ca8a04;
     classDef limitado fill:#fee2e2,stroke:#dc2626;
+    classDef futuro stroke-dasharray: 5 5, stroke:#888,fill:#f5f5f5;
     class B1,B2,B3,B4,F2A,F2B,F2C,F2D,F3A,F3B,F3C,F4A,F4B done
     class B5 limitado
+    class F5A wip
+    class FHA futuro
 ```
 
 ---

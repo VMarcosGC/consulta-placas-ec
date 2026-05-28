@@ -25,6 +25,7 @@ from routers import favoritos as favoritos_router
 from routers import mantenimientos as mantenimientos_router
 from routers import marketplace as marketplace_router
 from routers import compartidos as compartidos_router
+from routers import ocr as ocr_router
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ app.include_router(favoritos_router.router)
 app.include_router(mantenimientos_router.router)
 app.include_router(marketplace_router.router)
 app.include_router(compartidos_router.router)
+app.include_router(ocr_router.router)
 
 
 async def consultar_con_cache(
