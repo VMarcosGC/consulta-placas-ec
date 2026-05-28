@@ -4,6 +4,7 @@ from models.vehiculo import Vehiculo
 from models.vehiculo_favorito import VehiculoFavorito
 from models.dueno_historico import DuenoHistorico
 from models.kilometraje_lectura import KilometrajeLectura
+from models.mantenimiento import Mantenimiento
 
 __all__ = [
     "Consulta",
@@ -13,4 +14,5 @@ __all__ = [
     "VehiculoFavorito",
     "DuenoHistorico",
     "KilometrajeLectura",
+    "Mantenimiento",
 ]

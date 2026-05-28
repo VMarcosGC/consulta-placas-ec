@@ -22,6 +22,7 @@ from routers import duenos as duenos_router
 from routers import kilometraje as kilometraje_router
 from routers import tokens as tokens_router
 from routers import favoritos as favoritos_router
+from routers import mantenimientos as mantenimientos_router
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ app.include_router(duenos_router.router)
 app.include_router(kilometraje_router.router)
 app.include_router(tokens_router.router)
 app.include_router(favoritos_router.router)
+app.include_router(mantenimientos_router.router)
 
 
 async def consultar_con_cache(

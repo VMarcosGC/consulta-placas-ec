@@ -59,3 +59,7 @@ class Vehiculo(Base):
         back_populates="vehiculo",
         cascade="all, delete-orphan",
     )
+    mantenimientos: Mapped[list["Mantenimiento"]] = relationship(  # noqa: F821
+        back_populates="vehiculo",
+        cascade="all, delete-orphan",
+    )
