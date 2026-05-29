@@ -38,6 +38,10 @@ services:
       - key: JWT_EXPIRA_MINUTOS
         value: "1440"
       - key: CACHE_TTL_MINUTOS
-        value: "30"
+        value: "30"   # fallback para fuentes sin clasificar
+      - key: CACHE_TTL_TRANSACCIONAL_MINUTOS
+        value: "720"     # 12h — multas/infracciones/denuncias/valores (datos que cambian)
+      - key: CACHE_TTL_ESTATICO_MINUTOS
+        value: "129600"  # 90 días — características del vehículo (reservado para el TO-BE)
       - key: CORS_ORIGINS
         sync: false   # configurar con la URL del frontend Next.js cuando exista
