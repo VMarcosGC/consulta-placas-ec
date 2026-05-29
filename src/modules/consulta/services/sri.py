@@ -6,17 +6,56 @@ Evidencia de descubrimiento (scripts/discover.py, mayo 2026):
   - NO está en iframe — el form vive en la página principal.
   - Input: <input id="busqueda" type="text" placeholder="MNA0123">
   - Botón: <button>Consultar</button> (deshabilitado hasta tipear)
-  - Hay reCAPTCHA invisible (riesgo de bloqueo)
+  - reCAPTCHA **Enterprise v3** (score-based). sitekey en el script
+    `enterprise.js?render=...`; el sitio llama `grecaptcha.enterprise.execute`
+    con action `matriculacion_vehicular_valores_pagar`.
+
+Anti-captcha (opcional, gateado por `CAPSOLVER_API_KEY`): se intercepta
+`grecaptcha.enterprise.execute` para inyectar un token resuelto por Capsolver. Sin
+key, el flujo queda igual (probable `bloqueado_captcha`). El v3 enterprise es
+score-based: aun con token válido, SRI puede rechazarlo si el score es bajo
+(considerar `CAPSOLVER_PROXY` residencial). Ver services/captcha.py y docs/bitacora.md.
 """
 
 import re
 from playwright.async_api import async_playwright
+
+from src.modules.consulta.services.captcha import (
+    resolver_recaptcha_v3_enterprise,
+    hay_capsolver,
+)
 
 
 URL_SRI = (
     "https://srienlinea.sri.gob.ec/sri-en-linea/SriVehiculosWeb/"
     "ConsultaValoresPagarVehiculo/Consultas/consultaRubros"
 )
+
+# Action que SRI pasa a grecaptcha.enterprise.execute (descubierto interceptando
+# execute). Debe coincidir con la del sitio o el backend rechaza el token.
+SRI_RECAPTCHA_ACTION = "matriculacion_vehicular_valores_pagar"
+
+# Init-script: intercepta grecaptcha.enterprise.execute para devolver el token que
+# inyectemos (window.__cap_token). Se instala ANTES de cargar la página (add_init_script),
+# y como grecaptcha carga async, se reintenta el hook con un intervalo corto.
+_OVERRIDE_RECAPTCHA = r"""
+(() => {
+  window.__cap_token = null;
+  const install = () => {
+    const g = window.grecaptcha && window.grecaptcha.enterprise;
+    if (g && !g.__patched) {
+      const orig = g.execute.bind(g);
+      g.execute = (sk, opts) => {
+        if (window.__cap_token) return Promise.resolve(window.__cap_token);
+        return orig(sk, opts);
+      };
+      g.__patched = true;
+    }
+  };
+  const iv = setInterval(install, 30);
+  setTimeout(() => clearInterval(iv), 30000);
+})();
+"""
 
 USER_AGENT_REAL = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -89,6 +128,26 @@ def parsear_respuesta_sri(texto_original: str) -> dict:
 
 
 async def consultar_sri(placa: str) -> dict:
+    """Passthrough al portal oficial del SRI (vía ACTIVA).
+
+    SRI usa reCAPTCHA Enterprise v3 que rechaza los tokens de solvers (ver
+    docs/bitacora.md). En vez de pelear el captcha, exponemos el SERVICIO: devolvemos
+    el enlace al portal para que el usuario consulte ahí el detalle. Es instantáneo,
+    sin Playwright ni costo. El scraping + solver quedan DORMIDOS en
+    `_consultar_sri_scraping` (reactivables si algún día se retoma la vía A).
+    """
+    return {
+        "fuente": "SRI",
+        "placa": placa,
+        "estado": "consulta_externa",
+        "datos": None,
+        "url_consulta": URL_SRI,
+    }
+
+
+# ── Vía A (DORMIDA): scraping + solver de captcha (Capsolver). NO está en el path
+# activo; se conserva para un eventual reintento. La activa es `consultar_sri` (arriba).
+async def _consultar_sri_scraping(placa: str) -> dict:
     resultado = {
         "fuente": "SRI",
         "placa": placa,
@@ -102,6 +161,9 @@ async def consultar_sri(placa: str) -> dict:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             ctx = await browser.new_context(user_agent=USER_AGENT_REAL)
+            # Instalar el override de execute antes de cargar la página (solo si hay solver).
+            if hay_capsolver():
+                await ctx.add_init_script(_OVERRIDE_RECAPTCHA)
             page = await ctx.new_page()
             page.set_default_timeout(60000)
             page.set_default_navigation_timeout(60000)
@@ -135,6 +197,41 @@ async def consultar_sri(placa: str) -> dict:
 
             await page.fill("input#busqueda", placa)
             await page.wait_for_timeout(800)
+
+            # ── reCAPTCHA Enterprise v3: resolver con Capsolver e inyectar el token ──
+            # Solo se activa si hay CAPSOLVER_API_KEY; sin key, el flujo queda idéntico al
+            # previo (probable `bloqueado_captcha`) → cero cambio en prod hasta fondear.
+            # El sitekey se EXTRAE de la página (no se hardcodea). El token se entrega vía
+            # window.__cap_token: el override de `execute` (init-script) hace que, cuando el
+            # sitio llame grecaptcha.enterprise.execute al enviar, reciba NUESTRO token.
+            # Fallos del proveedor (sin saldo/timeout/sitekey ausente) → `except` → estado error.
+            if hay_capsolver():
+                sitekey = await page.evaluate(
+                    """() => {
+                        const el = document.querySelector('[data-sitekey]');
+                        if (el) return el.getAttribute('data-sitekey');
+                        const s = [...document.querySelectorAll('script')]
+                            .map(x => x.src)
+                            .find(u => u && u.includes('render='));
+                        if (s) { const m = s.match(/render=([^&]+)/); if (m) return m[1]; }
+                        return null;
+                    }"""
+                )
+                if not sitekey:
+                    raise Exception(
+                        "Solver activo pero no se halló el sitekey de reCAPTCHA en la "
+                        "página. Hacer discovery del DOM de SRI antes de seguir."
+                    )
+
+                token = await resolver_recaptcha_v3_enterprise(
+                    sitekey=sitekey,
+                    pageurl=URL_SRI,
+                    action=SRI_RECAPTCHA_ACTION,
+                    # proxy: usa CAPSOLVER_PROXY si está seteado (residencial sube el score).
+                )
+                # El override (init-script) devolverá este token cuando el sitio ejecute
+                # grecaptcha.enterprise.execute al hacer el submit.
+                await page.evaluate("(tok) => { window.__cap_token = tok; }", token)
 
             # Click en Consultar específico (excluyendo el "Continuar Navegando" del overlay).
             click_ok = False

@@ -173,13 +173,16 @@ Toda función `consultar_<fuente>` devuelve:
 {
   "fuente": "ANT|SRI|AMT|FGE",
   "placa": "ABC1234",
-  "estado": "consulta_realizada|error|pendiente_integracion|sin_resultados|bloqueado_captcha",
+  "estado": "consulta_realizada|error|pendiente_integracion|sin_resultados|bloqueado_captcha|en_proceso|consulta_externa",
   "datos": { ... } | null,
-  "error": "string (solo cuando estado=error o bloqueado_captcha)"
+  "error": "string (solo cuando estado=error o bloqueado_captcha)",
+  "url_consulta": "string (solo cuando estado=consulta_externa)"
 }
 ```
 
 `bloqueado_captcha`: la fuente respondió pero la submission fue bloqueada silenciosamente (caso SRI con reCAPTCHA invisible). El servicio detecta el bloqueo porque la respuesta vino vacía sin error técnico.
+
+`consulta_externa`: la fuente no se scrapea; se expone el **servicio oficial** para que el usuario consulte el detalle ahí. Devuelve `url_consulta` (enlace al portal) y `datos: null`. **Caso SRI**: usa reCAPTCHA Enterprise v3 (score-based) que rechaza tokens de solvers; en vez de pelearlo, el frontend muestra un botón que abre el portal del SRI (no se puede iframe: `X-Frame-Options: SAMEORIGIN`). El solver (vía A, Capsolver/2Captcha) queda DORMIDO en `_consultar_sri_scraping`. La vía definitiva (B = API oficial SRI) queda pendiente. Ver [docs/bitacora.md](docs/bitacora.md).
 
 Para la Fiscalía (FGE), el campo de identificación se llama `termino` en vez de `placa` porque el portal acepta placa, cédula, RUC, nombres o NDD.
 

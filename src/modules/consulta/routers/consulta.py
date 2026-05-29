@@ -137,7 +137,9 @@ async def consultar_placa(placa: str, sesion: Session = Depends(obtener_sesion))
         raise HTTPException(status_code=400, detail=str(e))
 
     resultado_ant = await consultar_con_cache(sesion, placa_limpia, "ANT", consultar_ant)
-    resultado_sri = await consultar_con_cache(sesion, placa_limpia, "SRI", consultar_sri)
+    # SRI: passthrough instantáneo al portal oficial (no se scrapea por el reCAPTCHA
+    # Enterprise v3; devuelve url_consulta para que el usuario consulte ahí).
+    resultado_sri = await consultar_sri(placa_limpia)
     # AMT y FGE se sirven vía worker híbrido (encolado + en_proceso), no Playwright.
     resultado_amt = consultar_via_worker(sesion, placa_limpia, "AMT")
     resultado_fge = consultar_via_worker(sesion, placa_limpia, "FGE", campo_id="termino")
@@ -187,6 +189,8 @@ async def consultar_placa(placa: str, sesion: Session = Depends(obtener_sesion))
             "total_citaciones_ant": total_citaciones_ant,
             "valor_pendiente_sri": total_sri,
             "tiene_valores_pendientes_sri": total_sri > 0,
+            "sri_consulta_externa": resultado_sri.get("estado") == "consulta_externa",
+            "url_consulta_sri": resultado_sri.get("url_consulta"),
             "total_infracciones_amt": total_registros_amt,
             "infracciones_pendientes_amt": pendientes_amt,
             "valor_pendiente_amt": total_pendiente_amt,
