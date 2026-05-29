@@ -1,5 +1,5 @@
 # Proyecto Snapshot — consulta_placas_ec (backend)
-**Generado:** 2026-05-29
+**Generado:** 2026-05-29 (rev. resiliencia worker + caché doble velocidad + frontend Instrucción 3)
 **Herramienta origen:** Claude Code / VS Code
 **Propósito de este archivo:** Subir a Gemini para continuar planificación TO-BE
 
@@ -39,19 +39,24 @@ Backend de una plataforma (móvil + web) para que cualquier persona en Ecuador c
   - `worker.py` pull-only: `FOR UPDATE SKIP LOCKED`, backoff (30/60/120s), rescate de zombis. Reusa `services/` sin modificarlos.
   - **API cableada**: AMT/FGE no se scrapean en la API; en cache miss encolan (idempotente) y devuelven `estado: en_proceso` (datos null) dentro del mismo 200. Flags `amt_en_proceso`/`fge_en_proceso` en el resumen.
   - **Autoarranque** vía Task Scheduler (`ConsultaPlacasWorker`, modo logon) instalado en la PC del usuario; procesó AMT/FGE reales desde IP residencial.
+- **Resiliencia del worker + estado `error_fuente` (nuevo, commits `2b0f40f`/`ad9ff42`):** al agotar `max_intentos` (subido a **4**) el trabajo queda terminal en `error_fuente` (antes `fallido`) y **no vuelve a la cola** — corta el bucle de polling del cliente ante una fuente caída. La API lee la cola en cache miss (`fuente_en_error_reciente`) y devuelve `estado: error_fuente` durante una ventana de enfriamiento (12h) en vez de re-encolar a ciegas. Nuevo `POST /consultar/{identificador}/reintentar/{fuente}` (AMT/FGE; FGE acepta placa o cédula) para el botón "Reintentar". Resumen suma `amt_error_fuente`/`fge_error_fuente`. Sin migración (ninguna columna `estado` tiene CHECK).
+- **Caché de doble velocidad (nuevo, commits `2b0f40f`/`d162370`):** TTL por naturaleza del dato en [src/modules/consulta/services/cache.py](src/modules/consulta/services/cache.py): transaccional **12h** (`CACHE_TTL_TRANSACCIONAL_MINUTOS`), estático **90d** (`CACHE_TTL_ESTATICO_MINUTOS`). AS-IS: cada fuente es un blob único y ANT mezcla ambos → se rige por 12h (gana la frescura); el TTL estático queda **reservado** para cuando, con clientes reales (TO-BE), el perfil del vehículo se cachee como entrada propia. Vars declaradas en `render.yaml`.
+- **Frontend Instrucción 3 — interfaz reactiva (repo `consulta-placas-web`, commit `2272926`, desplegado en Vercel):** `ResultadoConsulta` pasa a client component con **polling silencioso cada 4s** mientras AMT/FGE estén `en_proceso`; **Skeleton** animado por fuente; tarjeta `error_fuente` con botón "Reintentar conexión con la fuente" → llama al endpoint de reintento y reanuda el polling; SRI `consulta_externa` → botón al portal oficial. Sin dependencias nuevas (fetch + hooks). `next build` y typecheck OK.
 
 ### 🔄 En progreso / pendiente acotado
-- **Frontend (repo `consulta-placas-web`):** tarjeta de SRI con botón a `url_consulta` (consulta_externa); manejo de `en_proceso` (polling) para AMT/FGE; integración de OCR (subir foto).
+- **Frontend (repo `consulta-placas-web`):** ✅ polling `en_proceso` (4s) + Skeletons, ✅ `error_fuente` + botón reintentar, ✅ botón SRI `consulta_externa`. **Pendiente:** integración de OCR (subir foto → consulta).
 - **Verificar OCR end-to-end** (API key Vision real + foto).
+- **Prueba de humo en vivo** del ciclo `en_proceso → error_fuente → reintentar` con el worker corriendo y una fuente caída real.
 - **Precio en tokens:** definir cuántos tokens cuesta el enlace de compra-venta y la consulta OCR (hoy ambos en 0; mecanismo de débito listo).
 - **SRI vía B (definitiva):** evaluar convenio / API oficial del SRI para el valor tributario (la vía A —solver— quedó dormida).
+- **Lint preexistente** en el frontend (`Header.tsx`, `mi-garage/page.tsx`): 2 errores + 1 warning de `react-hooks` ajenos a los cambios de hoy; no bloquean el build.
 
 ### ⚠️ Problemas / deuda técnica / decisiones
 - **SRI = reCAPTCHA Enterprise v3 (score-based).** Probado: 2Captcha/Capsolver entregan token pero SRI lo rechaza por score; no se puede iframe (`X-Frame-Options: SAMEORIGIN`). **Decisión: passthrough** (`consulta_externa` + `url_consulta`, botón al portal oficial). Solver dormido en `_consultar_sri_scraping`/`captcha.py`. Vía definitiva = API oficial (B), pendiente.
 - **AMT y FGE bloqueados en cloud por IP de datacenter** (Render). Mitigado con el worker híbrido residencial (ya operativo con autoarranque).
 - **Decisiones:** worker = cola en Postgres (no broker); OCR = Cloud Vision; costo de compartir/OCR = 0 en MVP; anti-captcha evaluado (2Captcha/Capsolver) y descartado para SRI por el v3 enterprise.
 - **Seguridad pendiente:** rotar la contraseña de Neon y **la API key de 2Captcha** (ambas expuestas en chat). Las keys viven solo en `.env` (gitignored) y dashboards de prod.
-- **Sincronía remoto:** `main` al día con `origin/main` (Fase 0 modular, gateo por scope, worker autostart, SRI passthrough).
+- **Sincronía remoto:** ambos repos en `main` al día con `origin/main`. Backend hasta `ad9ff42` (Render redesplegando); frontend hasta `2272926` (Vercel redesplegando).
 
 ## 4. Estructura de archivos actual
 
@@ -84,7 +89,7 @@ internals ajenos fuera de esa dirección.
 ## 5. Skills y herramientas configuradas
 
 - **AGENTS.md** (proyecto; renombrada de CLAUDE.md, con shim `@AGENTS.md`): fuente de verdad, fases, reglas de negocio 10.x, §1.1 arquitectura modular + mapa skill→módulo.
-- **Skills del proyecto** (`.claude/skills/`): `agregar-fuente-consulta`, `desplegar-mvp`, `modelo-dominio-vehiculo`, `respuesta-api-estandar` (incluye estado `en_proceso`), `scraping-respetuoso`, `validacion-datos-ec`.
+- **Skills del proyecto** (`.claude/skills/`): `agregar-fuente-consulta`, `desplegar-mvp`, `modelo-dominio-vehiculo`, `respuesta-api-estandar` (incluye estados `en_proceso`, `error_fuente`, `consulta_externa`), `scraping-respetuoso`, `validacion-datos-ec`.
 - **Diagramas vivos** en `docs/arquitectura.md`: topología con worker cableado, secuencia auth, secuencia consulta (nota worker), secuencia OCR §2c, ER con `cola_scraping`, roadmap. Diseño híbrido en `docs/arquitectura_hibrida.md`.
 
 ## 6. Decisiones técnicas tomadas
@@ -92,7 +97,7 @@ internals ajenos fuera de esa dirección.
 - **Arquitectura modular (DDD), 2026-05-29:** un módulo = una capacidad de negocio (no una tabla). 5 módulos hoy; techo del producto final ~6–7 (OCR vive dentro de `consulta`; pagos crecerá `tokens`). App y web son clientes de la misma API → **no** suman módulos al backend. Modelos compartidos: `Usuario`+`TransaccionToken` quedan juntos en `auth` (tokens los importa); schemas de token en `auth.schemas` (split de cohesión es limpieza opcional futura, no se hizo para no tocar lógica).
 - **Migraciones manuales** (no autogenerate a ciegas), nombre descriptivo por archivo.
 - **Separación CRUD ↔ scraping:** el CRUD del MVP toca solo la BD propia; nunca invoca Playwright. La cola es exclusiva del pipeline de scraping.
-- **Contrato de error:** 422 validación de negocio (incl. saldo insuficiente), 404 propiedad (no 403), 400 input, 409 conflicto, 201/204 create/delete; nunca 500 por fuente externa. OCR: fallo de lectura → 400; sin API key → 503. AMT/FGE encolados → 200 con `estado: en_proceso` por fuente (no 202, para no romper el agregado).
+- **Contrato de error:** 422 validación de negocio (incl. saldo insuficiente), 404 propiedad (no 403), 400 input, 409 conflicto, 201/204 create/delete; nunca 500 por fuente externa. OCR: fallo de lectura → 400; sin API key → 503. AMT/FGE encolados → 200 con `estado: en_proceso` por fuente (no 202, para no romper el agregado); fuente caída tras 4 intentos → `estado: error_fuente` (terminal, con enfriamiento de 12h y endpoint de reintento). Caché: nunca guarda `error`/`bloqueado_captcha`/`error_fuente`.
 - **Idioma español estricto** en tablas, columnas, rutas y variables.
 - **Privacidad por niveles:** `completo` (dueño), `origen` (token), `oculto` (público). VIN/motor/chasis nunca completos a terceros.
 - **OCR:** Cloud Vision REST + `httpx` + API key (no SDK, no Tesseract).
@@ -101,16 +106,22 @@ internals ajenos fuera de esa dirección.
 
 ## 7. Últimos cambios (git log)
 
+Backend (`consulta_placas_ec`):
 ```
+ad9ff42 fix: reintentar FGE acepta placa o cédula según el flujo de origen
+d162370 chore: declarar CACHE_TTL_TRANSACCIONAL/ESTATICO_MINUTOS en render.yaml
+2b0f40f feat: resiliencia worker (error_fuente) + caché de doble velocidad
+1e29e5e docs: regenerar snapshot (gateo scope, worker autostart, SRI passthrough)
 9563cac feat: SRI por passthrough (consulta_externa) + solver dormido
-ab2b5df chore: autoarranque del worker hibrido en Windows (Task Scheduler)
-0bb6637 feat: gateo del historial compartido por scope (Fase 4)
-c5d3112 docs: regenerar snapshot tras merge de Fase 0 modular a main
-6e33ca2 refactor: monolito modular (DDD) en src/modules + AGENTS.md
 ```
-**Rama actual:** `main`, **al día con `origin/main`**. Última: `9563cac` (SRI passthrough).
-Render redesplegando desde `main`. Neon en revisión `0009` (sin cambios de schema desde la
-Fase 0). Rama `refactor/modulos` aún existe local (se puede borrar).
+Frontend (`consulta-placas-web`):
+```
+2272926 feat: polling de fuentes asincronas (AMT/FGE) + reintento + SRI passthrough
+130c683 MVP visual: landing comercial + consulta publica + auth + mi-garage + precios
+```
+**Rama actual:** `main` en ambos repos, **al día con `origin/main`**. Backend última `ad9ff42`;
+frontend última `2272926`. Render y Vercel redesplegando. Neon en revisión `0009` (sin cambios
+de schema desde la Fase 0; `error_fuente`/TTL no requirieron migración).
 
 ## 8. Para continuar en Gemini — instrucciones
 
@@ -126,10 +137,10 @@ Fase 0). Rama `refactor/modulos` aún existe local (se puede borrar).
 
 ## 9. Próximos pasos sugeridos
 
-1. **Desplegar `worker.py`** en una máquina con IP residencial EC (definir cuál: PC siempre encendida / Raspberry Pi), con `DATABASE_URL` de Neon y arranque persistente (systemd / Programador de tareas). Sin esto, AMT/FGE quedan en `en_proceso`.
-2. **Confirmar rotación de la contraseña de Neon** y que `.env` (local + Render) tenga la vigente.
-3. **Verificar OCR end-to-end:** configurar `GOOGLE_VISION_API_KEY`, probar `POST /consultar-foto` con foto real, integrar al frontend (subir foto → consulta) y manejar `en_proceso` (polling) en la UI.
+1. **Prueba de humo en vivo** del ciclo asíncrono: worker corriendo + una fuente caída → confirmar `en_proceso` → Skeleton → `error_fuente` → botón reintentar → `consulta_realizada` en la UI real.
+2. **Rotar** la contraseña de Neon y la API key de 2Captcha (ambas expuestas en chat); confirmar que `.env` (local + Render) tenga las vigentes.
+3. **Verificar OCR end-to-end:** configurar `GOOGLE_VISION_API_KEY`, probar `POST /consultar-foto` con foto real e **integrar al frontend** (subir foto → consulta) — único pendiente del frontend.
 4. **Definir precios en tokens** (enlace de compra-venta, consulta OCR) y activar el cobro subiendo las constantes; cablear débito también en OCR si se decide cobrarlo.
-5. **Decidir proveedor anti-captcha para SRI** (2Captcha/Anti-Captcha): crear cuenta, fondear, generar API key e integrar en `services/sri.py`.
-6. **Frontend:** consumir flags `amt_en_proceso`/`fge_en_proceso` y `estado: en_proceso` para mostrar "cargando" + reintento en esas fuentes.
+5. **SRI vía B (definitiva):** evaluar convenio / API oficial del SRI (la vía A —solver Capsolver/2Captcha— quedó dormida por el reCAPTCHA Enterprise v3).
+6. **Limpiar lint preexistente** del frontend (`Header.tsx`, `mi-garage/page.tsx`) si se quiere CI verde.
 ```
