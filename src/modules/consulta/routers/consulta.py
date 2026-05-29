@@ -30,8 +30,25 @@ ESTADO_EN_PROCESO = "en_proceso"
 ESTADO_ERROR_FUENTE = "error_fuente"
 VENTANA_ERROR_FUENTE_MINUTOS = TTL_TRANSACCIONAL_MINUTOS
 
-# Fuentes válidas para el worker híbrido y su validador de identificador.
-VALIDADOR_FUENTE_WORKER = {"AMT": validar_placa, "FGE": validar_cedula}
+# Fuentes servidas por el worker híbrido (las únicas reintentables).
+FUENTES_WORKER = {"AMT", "FGE"}
+
+
+def _normalizar_identificador_worker(fuente: str, identificador: str) -> str:
+    """Normaliza el identificador según la fuente, lanzando ValueError si es inválido.
+
+    AMT siempre va por placa. FGE acepta placa **o** cédula porque su `termino` depende
+    del flujo de origen: `/consultar/{placa}` lo encola con la placa; `/consultar-judicial/{cedula}`
+    con la cédula. El reintento debe aceptar el mismo identificador con que se encoló.
+    """
+    if fuente == "AMT":
+        return validar_placa(identificador)
+    # FGE
+    try:
+        return validar_placa(identificador)
+    except ValueError:
+        return validar_cedula(identificador)
+
 
 router = APIRouter(tags=["consulta"])
 
@@ -249,15 +266,14 @@ def reintentar_fuente(
     fuentes servidas por el worker híbrido (AMT/FGE); ANT es directo y SRI passthrough.
     """
     fuente = fuente.upper()
-    validador = VALIDADOR_FUENTE_WORKER.get(fuente)
-    if validador is None:
+    if fuente not in FUENTES_WORKER:
         raise HTTPException(
             status_code=400,
             detail=f"Fuente no reintentable vía worker: {fuente!r}. Válidas: AMT, FGE.",
         )
 
     try:
-        identificador_limpio = validador(identificador)
+        identificador_limpio = _normalizar_identificador_worker(fuente, identificador)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
