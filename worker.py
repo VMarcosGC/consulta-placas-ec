@@ -19,7 +19,7 @@ Uso:
 
 Variables de entorno (además de DATABASE_URL, compartida con la API):
     WORKER_POLL_SEGUNDOS          intervalo de sondeo cuando la cola está vacía (default 5)
-    WORKER_BACKOFF_BASE_SEGUNDOS  base del backoff exponencial (default 30)
+    WORKER_BACKOFF_SEGUNDOS       espera por reintento, lista separada por comas (default "5,15,30")
     WORKER_TIMEOUT_ZOMBI_SEGUNDOS antigüedad para considerar zombi un en_proceso (default 300)
 """
 
@@ -58,8 +58,27 @@ logging.basicConfig(
 logger = logging.getLogger("worker")
 
 POLL_SEGUNDOS = int(os.getenv("WORKER_POLL_SEGUNDOS", "5"))
-BACKOFF_BASE_SEGUNDOS = int(os.getenv("WORKER_BACKOFF_BASE_SEGUNDOS", "30"))
 TIMEOUT_ZOMBI_SEGUNDOS = int(os.getenv("WORKER_TIMEOUT_ZOMBI_SEGUNDOS", "300"))
+
+
+def _leer_backoff() -> list[int]:
+    """Lee la lista de esperas por reintento (segundos). Default rápido: 5, 15, 30.
+
+    El i-ésimo reintento espera BACKOFF_SEGUNDOS[i]; al pasarse del último, se
+    mantiene el último valor. Antes era exponencial (30/60/120s); se acortó para
+    reducir la espera del usuario en el frontend.
+    """
+    crudo = os.getenv("WORKER_BACKOFF_SEGUNDOS", "5,15,30")
+    try:
+        # max(1, ...) evita que un 0 o negativo mal configurado deje el trabajo
+        # disponible al instante y lo reintente en bucle contra una fuente caída.
+        valores = [max(1, int(x)) for x in crudo.split(",") if x.strip()]
+    except ValueError:
+        valores = []
+    return valores or [5, 15, 30]
+
+
+BACKOFF_SEGUNDOS = _leer_backoff()
 
 # fuente (código corto del contrato) → función de scraping.
 CONSULTORES = {
@@ -166,7 +185,8 @@ def reprogramar_o_fallar(trabajo: dict, error: str) -> None:
         )
         return
 
-    espera = BACKOFF_BASE_SEGUNDOS * (2 ** (trabajo["intentos"] - 1))
+    indice = min(trabajo["intentos"] - 1, len(BACKOFF_SEGUNDOS) - 1)
+    espera = BACKOFF_SEGUNDOS[indice]
     proximo = _ahora() + timedelta(seconds=espera)
     logger.info(
         "Trabajo %s (%s/%s) reprogramado en %ss (intento %s/%s)",
@@ -240,8 +260,8 @@ async def procesar(trabajo: dict) -> None:
 
 async def loop_principal() -> None:
     logger.info(
-        "Worker iniciado · poll=%ss · backoff_base=%ss · timeout_zombi=%ss",
-        POLL_SEGUNDOS, BACKOFF_BASE_SEGUNDOS, TIMEOUT_ZOMBI_SEGUNDOS,
+        "Worker iniciado · poll=%ss · backoff=%ss · timeout_zombi=%ss",
+        POLL_SEGUNDOS, BACKOFF_SEGUNDOS, TIMEOUT_ZOMBI_SEGUNDOS,
     )
     while not _detener.is_set():
         try:

@@ -69,6 +69,6 @@ powershell -ExecutionPolicy Bypass -File scripts\worker_uninstall_task.ps1
 - **OneDrive:** el proyecto vive bajo `OneDrive`; correr como el usuario logueado evita
   problemas de acceso a esa ruta (otra razón del modo "con sesión").
 - **Variables opcionales** (en `.env` o entorno): `WORKER_POLL_SEGUNDOS` (5),
-  `WORKER_BACKOFF_BASE_SEGUNDOS` (30), `WORKER_TIMEOUT_ZOMBI_SEGUNDOS` (300).
+  `WORKER_BACKOFF_SEGUNDOS` (lista por reintento, default `5,15,30`), `WORKER_TIMEOUT_ZOMBI_SEGUNDOS` (300).
 - **24/7 sin sesión:** si en el futuro se necesita, se cambia a "ejecutar aunque el usuario
   no haya iniciado sesión" (requiere almacenar la contraseña de Windows en la tarea).

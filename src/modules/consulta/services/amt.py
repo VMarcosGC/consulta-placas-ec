@@ -124,17 +124,20 @@ async def consultar_amt(placa: str) -> dict:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
 
-            page.set_default_timeout(60000)
-            page.set_default_navigation_timeout(60000)
+            # Timeouts cortos (15s) para no dejar al usuario esperando en el frontend:
+            # si la fuente no responde a tiempo, preferimos fallar rápido y que el
+            # worker reintente con backoff a colgar la consulta.
+            page.set_default_timeout(15000)
+            page.set_default_navigation_timeout(15000)
 
             try:
-                await page.goto(URL_AMT, wait_until="domcontentloaded", timeout=60000)
+                await page.goto(URL_AMT, wait_until="domcontentloaded", timeout=15000)
             except Exception:
                 pass
 
             # Esperar a que termine de cargar todo (incluido contenido de iframes).
             try:
-                await page.wait_for_load_state("networkidle", timeout=20000)
+                await page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
                 pass
             await page.wait_for_timeout(2000)
@@ -246,8 +249,11 @@ async def consultar_amt(placa: str) -> dict:
                 await contexto.wait_for_selector(
                     "text=Consultando", state="visible", timeout=5000
                 )
+                # Este wait NO es latencia de red sino el cómputo del JSP: si lo
+                # cortamos antes, se parsea una página a medio cargar y se cachea
+                # un falso "0 infracciones" ~12h. Por eso se mantiene en 25s.
                 await contexto.wait_for_selector(
-                    "text=Consultando", state="hidden", timeout=30000
+                    "text=Consultando", state="hidden", timeout=25000
                 )
             except Exception:
                 pass

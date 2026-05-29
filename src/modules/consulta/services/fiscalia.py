@@ -113,11 +113,14 @@ async def consultar_fiscalia(termino: str) -> dict:
             browser = await p.chromium.launch(headless=True)
             ctx = await browser.new_context(user_agent=USER_AGENT_REAL)
             page = await ctx.new_page()
-            page.set_default_timeout(60000)
-            page.set_default_navigation_timeout(60000)
+            # Timeouts cortos (15s) para no dejar al usuario esperando en el frontend:
+            # si la fuente no responde a tiempo, preferimos fallar rápido y que el
+            # worker reintente con backoff a colgar la consulta.
+            page.set_default_timeout(15000)
+            page.set_default_navigation_timeout(15000)
 
             try:
-                await page.goto(URL_FGE, wait_until="domcontentloaded", timeout=60000)
+                await page.goto(URL_FGE, wait_until="domcontentloaded", timeout=15000)
             except Exception:
                 pass
 
@@ -143,7 +146,7 @@ async def consultar_fiscalia(termino: str) -> dict:
                 await page.press("input#pwd", "Enter")
 
             try:
-                await page.wait_for_load_state("networkidle", timeout=20000)
+                await page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
                 pass
             await page.wait_for_timeout(2500)

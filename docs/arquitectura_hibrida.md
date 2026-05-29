@@ -203,7 +203,7 @@ hasta ver `consulta_realizada`.
 - **Variables de entorno** (mismas que la API, solo BD + ajustes del loop):
   - `DATABASE_URL` — apunta al **mismo** Neon que usa Render.
   - `WORKER_POLL_SEGUNDOS` (default `5`), `WORKER_MAX_INTENTOS` (default `3`),
-    `WORKER_BACKOFF_BASE_SEGUNDOS` (default `30`), `WORKER_TIMEOUT_ZOMBI_SEGUNDOS` (default `300`).
+    `WORKER_BACKOFF_SEGUNDOS` (lista por reintento, default `5,15,30`), `WORKER_TIMEOUT_ZOMBI_SEGUNDOS` (default `300`).
 - **Arranque persistente**:
   - Linux/Raspberry Pi: unidad `systemd` con `Restart=always`.
   - Windows: Programador de tareas o NSSM como servicio.
