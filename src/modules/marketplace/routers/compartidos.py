@@ -19,8 +19,11 @@ from sqlalchemy.orm import Session
 from src.core.database import obtener_sesion
 from src.modules.vehiculos.models.vehiculo import Vehiculo
 from src.modules.marketplace.models import EnlaceCompartido
-from src.modules.marketplace.schemas import EnlaceCompartidoCrear, EnlaceCompartidoSalida
-from src.modules.vehiculos.schemas.vehiculo import VehiculoSalidaCompartida
+from src.modules.marketplace.schemas import (
+    EnlaceCompartidoCrear,
+    EnlaceCompartidoSalida,
+    VehiculoCompartidoSalida,
+)
 from src.modules.auth.dependencies import vehiculo_propio
 from src.modules.tokens.service import debitar_tokens, SaldoInsuficiente
 
@@ -68,7 +71,7 @@ def crear_enlace_compartido(
     return enlace
 
 
-@router.get("/compartido/{token}", response_model=VehiculoSalidaCompartida)
+@router.get("/compartido/{token}", response_model=VehiculoCompartidoSalida)
 def ver_enlace_compartido(
     token: str,
     sesion: Session = Depends(obtener_sesion),
@@ -89,4 +92,5 @@ def ver_enlace_compartido(
     if vehiculo is None or vehiculo.eliminado_en is not None:
         raise no_encontrado
 
-    return VehiculoSalidaCompartida.desde_modelo(vehiculo)
+    # Las secciones del historial se incluyen solo si el `scope` del enlace las habilita.
+    return VehiculoCompartidoSalida.desde_enlace(enlace)
