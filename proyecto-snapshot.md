@@ -24,7 +24,7 @@ Backend de una plataforma (móvil + web) para que cualquier persona en Ecuador c
 ## 3. Estado actual — AS-IS
 
 ### ✅ Completado
-- **Fase 0 — Refactor a monolito modular (DDD) [rama `refactor/modulos`, sin merge a `main`]:** todo el backend se reorganizó de "por tipo de archivo" (`routers/`, `models/`, `schemas/`, `services/`, `auth/`, `utils/` sueltos) a "por dominio de negocio" en `src/`. 5 módulos (`auth`, `tokens`, `consulta`, `vehiculos`, `marketplace`) + `src/core/` (database, validators, ofuscacion) + `src/registry.py` (registro único de modelos para Alembic). Movimiento puro con `git mv` (historial preservado) + arreglo de imports; **cero cambios de lógica, BD ni Alembic**. Endpoints públicos extraídos de `main.py` a `src/modules/consulta/routers/consulta.py`; `main.py` quedó limpio (app + CORS + include_router). Entrypoints (`main.py`, `run.py`, `worker.py`, `scripts/discover.py`) siguen en la raíz. Verificado: `import main` (35 rutas), `registry` (10 tablas), `alembic heads`, `/health`, validación 400/401 y `/marketplace` 200 contra Neon. **Documentación actualizada:** `CLAUDE.md` → `AGENTS.md` (+ shim), rutas nuevas en AGENTS.md, los 6 skills y `docs/`, nueva §1.1 (arquitectura + mapa skill→módulo), `docs/bitacora.md` creada, memoria actualizada. **Pendiente:** merge de `refactor/modulos` a `main`.
+- **Fase 0 — Refactor a monolito modular (DDD) [mergeado a `main` y pusheado, commit `6e33ca2`]:** todo el backend se reorganizó de "por tipo de archivo" (`routers/`, `models/`, `schemas/`, `services/`, `auth/`, `utils/` sueltos) a "por dominio de negocio" en `src/`. 5 módulos (`auth`, `tokens`, `consulta`, `vehiculos`, `marketplace`) + `src/core/` (database, validators, ofuscacion) + `src/registry.py` (registro único de modelos para Alembic). Movimiento puro con `git mv` (historial preservado) + arreglo de imports; **cero cambios de lógica, BD ni Alembic**. Endpoints públicos extraídos de `main.py` a `src/modules/consulta/routers/consulta.py`; `main.py` quedó limpio (app + CORS + include_router). Entrypoints (`main.py`, `run.py`, `worker.py`, `scripts/discover.py`) siguen en la raíz. Verificado: `import main` (35 rutas), `registry` (10 tablas), `alembic heads`, `/health`, validación 400/401 y `/marketplace` 200 contra Neon. **Documentación actualizada:** `CLAUDE.md` → `AGENTS.md` (+ shim), rutas nuevas en AGENTS.md, los 6 skills y `docs/`, nueva §1.1 (arquitectura + mapa skill→módulo), `docs/bitacora.md` creada, memoria actualizada. **Ya en producción:** merge fast-forward a `main` + push → Render redesplegando con la estructura nueva (entrypoints `main:app` sin cambios).
 - **Fase 1 — Consultas públicas + caché:** endpoints `/consultar/{placa}`, `/consultar-judicial/{cedula}`, `/health`. ANT/SRI síncronos en la API; AMT/FGE ahora vía worker (ver abajo). SRI bloqueado por reCAPTCHA invisible. Caché en Postgres con TTL (solo cachea `consulta_realizada`/`sin_resultados`).
 - **Fase 2 — Auth + dominio + deploy:** registro/login JWT, CRUD de vehículos (VIN/motor/chasis con 3 niveles de visibilidad y ofuscación), histórico de dueños, kilometraje monotónico. Desplegado en Render + Vercel.
 - **Fase 3 — Billetera + Favoritos + Mantenimientos:** `saldo_tokens` (default 5, CHECK ≥ 0) + `transacciones_tokens` (auditoría); favoritos por placa (String, no FK); mantenimientos inmutables con validación monotónica. Migraciones `0004`–`0006`.
@@ -98,15 +98,15 @@ internals ajenos fuera de esa dirección.
 ## 7. Últimos cambios (git log)
 
 ```
+6e33ca2 refactor: monolito modular (DDD) en src/modules + AGENTS.md
 7865e53 docs: snapshot tras cablear worker híbrido y débito de tokens
 ceb593a feat: débito transaccional de tokens en creación de enlace compartido
 d740d2c feat: cablear worker híbrido - AMT/FGE vía cola_scraping (en_proceso)
 719e079 docs: regenerar snapshot tras Fase 5 OCR y worker híbrido
-16c5e25 feat: worker híbrido - cola en Postgres, modelo y migración 0009
 ```
-**Rama actual:** `refactor/modulos` (Fase 0 modular, **sin commitear ni mergear** todavía;
-60 archivos en staging = movimientos `git mv` + imports). `main` sigue al día con `origin/main`
-e intacto (de ahí despliega Render). Neon en revisión `0009`.
+**Rama actual:** `main`, **al día con `origin/main`** (Fase 0 mergeada por fast-forward y
+pusheada en `6e33ca2`). Render redesplegando desde `main`. Neon en revisión `0009` (sin
+cambios de schema en este refactor). Rama `refactor/modulos` aún existe local (se puede borrar).
 
 ## 8. Para continuar en Gemini — instrucciones
 
