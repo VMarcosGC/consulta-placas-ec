@@ -25,29 +25,33 @@ Backend de una plataforma (móvil + web) para que cualquier persona en Ecuador c
 
 ### ✅ Completado
 - **Fase 0 — Refactor a monolito modular (DDD) [mergeado a `main` y pusheado, commit `6e33ca2`]:** todo el backend se reorganizó de "por tipo de archivo" (`routers/`, `models/`, `schemas/`, `services/`, `auth/`, `utils/` sueltos) a "por dominio de negocio" en `src/`. 5 módulos (`auth`, `tokens`, `consulta`, `vehiculos`, `marketplace`) + `src/core/` (database, validators, ofuscacion) + `src/registry.py` (registro único de modelos para Alembic). Movimiento puro con `git mv` (historial preservado) + arreglo de imports; **cero cambios de lógica, BD ni Alembic**. Endpoints públicos extraídos de `main.py` a `src/modules/consulta/routers/consulta.py`; `main.py` quedó limpio (app + CORS + include_router). Entrypoints (`main.py`, `run.py`, `worker.py`, `scripts/discover.py`) siguen en la raíz. Verificado: `import main` (35 rutas), `registry` (10 tablas), `alembic heads`, `/health`, validación 400/401 y `/marketplace` 200 contra Neon. **Documentación actualizada:** `CLAUDE.md` → `AGENTS.md` (+ shim), rutas nuevas en AGENTS.md, los 6 skills y `docs/`, nueva §1.1 (arquitectura + mapa skill→módulo), `docs/bitacora.md` creada, memoria actualizada. **Ya en producción:** merge fast-forward a `main` + push → Render redesplegando con la estructura nueva (entrypoints `main:app` sin cambios).
-- **Fase 1 — Consultas públicas + caché:** endpoints `/consultar/{placa}`, `/consultar-judicial/{cedula}`, `/health`. ANT/SRI síncronos en la API; AMT/FGE ahora vía worker (ver abajo). SRI bloqueado por reCAPTCHA invisible. Caché en Postgres con TTL (solo cachea `consulta_realizada`/`sin_resultados`).
+- **Fase 1 — Consultas públicas + caché:** endpoints `/consultar/{placa}`, `/consultar-judicial/{cedula}`, `/health`. ANT síncrono en la API; AMT/FGE vía worker (ver abajo); **SRI por passthrough** (`consulta_externa` + `url_consulta`, ver decisiones). Caché en Postgres con TTL (solo cachea `consulta_realizada`/`sin_resultados`).
 - **Fase 2 — Auth + dominio + deploy:** registro/login JWT, CRUD de vehículos (VIN/motor/chasis con 3 niveles de visibilidad y ofuscación), histórico de dueños, kilometraje monotónico. Desplegado en Render + Vercel.
 - **Fase 3 — Billetera + Favoritos + Mantenimientos:** `saldo_tokens` (default 5, CHECK ≥ 0) + `transacciones_tokens` (auditoría); favoritos por placa (String, no FK); mantenimientos inmutables con validación monotónica. Migraciones `0004`–`0006`.
   - **Débito real de tokens (nuevo):** [services/tokens.py](services/tokens.py) — `debitar_tokens` atómico (no commitea; el caller controla la transacción), valida saldo, audita en `transacciones_tokens`, `SaldoInsuficiente → 422`. Cableado en `POST /vehiculos/{id}/compartir`. **Costo MVP = 0** (gratis, sin fricción de captación); subir `COSTO_COMPARTIR_TOKENS` activa el cobro.
 - **Fase 4 — Compra-venta:** Marketplace público (`GET /marketplace`, `en_venta AND precio>0`, sin VIN/dueño) y token de enlace compartido (`POST /vehiculos/{id}/compartir` + `GET /compartido/{token}`, TTL ≤ 7 días, `scope` JSONB, 404 si no existe/expira). Migraciones `0007`–`0008`.
+  - **Gateo por scope (nuevo, commit `0bb6637`):** `GET /compartido/{token}` ahora respeta el `scope`: `VehiculoCompartidoSalida` agrega kilometraje/mantenimientos/duenos_historico como secciones opcionales, incluidas solo si el flag está en `True`. Cédula de dueños previos ofuscada. Retrocompatible.
+- **Autoarranque del worker (nuevo, commit `ab2b5df`):** Task Scheduler en Windows (modo "solo con sesión iniciada"), `scripts/worker_*.ps1` + `docs/worker.md`. Tarea `ConsultaPlacasWorker` instalada y verificada (procesó AMT/FGE reales desde IP residencial).
+- **SRI por passthrough (nuevo, commit `9563cac`):** SRI usa reCAPTCHA Enterprise v3 (rechaza tokens de solver). `consultar_sri` devuelve `estado: consulta_externa` + `url_consulta` (instantáneo, sin Playwright ni costo); el frontend mostrará un botón al portal. Solver (Capsolver/2Captcha) DORMIDO en `_consultar_sri_scraping`/`captcha.py`.
 - **Fase 5 — OCR/foto (endpoint listo, live pendiente):** `POST /consultar-foto` ([routers/ocr.py](routers/ocr.py)) recibe `UploadFile`, extrae la placa con Cloud Vision ([services/vision.py](services/vision.py)) y encadena con `GET /consultar/{placa}`. Caminos 400/503 probados; parser probado contra muestras; lectura acotada al tope. **No verificado end-to-end** (requiere API key real + foto). Falta integrar al frontend.
-- **Worker híbrido — código completo, falta desplegar:**
-  - `cola_scraping` ([models/cola_scraping.py](models/cola_scraping.py)) + migración `0009` **aplicada a Neon** (índice único parcial para idempotencia).
-  - `worker.py` pull-only: `FOR UPDATE SKIP LOCKED`, backoff (30/60/120s), rescate de zombis, apagado limpio. Reusa `services/` sin modificarlos.
-  - **API cableada** ([services/cola.py](services/cola.py) + `main.py`): AMT/FGE ya no se scrapean en la API; en cache miss encolan (idempotente) y devuelven `estado: en_proceso` (datos null) dentro del mismo 200. ANT/SRI síncronos. Flags `amt_en_proceso`/`fge_en_proceso` en el resumen. Probado contra Neon (encolado + idempotencia).
+- **Worker híbrido — operativo:**
+  - `cola_scraping` ([src/modules/consulta/models/cola_scraping.py](src/modules/consulta/models/cola_scraping.py)) + migración `0009` **aplicada a Neon** (índice único parcial para idempotencia).
+  - `worker.py` pull-only: `FOR UPDATE SKIP LOCKED`, backoff (30/60/120s), rescate de zombis. Reusa `services/` sin modificarlos.
+  - **API cableada**: AMT/FGE no se scrapean en la API; en cache miss encolan (idempotente) y devuelven `estado: en_proceso` (datos null) dentro del mismo 200. Flags `amt_en_proceso`/`fge_en_proceso` en el resumen.
+  - **Autoarranque** vía Task Scheduler (`ConsultaPlacasWorker`, modo logon) instalado en la PC del usuario; procesó AMT/FGE reales desde IP residencial.
 
 ### 🔄 En progreso / pendiente acotado
-- **Desplegar `worker.py`** en una máquina con IP residencial EC (decisión operativa: PC/Raspberry; sin definir). Hasta entonces, AMT/FGE quedan en `en_proceso` indefinido porque nadie procesa la cola.
-- **Verificar OCR end-to-end** (API key Vision real + foto) e integrarlo al frontend.
-- **`scope` del enlace:** se persiste y valida, pero la vista compartida solo muestra características del auto; el gateo de kilometraje/mantenimientos/dueños se cableará cuando se agreguen a `VehiculoSalidaCompartida`.
-- **Precio en tokens:** definir cuántos tokens cuesta el enlace de compra-venta y la consulta OCR (hoy ambos efectivamente gratis; mecanismo de débito listo).
+- **Frontend (repo `consulta-placas-web`):** tarjeta de SRI con botón a `url_consulta` (consulta_externa); manejo de `en_proceso` (polling) para AMT/FGE; integración de OCR (subir foto).
+- **Verificar OCR end-to-end** (API key Vision real + foto).
+- **Precio en tokens:** definir cuántos tokens cuesta el enlace de compra-venta y la consulta OCR (hoy ambos en 0; mecanismo de débito listo).
+- **SRI vía B (definitiva):** evaluar convenio / API oficial del SRI para el valor tributario (la vía A —solver— quedó dormida).
 
 ### ⚠️ Problemas / deuda técnica / decisiones
-- **SRI bloqueado por reCAPTCHA Enterprise invisible** (local y cloud). El worker híbrido **no** lo resuelve; requiere proveedor anti-captcha (2Captcha/Anti-Captcha — sin decidir, sin cuenta/fondos/API key) o API oficial.
-- **AMT y FGE bloqueados en cloud por IP de datacenter** (Render). El worker híbrido con IP residencial es la mitigación; código listo, falta el despliegue físico.
-- **Decisión 2026-05-28:** scraping cloud = worker híbrido + tabla de cola en Postgres (no broker externo). OCR Fase 5 = Cloud Vision (API externa, no Tesseract). Costo de compartir enlace = 0 en MVP (no frenar captación; palanca de ingreso preservada para activar después).
-- **Seguridad pendiente:** confirmar rotación de la contraseña de Neon (quedó expuesta en historial de chat previo). El `.env` local conecta OK a Neon; vive solo en `.env` (gitignored) y dashboard de Render (`sync: false`).
-- **Sincronía remoto:** `main` está al día con `origin/main` (todo pusheado, incluido OCR, worker, cola y débito de tokens).
+- **SRI = reCAPTCHA Enterprise v3 (score-based).** Probado: 2Captcha/Capsolver entregan token pero SRI lo rechaza por score; no se puede iframe (`X-Frame-Options: SAMEORIGIN`). **Decisión: passthrough** (`consulta_externa` + `url_consulta`, botón al portal oficial). Solver dormido en `_consultar_sri_scraping`/`captcha.py`. Vía definitiva = API oficial (B), pendiente.
+- **AMT y FGE bloqueados en cloud por IP de datacenter** (Render). Mitigado con el worker híbrido residencial (ya operativo con autoarranque).
+- **Decisiones:** worker = cola en Postgres (no broker); OCR = Cloud Vision; costo de compartir/OCR = 0 en MVP; anti-captcha evaluado (2Captcha/Capsolver) y descartado para SRI por el v3 enterprise.
+- **Seguridad pendiente:** rotar la contraseña de Neon y **la API key de 2Captcha** (ambas expuestas en chat). Las keys viven solo en `.env` (gitignored) y dashboards de prod.
+- **Sincronía remoto:** `main` al día con `origin/main` (Fase 0 modular, gateo por scope, worker autostart, SRI passthrough).
 
 ## 4. Estructura de archivos actual
 
@@ -98,15 +102,15 @@ internals ajenos fuera de esa dirección.
 ## 7. Últimos cambios (git log)
 
 ```
+9563cac feat: SRI por passthrough (consulta_externa) + solver dormido
+ab2b5df chore: autoarranque del worker hibrido en Windows (Task Scheduler)
+0bb6637 feat: gateo del historial compartido por scope (Fase 4)
+c5d3112 docs: regenerar snapshot tras merge de Fase 0 modular a main
 6e33ca2 refactor: monolito modular (DDD) en src/modules + AGENTS.md
-7865e53 docs: snapshot tras cablear worker híbrido y débito de tokens
-ceb593a feat: débito transaccional de tokens en creación de enlace compartido
-d740d2c feat: cablear worker híbrido - AMT/FGE vía cola_scraping (en_proceso)
-719e079 docs: regenerar snapshot tras Fase 5 OCR y worker híbrido
 ```
-**Rama actual:** `main`, **al día con `origin/main`** (Fase 0 mergeada por fast-forward y
-pusheada en `6e33ca2`). Render redesplegando desde `main`. Neon en revisión `0009` (sin
-cambios de schema en este refactor). Rama `refactor/modulos` aún existe local (se puede borrar).
+**Rama actual:** `main`, **al día con `origin/main`**. Última: `9563cac` (SRI passthrough).
+Render redesplegando desde `main`. Neon en revisión `0009` (sin cambios de schema desde la
+Fase 0). Rama `refactor/modulos` aún existe local (se puede borrar).
 
 ## 8. Para continuar en Gemini — instrucciones
 
