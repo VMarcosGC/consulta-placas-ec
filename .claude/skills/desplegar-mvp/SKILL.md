@@ -59,7 +59,7 @@ Solución: imagen Docker oficial de Microsoft con Chromium + libs preinstalados.
 
 | Variable | Origen | Notas |
 |---|---|---|
-| `DATABASE_URL` | `fromDatabase` (Render Postgres) | `database.py` reescribe prefijo a `postgresql+psycopg://`. |
+| `DATABASE_URL` | `fromDatabase` (Render Postgres) | `src/core/database.py` reescribe prefijo a `postgresql+psycopg://`. |
 | `JWT_SECRET_KEY` | manual (sync: false) | 64 bytes urlsafe. Distinto al de dev. |
 | `JWT_ALGORITHM` | render.yaml | `HS256`. |
 | `JWT_EXPIRA_MINUTOS` | render.yaml | `1440` (24h). |
@@ -92,7 +92,7 @@ Solución: imagen Docker oficial de Microsoft con Chromium + libs preinstalados.
 |---|---|---|
 | Build falla con `su: Authentication failure` | Native runtime, intento de `apt-get` | Cambiar a runtime Docker (este skill ya lo asume). |
 | `(trapped) error reading bcrypt version`, 500 en `/auth/registro` | bcrypt 4.x incompatible con passlib 1.7.4 | Pinear `bcrypt<4.0` en requirements.txt y redeployar. |
-| `ModuleNotFoundError: No module named 'psycopg2'` | Render emite `postgresql://`, SQLAlchemy busca psycopg2 | Reescribir prefijo a `postgresql+psycopg://` en `database.py` (ya está). |
+| `ModuleNotFoundError: No module named 'psycopg2'` | Render emite `postgresql://`, SQLAlchemy busca psycopg2 | Reescribir prefijo a `postgresql+psycopg://` en `src/core/database.py` (ya está). |
 | Cold start de 30–40s tras 15 min inactividad | Free tier duerme | Cron externo (UptimeRobot) tocando `/health` cada 10 min. |
 | `RuntimeError: JWT_SECRET_KEY no configurada` al arrancar | Env var `sync: false` no fue seteada en el dashboard | Ir a Environment del servicio en Render y agregarla. |
 | Build tarda mucho (>15 min) | Primer build descarga imagen base ~1GB | Esperado. Builds siguientes cachean capas; solo el step de pip install se re-ejecuta si cambia `requirements.txt`. |

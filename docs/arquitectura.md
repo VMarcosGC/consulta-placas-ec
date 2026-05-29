@@ -17,11 +17,11 @@ graph TD
 
     API[FastAPI<br/>main.py + routers/<br/><i>Render free</i>]
     Cache[(PostgreSQL<br/>Neon)]
-    ANT[Servicio ANT<br/>services/ant.py]
-    SRI[Servicio SRI<br/>services/sri.py<br/><i>bloqueado_captcha</i>]:::limitado
-    AMT[Servicio AMT<br/>services/amt.py]
-    FGE[Servicio Fiscalía<br/>services/fiscalia.py]
-    OCR[Servicio OCR<br/>services/vision.py]
+    ANT[Servicio ANT<br/>src/modules/consulta/services/ant.py]
+    SRI[Servicio SRI<br/>src/modules/consulta/services/sri.py<br/><i>bloqueado_captcha</i>]:::limitado
+    AMT[Servicio AMT<br/>src/modules/consulta/services/amt.py]
+    FGE[Servicio Fiscalía<br/>src/modules/consulta/services/fiscalia.py]
+    OCR[Servicio OCR<br/>src/modules/consulta/services/vision.py]
 
     Worker[worker.py · IP residencial<br/>pull-only]
     Cola[(cola_scraping<br/>Neon)]
@@ -70,7 +70,7 @@ sequenceDiagram
     autonumber
     participant C as Cliente
     participant API as FastAPI
-    participant Sec as auth/security.py
+    participant Sec as src/modules/auth/security.py
     participant DB as PostgreSQL
 
     Note over C,API: Registro
@@ -124,7 +124,7 @@ sequenceDiagram
     participant C as Cliente
     participant API as FastAPI<br/>(main.py)
     participant V as validar_placa
-    participant Cache as services/cache.py
+    participant Cache as src/modules/consulta/services/cache.py
     participant DB as PostgreSQL
     participant Fuente as Servicio<br/>(ANT/SRI/AMT/FGE)
     participant Externa as Fuente externa
@@ -169,8 +169,8 @@ lógica de `GET /consultar/{placa}`. Fallos de lectura → 400 (nunca 500).
 sequenceDiagram
     autonumber
     participant C as Cliente
-    participant API as routers/ocr.py
-    participant Vis as services/vision.py
+    participant API as src/modules/consulta/routers/ocr.py
+    participant Vis as src/modules/consulta/services/vision.py
     participant CV as Cloud Vision (REST)
     participant Pl as validar_placa
     participant Cons as consultar_placa<br/>(main.py)
@@ -331,7 +331,7 @@ erDiagram
 **Estado**:
 - `consultas` → existe (migración `0001`).
 - `usuarios`, `vehiculos`, `duenos_historico`, `kilometraje_lecturas` → existen (migración `0002`, Fase 2 — Bloque 1).
-- `vehiculos.numero_motor` y `vehiculos.numero_chasis` → agregados en migración `0003` con soporte de ofuscación (ver [utils/ofuscacion.py](../utils/ofuscacion.py)).
+- `vehiculos.numero_motor` y `vehiculos.numero_chasis` → agregados en migración `0003` con soporte de ofuscación (ver [src/core/ofuscacion.py](../src/core/ofuscacion.py)).
 - `vehiculos.transmision/tipo_motor/ciudad_registro`, `usuarios.saldo_tokens` y `transacciones_tokens` → agregados en migración `0004` (Fase 3 — perfil + billetera).
 - `vehiculos_favoritos` → migración `0005`; placa como `String` (no FK), única por usuario+placa.
 - `mantenimientos` → migración `0006`; `fecha` y `kilometraje_relacionado` monotónicos.

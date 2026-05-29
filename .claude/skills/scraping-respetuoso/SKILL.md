@@ -16,7 +16,7 @@ Las fuentes que consultamos son **servicios públicos del Estado ecuatoriano**. 
 | SRI | 📌 `bloqueado_captcha` | 📌 `bloqueado_captcha` | reCAPTCHA Enterprise invisible, no automatizable sin proxy/servicio captcha. |
 | FGE | ✅ funciona | ❌ sirve página sin `input#pwd` | Acepta cédula, RUC, placa, nombres en mismo input. |
 
-**Implicación**: el MVP en producción solo agrega ANT desde cloud. Para AMT/FGE en producción se requiere proxy residencial pago o arquitectura híbrida (ver [CLAUDE.md §8](../../../CLAUDE.md)).
+**Implicación**: el MVP en producción solo agrega ANT desde cloud. Para AMT/FGE en producción se requiere proxy residencial pago o arquitectura híbrida (ver [AGENTS.md §8](../../../AGENTS.md)).
 
 ## Cuándo usar este skill
 
@@ -112,7 +112,7 @@ Ver [Dockerfile](../../../Dockerfile) y [render.yaml](../../../render.yaml). El 
 | Datos parciales en el screenshot | Overlay "Consultando" todavía visible | `wait_for_selector("text=Consultando", state="hidden")` |
 | `NameError`/`KeyError` tras refactor | Referencias muertas a variables/claves viejas | Grep del nombre viejo y eliminar TODAS las apariciones |
 | `consulta_realizada` con datos vacíos | reCAPTCHA invisible bloqueó submission silenciosa | Detectar respuesta vacía → `estado: bloqueado_captcha` |
-| Funciona en local, falla en Render (ej: "Form no encontrado", iframes inesperados) | IP datacenter bloqueada por anti-bot del portal | NO es bug de código. Aceptar la limitación, usar proxy residencial, o cambiar a arquitectura híbrida. Ver CLAUDE.md §8. |
+| Funciona en local, falla en Render (ej: "Form no encontrado", iframes inesperados) | IP datacenter bloqueada por anti-bot del portal | NO es bug de código. Aceptar la limitación, usar proxy residencial, o cambiar a arquitectura híbrida. Ver AGENTS.md §8. |
 | `playwright install --with-deps` falla en Render con `sudo: command not found` | Native Python runtime no permite apt-get | Usar runtime Docker con imagen `mcr.microsoft.com/playwright/python`. Ver skill desplegar-mvp. |
 | Build de Docker en Render exit code 1 sin causa clara tras `playwright install` | bcrypt 4 incompatible con passlib | Pinear `bcrypt>=3.2.0,<4.0.0` en requirements.txt. |
 

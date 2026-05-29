@@ -40,7 +40,7 @@ Este skill cubre la persistencia del dominio del proyecto. La Fase 1 creó `cons
 | `creado_en`, `actualizado_en` | TimestampTZ | |
 | `eliminado_en` | TimestampTZ nullable | Soft delete. NULL = activo. |
 
-### Schemas Pydantic asociados (en `schemas/vehiculo.py`)
+### Schemas Pydantic asociados (en `src/modules/vehiculos/schemas/vehiculo.py`)
 
 - `VehiculoCrear` — entrada para POST. Valida placa y VIN.
 - `VehiculoActualizar` — entrada para PATCH. Todos los campos opcionales.
@@ -60,7 +60,7 @@ consulta_placas_ec/
 ├── alembic/            ← Migraciones (manuales, no autogenerate-only)
 │   └── versions/
 ├── alembic.ini
-└── database.py         ← engine, SessionLocal, Base, env vars
+└── src/core/database.py         ← engine, SessionLocal, Base, env vars
 ```
 
 ## Pasos para agregar/modificar una entidad
@@ -97,15 +97,15 @@ consulta_placas_ec/
 
 Al diseñar cualquier endpoint que devuelva entidades del dominio:
 
-- **Default**: sólo el dueño autenticado ve sus datos. Usar `Depends(usuario_actual)` para el header `Authorization`, y `Depends(vehiculo_propio)` para resolver un vehículo del usuario por path param (`/vehiculos/{vehiculo_id}/...`). Ambas están en [auth/dependencies.py](../../../auth/dependencies.py).
-- **Schemas con visibilidad** (ver `schemas/vehiculo.py`):
+- **Default**: sólo el dueño autenticado ve sus datos. Usar `Depends(usuario_actual)` para el header `Authorization`, y `Depends(vehiculo_propio)` para resolver un vehículo del usuario por path param (`/vehiculos/{vehiculo_id}/...`). Ambas están en [src/modules/auth/dependencies.py](../../../src/modules/auth/dependencies.py).
+- **Schemas con visibilidad** (ver `src/modules/vehiculos/schemas/vehiculo.py`):
   - Dueño → `VehiculoSalidaCompleta` (todo visible).
   - Token compra-venta → `VehiculoSalidaCompartida` (VIN/motor/chasis ofuscados).
   - Listado público → `VehiculoSalidaPublica` (sin campos sensibles).
 - **Token de compra-venta** (`enlaces_compartidos` — Fase 4): cada token tiene un campo `scope` (JSON) que enumera qué entidades/campos puede ver el portador. Default mínimo: marca, modelo, año. Opt-in para: kilometraje, mantenimientos, dueños históricos.
 - **Caducidad del token**: máximo 7 días. Validar `fecha_expiracion > now()` en cada uso.
 
-Ver [CLAUDE.md sección 9](../../../CLAUDE.md) para el modelo completo de privacidad y [validacion-datos-ec](../validacion-datos-ec/SKILL.md) para las funciones de ofuscación.
+Ver [AGENTS.md sección 9](../../../AGENTS.md) para el modelo completo de privacidad y [validacion-datos-ec](../validacion-datos-ec/SKILL.md) para las funciones de ofuscación.
 
 ## Anti-patrones
 

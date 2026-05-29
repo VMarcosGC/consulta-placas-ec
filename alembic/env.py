@@ -2,8 +2,8 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-from database import Base, DATABASE_URL
-import models  # noqa: F401  -- registra los modelos en Base.metadata
+from src.core.database import Base, DATABASE_URL
+import src.registry  # noqa: F401  -- registra TODOS los modelos en Base.metadata
 
 config = context.config
 config.set_main_option("sqlalchemy.url", DATABASE_URL)

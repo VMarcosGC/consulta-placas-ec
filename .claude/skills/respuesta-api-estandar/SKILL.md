@@ -122,7 +122,7 @@ Endpoints implementados en Fase 2. Todos requieren `Authorization: Bearer <jwt>`
 | Kilometraje | `GET /vehiculos/{id}/kilometraje` | — | 200 lista ordenada por `fecha_lectura` desc |
 | Kilometraje | `DELETE /vehiculos/{id}/kilometraje/{id_lectura}` | — | 204 |
 
-Autorización transversal: usar `Depends(vehiculo_propio)` (en [auth/dependencies.py](../../../auth/dependencies.py)) para todos los endpoints anidados bajo `/vehiculos/{id}/...`. La dependency ya resuelve `Vehiculo` filtrado por `usuario_id` y excluye soft-deleted.
+Autorización transversal: usar `Depends(vehiculo_propio)` (en [src/modules/auth/dependencies.py](../../../src/modules/auth/dependencies.py)) para todos los endpoints anidados bajo `/vehiculos/{id}/...`. La dependency ya resuelve `Vehiculo` filtrado por `usuario_id` y excluye soft-deleted.
 
 ## Anti-patrones
 

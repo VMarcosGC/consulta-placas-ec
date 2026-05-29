@@ -2,7 +2,7 @@
 
 > Diseño de topología. Define **cómo** se desacopla el scraping (frágil y dependiente de IP)
 > de la API principal, sin cambiar los servicios `services/<fuente>.py` existentes.
-> Decisión base: 2026-05-28 (ver [CLAUDE.md](../CLAUDE.md) §8, limitación 2).
+> Decisión base: 2026-05-28 (ver [AGENTS.md](../AGENTS.md) §8, limitación 2).
 
 ---
 
@@ -32,7 +32,7 @@ Decisiones tomadas:
 
 - **Mecanismo de comunicación: tabla de cola en Postgres (Neon).** Cero infra nueva,
   cero costo, mínimo recurso. Se descartó Redis/RabbitMQ por superficie operativa y costo.
-- El worker **reutiliza tal cual** `services/ant.py`, `services/amt.py`, `services/fiscalia.py`.
+- El worker **reutiliza tal cual** `src/modules/consulta/services/ant.py`, `src/modules/consulta/services/amt.py`, `src/modules/consulta/services/fiscalia.py`.
   No se duplica lógica de scraping.
 
 ## 3. Topología
@@ -50,7 +50,7 @@ graph TB
 
     subgraph casa["🏠 IP residencial Ecuador (PC / Raspberry Pi)"]
         WORKER["worker.py<br/><i>proceso liviano, sin FastAPI</i>"]
-        PW["Playwright + Chromium<br/>services/amt.py · fiscalia.py · ant.py"]
+        PW["Playwright + Chromium<br/>src/modules/consulta/services/amt.py · fiscalia.py · ant.py"]
     end
 
     Cliente(["Cliente web / móvil"]) -->|GET /consultar/placa| API
@@ -77,7 +77,7 @@ Puntos clave de la topología:
 ## 4. Tabla de cola (`cola_scraping`)
 
 Migración Alembic manual sugerida: `0009_cola_scraping.py` (ver convención en
-[CLAUDE.md](../CLAUDE.md) §10.2 — migraciones manuales, nombre descriptivo, español).
+[AGENTS.md](../AGENTS.md) §10.2 — migraciones manuales, nombre descriptivo, español).
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -102,7 +102,7 @@ Migración Alembic manual sugerida: `0009_cola_scraping.py` (ver convención en
   DO NOTHING`.
 
 > El resultado del scraping **no** vive en `cola_scraping`: se guarda en `consultas` con el
-> contrato de caché existente ([services/cache.py](../services/cache.py)). La cola solo
+> contrato de caché existente ([src/modules/consulta/services/cache.py](../src/modules/consulta/services/cache.py)). La cola solo
 > coordina el trabajo. Así la API no cambia su forma de leer resultados.
 
 ## 5. Flujo de una consulta
@@ -129,7 +129,7 @@ sequenceDiagram
     loop polling del worker (cada N s)
         W->>Q: SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1
         Q-->>W: trabajo (AMT, ABC1234)
-        W->>W: ejecuta services/amt.py (Playwright)
+        W->>W: ejecuta src/modules/consulta/services/amt.py (Playwright)
         alt éxito
             W->>K: guarda en consultas (consulta_realizada / sin_resultados)
             W->>Q: UPDATE estado='completado'
@@ -170,12 +170,12 @@ hasta ver `consulta_realizada`.
 - **Idempotencia**: el índice único parcial impide duplicados; reprocesar un trabajo solo
   reescribe la caché (operación naturalmente idempotente).
 - **Tolerancia a fallos de fuente**: los `services/<fuente>.py` ya capturan todo y devuelven
-  `{estado: error}` sin propagar excepciones (CLAUDE.md §5). El worker trata ese `error`
+  `{estado: error}` sin propagar excepciones (AGENTS.md §5). El worker trata ese `error`
   como fallo reintentable; un portal caído no tumba el worker.
 - **Apagado limpio**: el worker atrapa `SIGTERM`/`KeyboardInterrupt`, termina el trabajo en
   curso (o lo devuelve a `pendiente`) y cierra el navegador antes de salir.
 - **Caché y reintento coherentes**: solo `consulta_realizada`/`sin_resultados` se guardan en
-  `consultas` (regla existente de [cache.py](../services/cache.py)); `error` no se cachea,
+  `consultas` (regla existente de [cache.py](../src/modules/consulta/services/cache.py)); `error` no se cachea,
   así un reintento posterior puede tener éxito.
 
 ## 7. Uso mínimo de recursos (requisito de la tarea)
@@ -189,7 +189,7 @@ hasta ver `consulta_realizada`.
   Opcional: `LISTEN/NOTIFY` de Postgres para despertar al instante en vez de polling fijo
   (la API hace `NOTIFY cola_scraping` tras encolar). Polling es el default por simplicidad.
 - **Serial por diseño**: el worker procesa **un trabajo a la vez** contra la misma fuente
-  (regla CLAUDE.md §15 — no paralelizar contra la misma fuente). Esto también acota RAM/CPU,
+  (regla AGENTS.md §15 — no paralelizar contra la misma fuente). Esto también acota RAM/CPU,
   ideal para una Raspberry Pi.
 - **Sin estado local**: toda la coordinación vive en Neon; el worker es desechable y se
   puede reiniciar sin pérdida.
@@ -197,7 +197,7 @@ hasta ver `consulta_realizada`.
 ## 8. Despliegue del worker
 
 - **Mismo repo**, nuevo entrypoint `worker.py` en la raíz (junto a `run.py`). Reusa
-  `database.py`, `services/` y `models/`. Comparte `requirements.txt` (ya trae Playwright).
+  `src/core/database.py`, `services/` y `models/`. Comparte `requirements.txt` (ya trae Playwright).
 - **Variables de entorno** (mismas que la API, solo BD + ajustes del loop):
   - `DATABASE_URL` — apunta al **mismo** Neon que usa Render.
   - `WORKER_POLL_SEGUNDOS` (default `5`), `WORKER_MAX_INTENTOS` (default `3`),
@@ -213,7 +213,7 @@ hasta ver `consulta_realizada`.
 
 ## 9. Cambios en la API (resumen)
 
-1. Modelo nuevo `models/cola_scraping.py` + migración `0009_cola_scraping.py`.
+1. Modelo nuevo `src/modules/consulta/models/cola_scraping.py` + migración `0009_cola_scraping.py`.
 2. En `consultar_con_cache` (o un helper nuevo): para AMT/FGE, si hay cache miss →
    `INSERT ... ON CONFLICT DO NOTHING` en `cola_scraping` y devolver `{estado: "en_proceso"}`
    en vez de invocar Playwright. **La API en Render deja de importar/instanciar Chromium para
@@ -224,16 +224,16 @@ hasta ver `consulta_realizada`.
 ## 10. Qué NO hace este diseño
 
 - **No resuelve SRI**: el reCAPTCHA invisible bloquea igual desde IP residencial. SRI sigue
-  `bloqueado_captcha` (CLAUDE.md §8, limitación 1).
+  `bloqueado_captcha` (AGENTS.md §8, limitación 1).
 - **No mezcla CRUD con scraping**: Billetera/Favoritos/Mantenimientos/Marketplace siguen
-  tocando solo la BD (CLAUDE.md §10.2). La cola es exclusiva del pipeline de scraping.
+  tocando solo la BD (AGENTS.md §10.2). La cola es exclusiva del pipeline de scraping.
 - **No introduce un broker externo**: la coordinación es 100% Postgres.
 
 ---
 
 ## Checklist de implementación (fase futura)
 
-- [ ] `models/cola_scraping.py` + migración `0009_cola_scraping.py` (índice único parcial).
+- [ ] `src/modules/consulta/models/cola_scraping.py` + migración `0009_cola_scraping.py` (índice único parcial).
 - [ ] `worker.py` (loop asyncio, navegador reutilizado, backoff, rescate de zombis, apagado limpio).
 - [ ] Helper de encolado en la API + estado `en_proceso` en el contrato.
 - [ ] La API en Render deja de instanciar Chromium para AMT/FGE.

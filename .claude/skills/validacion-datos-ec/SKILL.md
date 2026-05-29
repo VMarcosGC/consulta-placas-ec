@@ -5,18 +5,18 @@ description: Validar y normalizar identificadores ecuatorianos (placa, cédula, 
 
 # Validación de datos ecuatorianos
 
-Todos los validadores viven en [utils/validators.py](../../../utils/validators.py). Una función por tipo, con la convención `validar_<tipo>(valor: str) -> str` que devuelve el valor **normalizado** o lanza `ValueError` con un mensaje en español.
+Todos los validadores viven en [src/core/validators.py](../../../src/core/validators.py). Una función por tipo, con la convención `validar_<tipo>(valor: str) -> str` que devuelve el valor **normalizado** o lanza `ValueError` con un mensaje en español.
 
 ## Estado actual
 
 | Validador | Estado | Ubicación |
 |---|---|---|
-| `validar_placa(placa)` | ✅ implementado | [utils/validators.py](../../../utils/validators.py) |
-| `validar_cedula(cedula)` | ✅ implementado (con checksum módulo 10) | [utils/validators.py](../../../utils/validators.py) |
-| `validar_vin(vin)` | ✅ implementado (ISO 3779/3780) | [utils/validators.py](../../../utils/validators.py) |
+| `validar_placa(placa)` | ✅ implementado | [src/core/validators.py](../../../src/core/validators.py) |
+| `validar_cedula(cedula)` | ✅ implementado (con checksum módulo 10) | [src/core/validators.py](../../../src/core/validators.py) |
+| `validar_vin(vin)` | ✅ implementado (ISO 3779/3780) | [src/core/validators.py](../../../src/core/validators.py) |
 | `validar_ruc(ruc)` | ⏳ pendiente | (cuando se necesite) |
 
-Funciones de ofuscación/decoding del VIN viven aparte en [utils/ofuscacion.py](../../../utils/ofuscacion.py).
+Funciones de ofuscación/decoding del VIN viven aparte en [src/core/ofuscacion.py](../../../src/core/ofuscacion.py).
 
 ## Cuándo usar este skill
 
@@ -58,7 +58,7 @@ Funciones de ofuscación/decoding del VIN viven aparte en [utils/ofuscacion.py](
 
 ### Decodificación del origen del VIN
 
-El **primer carácter** del VIN (parte del WMI = primeros 3) identifica la región/país. Tabla `PAISES_VIN` en [utils/ofuscacion.py](../../../utils/ofuscacion.py). Ejemplos relevantes para Ecuador:
+El **primer carácter** del VIN (parte del WMI = primeros 3) identifica la región/país. Tabla `PAISES_VIN` en [src/core/ofuscacion.py](../../../src/core/ofuscacion.py). Ejemplos relevantes para Ecuador:
 
 | Carácter 1 | Origen |
 |---|---|
@@ -78,12 +78,12 @@ Función: `decodificar_origen_vin(vin) -> {pais, wmi, descripcion}`.
 
 VIN, número de motor y número de chasis son sensibles. Mostrar el valor completo solo al dueño autenticado. Para vistas compartidas (compra-venta con token), usar el nivel `"origen"` que mantiene los primeros 3 caracteres + el país decodificado.
 
-Niveles implementados en [utils/ofuscacion.py](../../../utils/ofuscacion.py):
+Niveles implementados en [src/core/ofuscacion.py](../../../src/core/ofuscacion.py):
 - `completo`: valor sin ofuscar.
 - `origen`: primeros 3 caracteres + máscara (`JTD**************`).
 - `oculto`: sin valor; solo el país y la descripción del WMI.
 
-Esquemas Pydantic correspondientes en [schemas/vehiculo.py](../../../schemas/vehiculo.py):
+Esquemas Pydantic correspondientes en [src/modules/vehiculos/schemas/vehiculo.py](../../../src/modules/vehiculos/schemas/vehiculo.py):
 - `VehiculoSalidaCompleta` (dueño).
 - `VehiculoSalidaCompartida` (token de compra-venta).
 - `VehiculoSalidaPublica` (sin VIN/motor/chasis).

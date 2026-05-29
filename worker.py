@@ -36,19 +36,19 @@ if sys.platform == "win32":
 
 from sqlalchemy import select, update, text
 
-from database import SessionLocal
-from models import ColaScraping
-from models.cola_scraping import (
+from src.core.database import SessionLocal
+from src.modules.consulta.models.cola_scraping import ColaScraping
+from src.modules.consulta.models.cola_scraping import (
     ESTADO_PENDIENTE,
     ESTADO_EN_PROCESO,
     ESTADO_COMPLETADO,
     ESTADO_FALLIDO,
 )
-from services.cache import guardar_consulta, ESTADOS_CACHEABLES
-from services.ant import consultar_ant
-from services.amt import consultar_amt
-from services.fiscalia import consultar_fiscalia
-from services.sri import consultar_sri
+from src.modules.consulta.services.cache import guardar_consulta, ESTADOS_CACHEABLES
+from src.modules.consulta.services.ant import consultar_ant
+from src.modules.consulta.services.amt import consultar_amt
+from src.modules.consulta.services.fiscalia import consultar_fiscalia
+from src.modules.consulta.services.sri import consultar_sri
 
 
 logging.basicConfig(

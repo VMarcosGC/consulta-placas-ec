@@ -5,7 +5,7 @@ description: Agregar una nueva fuente de consulta vehicular (ANT, SRI, AMT, Fisc
 
 # Agregar una nueva fuente de consulta
 
-Este skill aplica al proyecto [consulta_placas_ec](../../../CLAUDE.md). Lee `CLAUDE.md` antes de proceder si aún no lo has hecho.
+Este skill aplica al proyecto [consulta_placas_ec](../../../AGENTS.md). Lee `AGENTS.md` antes de proceder si aún no lo has hecho.
 
 ## Cuándo usar este skill
 
@@ -27,9 +27,9 @@ Saltar este paso costó ~6 iteraciones en AMT antes de descubrir el iframe + dro
 ### 1. Decidir el método de acceso
 
 - **¿La fuente tiene API pública o HTML estático?** → usar `httpx` (más rápido, menos frágil).
-- **¿La fuente exige JavaScript, sesión, captcha?** → usar Playwright async, como [services/ant.py](../../../services/ant.py).
+- **¿La fuente exige JavaScript, sesión, captcha?** → usar Playwright async, como [src/modules/consulta/services/ant.py](../../../src/modules/consulta/services/ant.py).
 - Por defecto, intentar primero `httpx`. Solo escalar a Playwright si es necesario.
-- **Verificar si la fuente filtra por IP**: si funciona en local pero no desde Render/cloud, casi seguro que sí. Ver [CLAUDE.md §8](../../../CLAUDE.md). Considerá la limitación antes de prometer disponibilidad en producción.
+- **Verificar si la fuente filtra por IP**: si funciona en local pero no desde Render/cloud, casi seguro que sí. Ver [AGENTS.md §8](../../../AGENTS.md). Considerá la limitación antes de prometer disponibilidad en producción.
 
 ### 2. Crear el archivo del servicio
 
@@ -57,12 +57,12 @@ async def consultar_<fuente>(termino: str) -> dict:
 
 Reglas:
 - **Nunca propagar excepciones**. Capturar todo y devolver `estado: error`.
-- Estructura de respuesta exacta como dice `CLAUDE.md` sección 6 y el skill `respuesta-api-estandar`.
+- Estructura de respuesta exacta como dice `AGENTS.md` sección 6 y el skill `respuesta-api-estandar`.
 - Si la fuente no aplica para la placa (ej: AMT solo Quito), devolver `estado: sin_resultados`.
 
 ### 3. Separar parsing de I/O
 
-Como en [services/ant.py](../../../services/ant.py), la función `parsear_respuesta_<fuente>(texto)` debe vivir aparte de la función async. Esto permite probar el parser con fixtures sin tocar la red.
+Como en [src/modules/consulta/services/ant.py](../../../src/modules/consulta/services/ant.py), la función `parsear_respuesta_<fuente>(texto)` debe vivir aparte de la función async. Esto permite probar el parser con fixtures sin tocar la red.
 
 ### 4. Registrar la fuente en `main.py`
 

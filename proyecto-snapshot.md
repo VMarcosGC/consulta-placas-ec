@@ -1,5 +1,5 @@
 # Proyecto Snapshot — consulta_placas_ec (backend)
-**Generado:** 2026-05-28
+**Generado:** 2026-05-29
 **Herramienta origen:** Claude Code / VS Code
 **Propósito de este archivo:** Subir a Gemini para continuar planificación TO-BE
 
@@ -12,8 +12,8 @@ Backend de una plataforma (móvil + web) para que cualquier persona en Ecuador c
 ## 2. Stack tecnológico
 
 - **Lenguaje:** Python 3.11+ (prod: imagen Docker Playwright con Python 3.10).
-- **API:** FastAPI con routers en `routers/`; Pydantic 2 para validación/serialización.
-- **Scraping:** Playwright async (Chromium) en `services/<fuente>.py`.
+- **API:** FastAPI con **arquitectura de monolito modular (DDD)**: el código vive en `src/modules/<dominio>/` (auth, tokens, consulta, vehiculos, marketplace) + `src/core/` (infra y utils compartidos). `main.py` solo monta routers. Pydantic 2 para validación/serialización.
+- **Scraping:** Playwright async (Chromium) en `src/modules/consulta/services/<fuente>.py`.
 - **OCR:** Google Cloud Vision vía REST (`images:annotate`, TEXT_DETECTION) con `httpx` + API key (`GOOGLE_VISION_API_KEY`). Sin SDK pesado.
 - **BD:** PostgreSQL 16 en **Neon** (externa, serverless). JSONB para respuestas crudas, `scope` de enlaces y `payload` de la cola.
 - **ORM/Migraciones:** SQLAlchemy 2 + Alembic (migraciones **manuales**, `0001`–`0009`).
@@ -24,6 +24,7 @@ Backend de una plataforma (móvil + web) para que cualquier persona en Ecuador c
 ## 3. Estado actual — AS-IS
 
 ### ✅ Completado
+- **Fase 0 — Refactor a monolito modular (DDD) [rama `refactor/modulos`, sin merge a `main`]:** todo el backend se reorganizó de "por tipo de archivo" (`routers/`, `models/`, `schemas/`, `services/`, `auth/`, `utils/` sueltos) a "por dominio de negocio" en `src/`. 5 módulos (`auth`, `tokens`, `consulta`, `vehiculos`, `marketplace`) + `src/core/` (database, validators, ofuscacion) + `src/registry.py` (registro único de modelos para Alembic). Movimiento puro con `git mv` (historial preservado) + arreglo de imports; **cero cambios de lógica, BD ni Alembic**. Endpoints públicos extraídos de `main.py` a `src/modules/consulta/routers/consulta.py`; `main.py` quedó limpio (app + CORS + include_router). Entrypoints (`main.py`, `run.py`, `worker.py`, `scripts/discover.py`) siguen en la raíz. Verificado: `import main` (35 rutas), `registry` (10 tablas), `alembic heads`, `/health`, validación 400/401 y `/marketplace` 200 contra Neon. **Documentación actualizada:** `CLAUDE.md` → `AGENTS.md` (+ shim), rutas nuevas en AGENTS.md, los 6 skills y `docs/`, nueva §1.1 (arquitectura + mapa skill→módulo), `docs/bitacora.md` creada, memoria actualizada. **Pendiente:** merge de `refactor/modulos` a `main`.
 - **Fase 1 — Consultas públicas + caché:** endpoints `/consultar/{placa}`, `/consultar-judicial/{cedula}`, `/health`. ANT/SRI síncronos en la API; AMT/FGE ahora vía worker (ver abajo). SRI bloqueado por reCAPTCHA invisible. Caché en Postgres con TTL (solo cachea `consulta_realizada`/`sin_resultados`).
 - **Fase 2 — Auth + dominio + deploy:** registro/login JWT, CRUD de vehículos (VIN/motor/chasis con 3 niveles de visibilidad y ofuscación), histórico de dueños, kilometraje monotónico. Desplegado en Render + Vercel.
 - **Fase 3 — Billetera + Favoritos + Mantenimientos:** `saldo_tokens` (default 5, CHECK ≥ 0) + `transacciones_tokens` (auditoría); favoritos por placa (String, no FK); mantenimientos inmutables con validación monotónica. Migraciones `0004`–`0006`.
@@ -52,38 +53,39 @@ Backend de una plataforma (móvil + web) para que cualquier persona en Ecuador c
 
 ```
 consulta_placas_ec/
-├── main.py                 # FastAPI: públicos + include_router. AMT/FGE vía worker.
-├── run.py                  # launcher API (WindowsProactorEventLoopPolicy)
-├── worker.py               # worker híbrido pull-only (cola_scraping)
-├── database.py             # engine, SessionLocal, Base, env vars
-├── alembic/versions/       # 0001..0009 (migraciones manuales)
-├── auth/                   # security.py (bcrypt+JWT), dependencies.py
-├── models/                 # consulta, usuario(+TransaccionToken), vehiculo,
-│                           # vehiculo_favorito, dueno_historico,
-│                           # kilometraje_lectura, mantenimiento, enlace_compartido,
-│                           # cola_scraping
-├── schemas/                # auth, vehiculo, dueno_historico, kilometraje,
-│                           # favorito, mantenimiento, enlace_compartido
-├── routers/                # auth, vehiculos, duenos, kilometraje, tokens,
-│                           # favoritos, mantenimientos, marketplace, compartidos, ocr
-├── services/               # ant, sri, amt, fiscalia, cache, vision (OCR),
-│                           # cola (encolado), tokens (débito)
-├── utils/                  # validators.py, ofuscacion.py
+├── main.py                 # FastAPI: solo app + CORS + include_router de cada módulo
+├── run.py                  # launcher API (WindowsProactorEventLoopPolicy); lanza "main:app"
+├── worker.py               # worker híbrido pull-only (cola_scraping); entrypoint en raíz
 ├── scripts/discover.py     # descubrimiento de selectores para scraping
-├── docs/                   # arquitectura.md (Mermaid), despliegue.md,
-│                           # arquitectura_hibrida.md (diseño worker)
+├── src/
+│   ├── registry.py         # importa TODOS los modelos → Base.metadata (lo usa Alembic)
+│   ├── core/               # database.py (engine/Base/env), validators.py, ofuscacion.py
+│   └── modules/
+│       ├── auth/           # models(Usuario,TransaccionToken), schemas, security, dependencies, router
+│       ├── tokens/         # service.py (debitar_tokens), router.py
+│       ├── consulta/       # routers/{consulta,ocr} · services/{ant,sri,amt,fiscalia,cache,cola,vision} · models/{consulta,cola_scraping}
+│       ├── vehiculos/      # models/ · schemas/ · routers/{vehiculos,duenos,kilometraje,mantenimientos,favoritos}
+│       └── marketplace/    # models(enlace_compartido), schemas, routers/{marketplace,compartidos}
+├── alembic/                # env.py (→ import src.registry) + versions/ 0001..0009 (manuales, intactas)
+├── docs/                   # arquitectura.md (Mermaid), despliegue.md, arquitectura_hibrida.md
 ├── Dockerfile · render.yaml · requirements.txt
-└── .claude/skills/         # 6 skills del proyecto
+└── .claude/skills/         # 6 skills del proyecto (refs a rutas viejas: actualizar)
 ```
+
+**Dependencias entre módulos (interfaz pública, dirección permitida):** `tokens`→`auth`,
+`vehiculos`→`auth`, `marketplace`→`vehiculos`+`tokens`, `consulta`→`core`; todos→`core`.
+Regla de oro: los módulos se hablan por funciones de servicio expuestas, no importando
+internals ajenos fuera de esa dirección.
 
 ## 5. Skills y herramientas configuradas
 
-- **CLAUDE.md** presente (workspace + proyecto): fuente de verdad, fases, reglas de negocio 10.x.
+- **AGENTS.md** (proyecto; renombrada de CLAUDE.md, con shim `@AGENTS.md`): fuente de verdad, fases, reglas de negocio 10.x, §1.1 arquitectura modular + mapa skill→módulo.
 - **Skills del proyecto** (`.claude/skills/`): `agregar-fuente-consulta`, `desplegar-mvp`, `modelo-dominio-vehiculo`, `respuesta-api-estandar` (incluye estado `en_proceso`), `scraping-respetuoso`, `validacion-datos-ec`.
 - **Diagramas vivos** en `docs/arquitectura.md`: topología con worker cableado, secuencia auth, secuencia consulta (nota worker), secuencia OCR §2c, ER con `cola_scraping`, roadmap. Diseño híbrido en `docs/arquitectura_hibrida.md`.
 
 ## 6. Decisiones técnicas tomadas
 
+- **Arquitectura modular (DDD), 2026-05-29:** un módulo = una capacidad de negocio (no una tabla). 5 módulos hoy; techo del producto final ~6–7 (OCR vive dentro de `consulta`; pagos crecerá `tokens`). App y web son clientes de la misma API → **no** suman módulos al backend. Modelos compartidos: `Usuario`+`TransaccionToken` quedan juntos en `auth` (tokens los importa); schemas de token en `auth.schemas` (split de cohesión es limpieza opcional futura, no se hizo para no tocar lógica).
 - **Migraciones manuales** (no autogenerate a ciegas), nombre descriptivo por archivo.
 - **Separación CRUD ↔ scraping:** el CRUD del MVP toca solo la BD propia; nunca invoca Playwright. La cola es exclusiva del pipeline de scraping.
 - **Contrato de error:** 422 validación de negocio (incl. saldo insuficiente), 404 propiedad (no 403), 400 input, 409 conflicto, 201/204 create/delete; nunca 500 por fuente externa. OCR: fallo de lectura → 400; sin API key → 503. AMT/FGE encolados → 200 con `estado: en_proceso` por fuente (no 202, para no romper el agregado).
@@ -96,14 +98,15 @@ consulta_placas_ec/
 ## 7. Últimos cambios (git log)
 
 ```
+7865e53 docs: snapshot tras cablear worker híbrido y débito de tokens
 ceb593a feat: débito transaccional de tokens en creación de enlace compartido
 d740d2c feat: cablear worker híbrido - AMT/FGE vía cola_scraping (en_proceso)
 719e079 docs: regenerar snapshot tras Fase 5 OCR y worker híbrido
 16c5e25 feat: worker híbrido - cola en Postgres, modelo y migración 0009
-e44cbb8 feat: Fase 5 - endpoint OCR con Google Cloud Vision y diseño worker
-8374529 docs: regenerar snapshot del proyecto tras cierre de Fase 4
 ```
-**Working tree limpio.** Rama `main` **al día con `origin/main`** (todo pusheado). Neon en revisión `0009`.
+**Rama actual:** `refactor/modulos` (Fase 0 modular, **sin commitear ni mergear** todavía;
+60 archivos en staging = movimientos `git mv` + imports). `main` sigue al día con `origin/main`
+e intacto (de ahí despliega Render). Neon en revisión `0009`.
 
 ## 8. Para continuar en Gemini — instrucciones
 
