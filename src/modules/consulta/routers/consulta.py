@@ -8,12 +8,16 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
-from src.core.database import obtener_sesion, CACHE_TTL_MINUTOS
+from src.core.database import obtener_sesion
 from src.core.validators import validar_placa, validar_cedula
 from src.modules.consulta.services.ant import consultar_ant
 from src.modules.consulta.services.sri import consultar_sri
-from src.modules.consulta.services.cache import obtener_consulta_reciente, guardar_consulta
-from src.modules.consulta.services.cola import encolar_scraping
+from src.modules.consulta.services.cache import (
+    obtener_consulta_reciente,
+    guardar_consulta,
+    TTL_TRANSACCIONAL_MINUTOS,
+)
+from src.modules.consulta.services.cola import encolar_scraping, fuente_en_error_reciente
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,13 @@ logger = logging.getLogger(__name__)
 # (ver docs/arquitectura_hibrida.md). La API no las scrapea; encola y responde
 # en_proceso. El worker (IP residencial) las procesa y llena la caché `consultas`.
 ESTADO_EN_PROCESO = "en_proceso"
+# Fuente caída: el worker agotó los reintentos. El cliente deja de pollear y puede
+# reintentar manualmente. Durante esta ventana la API no re-encola a ciegas.
+ESTADO_ERROR_FUENTE = "error_fuente"
+VENTANA_ERROR_FUENTE_MINUTOS = TTL_TRANSACCIONAL_MINUTOS
+
+# Fuentes válidas para el worker híbrido y su validador de identificador.
+VALIDADOR_FUENTE_WORKER = {"AMT": validar_placa, "FGE": validar_cedula}
 
 router = APIRouter(tags=["consulta"])
 
@@ -37,7 +48,7 @@ async def consultar_con_cache(
     El endpoint nunca debe fallar por problemas de caché.
     """
     try:
-        cacheada = obtener_consulta_reciente(sesion, identificador, fuente, CACHE_TTL_MINUTOS)
+        cacheada = obtener_consulta_reciente(sesion, identificador, fuente)
         if cacheada is not None:
             return {**cacheada, "_cache": True}
     except Exception as e:
@@ -64,16 +75,37 @@ def consultar_via_worker(
     """Devuelve la respuesta cacheada si existe; si no, encola para el worker.
 
     A diferencia de `consultar_con_cache`, NUNCA invoca Playwright: estas fuentes
-    (AMT/FGE) se scrapean desde una IP residencial vía el worker híbrido. En cache
-    miss inserta un trabajo `pendiente` (idempotente) y devuelve `en_proceso` con
-    `datos: null`. El cliente reintenta hasta que el worker llena la caché.
+    (AMT/FGE) se scrapean desde una IP residencial vía el worker híbrido. Flujo:
+
+    1. Cache hit en `consultas` → devuelve el resultado.
+    2. Si el último trabajo terminó en `error_fuente` dentro de la ventana de
+       enfriamiento → devuelve `error_fuente` (NO re-encola; el cliente deja de
+       pollear y ofrece "Reintentar", que va al endpoint dedicado).
+    3. Cache miss normal → inserta trabajo `pendiente` (idempotente) y devuelve
+       `en_proceso` con `datos: null`. El cliente reintenta hasta que llene la caché.
     """
     try:
-        cacheada = obtener_consulta_reciente(sesion, identificador, fuente, CACHE_TTL_MINUTOS)
+        cacheada = obtener_consulta_reciente(sesion, identificador, fuente)
         if cacheada is not None:
             return {**cacheada, "_cache": True}
     except Exception as e:
         logger.warning("Cache lookup falló para %s/%s: %r", fuente, identificador, e)
+        sesion.rollback()
+
+    try:
+        error = fuente_en_error_reciente(
+            sesion, identificador, fuente, VENTANA_ERROR_FUENTE_MINUTOS
+        )
+        if error is not None:
+            return {
+                "fuente": fuente,
+                campo_id: identificador,
+                "estado": ESTADO_ERROR_FUENTE,
+                "datos": None,
+                "error": error or "La fuente oficial no respondió tras varios intentos",
+            }
+    except Exception as e:
+        logger.warning("Lectura de cola falló para %s/%s: %r", fuente, identificador, e)
         sesion.rollback()
 
     try:
@@ -123,6 +155,7 @@ async def consultar_judicial(cedula: str, sesion: Session = Depends(obtener_sesi
         "resumen": {
             "fge_consultado": resultado.get("estado") == "consulta_realizada",
             "fge_en_proceso": resultado.get("estado") == ESTADO_EN_PROCESO,
+            "fge_error_fuente": resultado.get("estado") == ESTADO_ERROR_FUENTE,
             "total_denuncias": total,
             "tiene_denuncias": total > 0,
         },
@@ -185,6 +218,8 @@ async def consultar_placa(placa: str, sesion: Session = Depends(obtener_sesion))
             "fge_consultado": resultado_fge.get("estado") == "consulta_realizada",
             "amt_en_proceso": resultado_amt.get("estado") == ESTADO_EN_PROCESO,
             "fge_en_proceso": resultado_fge.get("estado") == ESTADO_EN_PROCESO,
+            "amt_error_fuente": resultado_amt.get("estado") == ESTADO_ERROR_FUENTE,
+            "fge_error_fuente": resultado_fge.get("estado") == ESTADO_ERROR_FUENTE,
             "tiene_citaciones_pendientes_ant": pendientes_ant > 0,
             "total_citaciones_ant": total_citaciones_ant,
             "valor_pendiente_sri": total_sri,
@@ -199,4 +234,45 @@ async def consultar_placa(placa: str, sesion: Session = Depends(obtener_sesion))
             "tiene_denuncias_fge": total_denuncias_fge > 0,
             "estado_general": "con_pendientes" if hay_pendientes else "sin_pendientes",
         },
+    }
+
+
+@router.post("/consultar/{identificador}/reintentar/{fuente}")
+def reintentar_fuente(
+    identificador: str, fuente: str, sesion: Session = Depends(obtener_sesion)
+):
+    """Fuerza un nuevo intento de scraping de una fuente que quedó en `error_fuente`.
+
+    Lo dispara el botón "Reintentar conexión" del frontend. Re-encola el trabajo
+    saltándose la ventana de enfriamiento (un trabajo `error_fuente` no es activo, así
+    que el insert idempotente crea una fila `pendiente` nueva). Solo aplica a las
+    fuentes servidas por el worker híbrido (AMT/FGE); ANT es directo y SRI passthrough.
+    """
+    fuente = fuente.upper()
+    validador = VALIDADOR_FUENTE_WORKER.get(fuente)
+    if validador is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Fuente no reintentable vía worker: {fuente!r}. Válidas: AMT, FGE.",
+        )
+
+    try:
+        identificador_limpio = validador(identificador)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    campo_id = "termino" if fuente == "FGE" else "placa"
+
+    try:
+        encolar_scraping(sesion, identificador_limpio, fuente)
+    except Exception as e:
+        logger.warning("Re-encolado falló para %s/%s: %r", fuente, identificador_limpio, e)
+        sesion.rollback()
+        raise HTTPException(status_code=503, detail="No se pudo reencolar el trabajo")
+
+    return {
+        "fuente": fuente,
+        campo_id: identificador_limpio,
+        "estado": ESTADO_EN_PROCESO,
+        "datos": None,
     }

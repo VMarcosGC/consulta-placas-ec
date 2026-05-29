@@ -40,11 +40,12 @@ Para Fiscalía, `placa` se llama `termino` porque acepta varios identificadores 
 | `error` | Cualquier fallo (timeout, parser, conexión). Incluir `"error": "..."` con `repr(e)`. |
 | `bloqueado_captcha` | reCAPTCHA invisible bloqueó silenciosamente. Caso SRI. |
 | `en_proceso` | La fuente (AMT/FGE) se encoló para el worker híbrido; aún no hay resultado. `datos: null`, sin `error`. No se cachea. El cliente reintenta hasta ver `consulta_realizada`. Ver [arquitectura_hibrida.md](../../../docs/arquitectura_hibrida.md). |
+| `error_fuente` | El worker agotó los reintentos (default 4) en AMT/FGE: la fuente oficial está caída/bloqueando. `datos: null` + `error`. No se cachea (vive en `cola_scraping`). La API lo devuelve durante una ventana de enfriamiento (12h) sin re-encolar; el cliente deja de pollear y ofrece "Reintentar" → `POST /consultar/{identificador}/reintentar/{fuente}`. |
 | `consulta_externa` | La fuente no se scrapea; se expone el servicio oficial. Devuelve `url_consulta` (enlace al portal) y `datos: null`. Caso SRI (reCAPTCHA Enterprise v3 que rechaza solvers; no se puede iframe por `X-Frame-Options`). El frontend muestra un botón al portal. No se cachea. |
 
 ### Reglas
 - `datos` es `null` cuando `estado != "consulta_realizada"`.
-- `error` aparece **solo** cuando `estado == "error"` o `bloqueado_captcha`.
+- `error` aparece **solo** cuando `estado in {"error", "bloqueado_captcha", "error_fuente"}`.
 - `url_consulta` aparece **solo** cuando `estado == "consulta_externa"`.
 - `fuente` es un código corto y estable (`ANT`, `SRI`, `AMT`, `FGE`, etc.). No cambiarlo después.
 - `placa` es la placa **ya normalizada** (mayúsculas, sin guiones).

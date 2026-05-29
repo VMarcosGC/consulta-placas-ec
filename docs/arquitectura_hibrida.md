@@ -84,9 +84,9 @@ Migración Alembic manual sugerida: `0009_cola_scraping.py` (ver convención en
 | `id` | `BigInteger` PK | autoincrement |
 | `identificador` | `String(20)` | placa o cédula (FGE) ya normalizada |
 | `fuente` | `String(10)` | `ANT` · `AMT` · `FGE` |
-| `estado` | `String(20)` | `pendiente` · `en_proceso` · `completado` · `fallido` |
+| `estado` | `String(20)` | `pendiente` · `en_proceso` · `completado` · `error_fuente` (fuente caída tras agotar reintentos) |
 | `intentos` | `Integer` | default `0`, se incrementa en cada toma |
-| `max_intentos` | `Integer` | default `3` |
+| `max_intentos` | `Integer` | default `4` (`MAX_INTENTOS_DEFAULT`) |
 | `error` | `Text` nullable | `repr` del último fallo (diagnóstico) |
 | `disponible_en` | `DateTime(tz)` | momento a partir del cual es elegible (backoff) |
 | `tomado_en` | `DateTime(tz)` nullable | cuándo lo tomó un worker (para detectar zombis) |
@@ -134,19 +134,20 @@ sequenceDiagram
             W->>K: guarda en consultas (consulta_realizada / sin_resultados)
             W->>Q: UPDATE estado='completado'
         else fallo
-            W->>Q: intentos+1; si < max → 'pendiente' con backoff; si no → 'fallido'
+            W->>Q: intentos+1; si < max → 'pendiente' con backoff; si no → 'error_fuente'
         end
     end
 ```
 
-### Nuevo estado de respuesta: `en_proceso`
+### Estados de respuesta del worker: `en_proceso` y `error_fuente`
 
-La API necesita comunicar "lo encolé, todavía no hay dato". Se añade un valor al contrato
-estándar ([respuesta-api-estandar](../.claude/skills/respuesta-api-estandar/SKILL.md) §estado):
+La API necesita comunicar "lo encolé, todavía no hay dato" y "la fuente está caída". Se
+añaden al contrato estándar ([respuesta-api-estandar](../.claude/skills/respuesta-api-estandar/SKILL.md) §estado):
 
 | Estado | Cuándo |
 |---|---|
 | `en_proceso` | La consulta se encoló para el worker; aún no hay resultado. `datos: null`. No se cachea. |
+| `error_fuente` | El worker agotó `max_intentos` (4): la fuente oficial está caída/bloqueando. `datos: null` + `error`. La API lo devuelve durante una ventana de enfriamiento (12h) sin re-encolar; el cliente deja de pollear y puede llamar a `POST /consultar/{identificador}/reintentar/{fuente}`. |
 
 El endpoint sigue devolviendo **200** siempre (una fuente encolada no es un error). El
 `resumen` marca `amt_consultado: false` / `fge_consultado: false` hasta que llegue el dato.
@@ -161,7 +162,8 @@ hasta ver `consulta_realizada`.
 
 - **Reintentos automáticos con backoff exponencial.** En cada fallo: `intentos += 1` y se
   reprograma con `disponible_en = now() + base * 2^intentos` (p. ej. 30s, 60s, 120s).
-  Al agotar `max_intentos` → `estado='fallido'` con el `error` guardado (dead-letter pasivo).
+  Al agotar `max_intentos` (4) → `estado='error_fuente'` con el `error` guardado: no vuelve a
+  la cola (corta el bucle infinito ante una fuente caída) y la API lo expone al cliente.
 - **`FOR UPDATE SKIP LOCKED`**: dos workers nunca toman el mismo trabajo; si uno está
   ocupado, el otro salta a la siguiente fila. Concurrencia segura sin broker.
 - **Recuperación de zombis**: un trabajo `en_proceso` con `tomado_en` más viejo que un

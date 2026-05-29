@@ -11,11 +11,19 @@ from src.core.database import Base
 ESTADO_PENDIENTE = "pendiente"
 ESTADO_EN_PROCESO = "en_proceso"
 ESTADO_COMPLETADO = "completado"
-ESTADO_FALLIDO = "fallido"
+# Estado terminal cuando se agotan los reintentos: la fuente oficial está caída o
+# bloqueando (AMT/FGE). No vuelve a la cola; la API lo expone al cliente como
+# `error_fuente` para que deje de pollear y ofrezca "Reintentar". Reemplaza al antiguo
+# `fallido` (dead-letter pasivo) con un nombre que el frontend entiende directamente.
+ESTADO_ERROR_FUENTE = "error_fuente"
 
 # Estados "vivos": un trabajo en estos estados aún ocupa el cupo de idempotencia
 # (no se puede encolar otro para el mismo identificador+fuente).
 ESTADOS_ACTIVOS = (ESTADO_PENDIENTE, ESTADO_EN_PROCESO)
+
+# Intentos antes de declarar la fuente caída. Gemini/negocio: 4 (AMT/FGE son las
+# únicas fuentes que pasan por la cola; ANT es directo y SRI es passthrough).
+MAX_INTENTOS_DEFAULT = 4
 
 
 class ColaScraping(Base):
@@ -43,8 +51,10 @@ class ColaScraping(Base):
     )
 
     intentos: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Todos los inserts pasan por `encolar_scraping`, que fija este valor explícitamente
+    # (MAX_INTENTOS_DEFAULT). El server_default solo cubre inserts manuales.
     max_intentos: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="3"
+        Integer, nullable=False, server_default=str(MAX_INTENTOS_DEFAULT)
     )
 
     # Contexto opcional del trabajo (forward-compatible). El resultado del scraping

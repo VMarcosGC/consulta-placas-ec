@@ -10,6 +10,44 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-05-29 — Resiliencia worker (`error_fuente`) + caché de doble velocidad
+
+**Rama:** `main`. Instrucciones del round-trip a Gemini (Instrucción 1 y 2; la 3 es del
+frontend, fuera de este repo).
+
+**Instrucción 1 — límite de reintentos + estado `error_fuente` (✅).** Hallazgo: la cola
+**ya** cortaba en `fallido` tras `max_intentos`; el bucle real era **del cliente** (al fallar,
+cache miss → re-encola en cada poll → reintento infinito). Solución en dos piezas:
+- *Worker/cola*: estado terminal renombrado `fallido` → **`error_fuente`** (más claro para el
+  frontend); tope subido a **4** intentos (`MAX_INTENTOS_DEFAULT`, fijado en `encolar_scraping`).
+  Sin migración (ni `cola_scraping.estado` ni `consultas.estado` tienen CHECK).
+- *API*: `consultar_via_worker` lee la cola (`fuente_en_error_reciente`) en cache miss; si el
+  último trabajo quedó `error_fuente` dentro de una **ventana de enfriamiento (12h)**, devuelve
+  `estado: error_fuente` (+`error`) **sin re-encolar**. El cliente deja de pollear.
+- *Reintento manual*: `POST /consultar/{identificador}/reintentar/{fuente}` (AMT/FGE) reencola
+  saltándose el enfriamiento. Resumen de `/consultar` y `/consultar-judicial` agregan
+  `amt_error_fuente` / `fge_error_fuente`.
+
+**Instrucción 2 — caché de doble velocidad (✅, ajustada al AS-IS).** `cache.py` define TTL por
+naturaleza: transaccional **12h** (`CACHE_TTL_TRANSACCIONAL_MINUTOS`) y estático **90 días**
+(`CACHE_TTL_ESTATICO_MINUTOS`). Decisión del usuario: *"la que mejor se ajuste al AS-IS y dé
+espacio para el TO-BE"* → **TTL por fuente** (`ttl_para_fuente`): ANT/AMT/FGE = 12h. Como hoy
+cada fuente es un solo blob y **ANT mezcla** características (estático) + citaciones
+(transaccional), gana la frescura (12h). El TTL de 90 días queda **cableado y reservado** para
+cuando, con clientes reales (TO-BE), el perfil del vehículo se cachee como entrada propia.
+`obtener_consulta_reciente` ahora deriva el TTL de la fuente; el router dejó de pasar
+`CACHE_TTL_MINUTOS` fijo.
+
+**Doc:** AGENTS.md §6 (+estado `error_fuente`) y §8 (TTL doble); skill respuesta-api-estandar;
+docs/arquitectura_hibrida.md (`fallido`→`error_fuente`, max 4); `.env.example` (+2 TTL).
+
+**Pendiente (frontend, repo consulta-placas-web · Instrucción 3):** Skeleton + polling cada 4s
+mientras `*_en_proceso`; al ver `*_error_fuente` detener polling y mostrar botón "Reintentar
+conexión" → `POST /consultar/{identificador}/reintentar/{fuente}`. Tarjeta SRI con botón a
+`url_consulta_sri`.
+
+---
+
 ## 2026-05-29 — Rotación BD + gateo por scope + anti-captcha SRI (2Captcha)
 
 **Rama:** `main` (Fase 0 ya mergeada). Cambios de esta sesión **sin commitear** al cierre.

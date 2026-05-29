@@ -9,7 +9,7 @@ Diseño completo: docs/arquitectura_hibrida.md.
 Características:
 - Toma trabajos con SELECT ... FOR UPDATE SKIP LOCKED → varios workers concurrentes
   sin pisarse, sin broker externo.
-- Reintentos con backoff exponencial; al agotar `max_intentos` → estado `fallido`.
+- Reintentos con backoff exponencial; al agotar `max_intentos` → estado `error_fuente`.
 - Rescate de zombis: trabajos `en_proceso` huérfanos (worker caído) vuelven a la cola.
 - Apagado limpio: termina el trabajo en curso y cierra antes de salir.
 - Manejo exhaustivo de excepciones: ningún trabajo defectuoso tumba el loop.
@@ -42,7 +42,7 @@ from src.modules.consulta.models.cola_scraping import (
     ESTADO_PENDIENTE,
     ESTADO_EN_PROCESO,
     ESTADO_COMPLETADO,
-    ESTADO_FALLIDO,
+    ESTADO_ERROR_FUENTE,
 )
 from src.modules.consulta.services.cache import guardar_consulta, ESTADOS_CACHEABLES
 from src.modules.consulta.services.ant import consultar_ant
@@ -150,13 +150,20 @@ def marcar_completado(trabajo_id: int) -> None:
 
 
 def reprogramar_o_fallar(trabajo: dict, error: str) -> None:
-    """Tras un fallo: reprograma con backoff si quedan intentos; si no, marca fallido."""
+    """Tras un fallo: reprograma con backoff si quedan intentos; si no, error_fuente.
+
+    Al agotar `max_intentos` el trabajo NO vuelve a la cola: queda terminal en
+    `error_fuente` (fuente oficial caída/bloqueando). La API lo lee y se lo informa
+    al cliente para que deje de pollear y ofrezca reintentar manualmente.
+    """
     if trabajo["intentos"] >= trabajo["max_intentos"]:
         logger.warning(
-            "Trabajo %s (%s/%s) agotó reintentos → fallido",
-            trabajo["id"], trabajo["fuente"], trabajo["identificador"],
+            "Trabajo %s (%s/%s) agotó %s intentos → error_fuente",
+            trabajo["id"], trabajo["fuente"], trabajo["identificador"], trabajo["max_intentos"],
         )
-        _actualizar_estado(trabajo["id"], estado=ESTADO_FALLIDO, error=error, disponible_en=None)
+        _actualizar_estado(
+            trabajo["id"], estado=ESTADO_ERROR_FUENTE, error=error, disponible_en=None
+        )
         return
 
     espera = BACKOFF_BASE_SEGUNDOS * (2 ** (trabajo["intentos"] - 1))

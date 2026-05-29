@@ -173,14 +173,16 @@ Toda función `consultar_<fuente>` devuelve:
 {
   "fuente": "ANT|SRI|AMT|FGE",
   "placa": "ABC1234",
-  "estado": "consulta_realizada|error|pendiente_integracion|sin_resultados|bloqueado_captcha|en_proceso|consulta_externa",
+  "estado": "consulta_realizada|error|pendiente_integracion|sin_resultados|bloqueado_captcha|en_proceso|error_fuente|consulta_externa",
   "datos": { ... } | null,
-  "error": "string (solo cuando estado=error o bloqueado_captcha)",
+  "error": "string (solo cuando estado=error, bloqueado_captcha o error_fuente)",
   "url_consulta": "string (solo cuando estado=consulta_externa)"
 }
 ```
 
 `bloqueado_captcha`: la fuente respondió pero la submission fue bloqueada silenciosamente (caso SRI con reCAPTCHA invisible). El servicio detecta el bloqueo porque la respuesta vino vacía sin error técnico.
+
+`error_fuente`: el worker híbrido agotó los reintentos (default 4) consultando AMT/FGE — la fuente oficial está caída o bloqueando. La API lo devuelve durante una ventana de enfriamiento (12h) en vez de re-encolar a ciegas, para que el cliente deje de pollear. El frontend muestra "Reintentar conexión con la fuente", que llama a `POST /consultar/{identificador}/reintentar/{fuente}` y reencola el trabajo. No se cachea en `consultas` (vive solo en `cola_scraping`).
 
 `consulta_externa`: la fuente no se scrapea; se expone el **servicio oficial** para que el usuario consulte el detalle ahí. Devuelve `url_consulta` (enlace al portal) y `datos: null`. **Caso SRI**: usa reCAPTCHA Enterprise v3 (score-based) que rechaza tokens de solvers; en vez de pelearlo, el frontend muestra un botón que abre el portal del SRI (no se puede iframe: `X-Frame-Options: SAMEORIGIN`). El solver (vía A, Capsolver/2Captcha) queda DORMIDO en `_consultar_sri_scraping`. La vía definitiva (B = API oficial SRI) queda pendiente. Ver [docs/bitacora.md](docs/bitacora.md).
 
@@ -215,7 +217,8 @@ ANT, SRI, AMT y Fiscalía (FGE) son sitios públicos que cambian sin aviso. Regl
 
 - **Tolerancia a fallos**: una fuente caída NO debe romper la respuesta global. El endpoint siempre responde 200, marcando la fuente fallida con `estado: error`.
 - **Capturas de debug**: guardar `debug_<fuente>_*.png` en errores de scraping (gitignored).
-- **Caché en BD**: respuestas con `estado in {consulta_realizada, sin_resultados}` se guardan; errores y `bloqueado_captcha` NO se cachean (para reintentar).
+- **Caché en BD**: respuestas con `estado in {consulta_realizada, sin_resultados}` se guardan; errores, `bloqueado_captcha` y `error_fuente` NO se cachean (para reintentar).
+- **TTL de doble velocidad** ([src/modules/consulta/services/cache.py](src/modules/consulta/services/cache.py)): el TTL depende de la naturaleza del dato. Transaccional (multas/citaciones, infracciones, denuncias, valores) → **12h** (`CACHE_TTL_TRANSACCIONAL_MINUTOS`). Estático (características del vehículo) → **90 días** (`CACHE_TTL_ESTATICO_MINUTOS`). AS-IS: hoy cada fuente es un solo blob y ANT mezcla ambos, así que se rige por el TTL transaccional (gana la frescura). El TTL estático queda **reservado** para el TO-BE, cuando el perfil del vehículo se cachee como entrada propia.
 
 ### Limitación 1: SRI bloqueado por reCAPTCHA
 El portal SRI usa **Google reCAPTCHA Enterprise invisible**. Playwright es detectable y la submission falla silenciosamente sin challenge visual. Resultado: `estado: bloqueado_captcha`. Pasa **tanto en local como en cloud**. Workarounds futuros:
