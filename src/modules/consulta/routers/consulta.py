@@ -12,12 +12,16 @@ from src.core.database import obtener_sesion
 from src.core.validators import validar_placa, validar_cedula
 from src.modules.consulta.services.ant import consultar_ant
 from src.modules.consulta.services.sri import consultar_sri
+from src.modules.consulta.services.consultasecuador import consultar_consultasecuador
+from src.modules.consulta.services.ecuadorlegalonline import consultar_ecuadorlegalonline
 from src.modules.consulta.services.cache import (
     obtener_consulta_reciente,
     guardar_consulta,
     TTL_TRANSACCIONAL_MINUTOS,
 )
 from src.modules.consulta.services.cola import encolar_scraping, fuente_en_error_reciente
+from src.modules.consulta.services.consolidador import consolidar_placa
+from src.modules.consulta.schemas import VehiculoConsolidadoResponse
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +35,18 @@ ESTADO_ERROR_FUENTE = "error_fuente"
 VENTANA_ERROR_FUENTE_MINUTOS = TTL_TRANSACCIONAL_MINUTOS
 
 # Fuentes servidas por el worker híbrido (las únicas reintentables).
-FUENTES_WORKER = {"AMT", "FGE"}
+FUENTES_WORKER = {"AMT", "EPMTSD", "FGE"}
 
 
 def _normalizar_identificador_worker(fuente: str, identificador: str) -> str:
     """Normaliza el identificador según la fuente, lanzando ValueError si es inválido.
 
-    AMT siempre va por placa. FGE acepta placa **o** cédula porque su `termino` depende
-    del flujo de origen: `/consultar/{placa}` lo encola con la placa; `/consultar-judicial/{cedula}`
-    con la cédula. El reintento debe aceptar el mismo identificador con que se encoló.
+    AMT y EPMTSD siempre van por placa. FGE acepta placa **o** cédula porque su `termino`
+    depende del flujo de origen: `/consultar/{placa}` lo encola con la placa;
+    `/consultar-judicial/{cedula}` con la cédula. El reintento debe aceptar el mismo
+    identificador con que se encoló.
     """
-    if fuente == "AMT":
+    if fuente in ("AMT", "EPMTSD"):
         return validar_placa(identificador)
     # FGE
     try:
@@ -179,6 +184,57 @@ async def consultar_judicial(cedula: str, sesion: Session = Depends(obtener_sesi
     }
 
 
+async def _obtener_fuentes_placa(sesion: Session, placa_limpia: str) -> dict:
+    """Obtiene las 4 respuestas por-fuente para una placa (sin construir resumen).
+
+    Compartido por `/consultar/{placa}` (vista por fuente) y
+    `/consultar/{placa}/perfil` (vista consolidada) para no duplicar la orquestación:
+    ANT cacheado, SRI passthrough, AMT/FGE vía worker híbrido.
+    """
+    resultado_ant = await consultar_con_cache(sesion, placa_limpia, "ANT", consultar_ant)
+    # SRI: passthrough instantáneo al portal oficial (no se scrapea por el reCAPTCHA
+    # Enterprise v3; devuelve url_consulta para que el usuario consulte ahí).
+    resultado_sri = await consultar_sri(placa_limpia)
+    # AMT y FGE se sirven vía worker híbrido (encolado + en_proceso), no Playwright.
+    resultado_amt = consultar_via_worker(sesion, placa_limpia, "AMT")
+    # EPMTSD: mismo portal AxisCloud que AMT (Santo Domingo) → también vía worker.
+    resultado_epmtsd = consultar_via_worker(sesion, placa_limpia, "EPMTSD")
+    resultado_fge = consultar_via_worker(sesion, placa_limpia, "FGE", campo_id="termino")
+    # ConsultasEcuador (no oficial): passthrough instantáneo a su portal (consulta_externa),
+    # igual que SRI; tras reCAPTCHA, no se scrapea (ver consultasecuador.py).
+    resultado_consultasec = await consultar_consultasecuador(placa_limpia)
+    # EcuadorLegalOnline (no oficial): también consulta_externa (guía con paywall/reCAPTCHA).
+    resultado_eclegal = await consultar_ecuadorlegalonline(placa_limpia)
+    # Keyed por la clave del catálogo — así el consolidador arma `estado_fuentes`
+    # desde el catálogo y las fuentes nuevas se suman aquí sin tocar nada más.
+    return {
+        "ANT": resultado_ant,
+        "SRI": resultado_sri,
+        "AMT": resultado_amt,
+        "EPMTSD": resultado_epmtsd,
+        "FGE": resultado_fge,
+        "ConsultasEcuador": resultado_consultasec,
+        "EcuadorLegalOnline": resultado_eclegal,
+    }
+
+
+@router.get("/consultar/{placa}/perfil", response_model=VehiculoConsolidadoResponse)
+async def consultar_perfil(placa: str, sesion: Session = Depends(obtener_sesion)):
+    """Perfil consolidado del vehículo: agrega las fuentes en secciones temáticas.
+
+    Misma orquestación que `/consultar/{placa}` pero orientada a la entidad
+    (datos básicos, multas, novedades, valores) en vez de a cada proveedor. El
+    bloque `estado_fuentes` permite al frontend pollear mientras AMT/FGE cargan.
+    """
+    try:
+        placa_limpia = validar_placa(placa)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
+    return consolidar_placa(placa_limpia, fuentes)
+
+
 @router.get("/consultar/{placa}")
 async def consultar_placa(placa: str, sesion: Session = Depends(obtener_sesion)):
     try:
@@ -186,13 +242,11 @@ async def consultar_placa(placa: str, sesion: Session = Depends(obtener_sesion))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    resultado_ant = await consultar_con_cache(sesion, placa_limpia, "ANT", consultar_ant)
-    # SRI: passthrough instantáneo al portal oficial (no se scrapea por el reCAPTCHA
-    # Enterprise v3; devuelve url_consulta para que el usuario consulte ahí).
-    resultado_sri = await consultar_sri(placa_limpia)
-    # AMT y FGE se sirven vía worker híbrido (encolado + en_proceso), no Playwright.
-    resultado_amt = consultar_via_worker(sesion, placa_limpia, "AMT")
-    resultado_fge = consultar_via_worker(sesion, placa_limpia, "FGE", campo_id="termino")
+    fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
+    resultado_ant = fuentes["ANT"]
+    resultado_sri = fuentes["SRI"]
+    resultado_amt = fuentes["AMT"]
+    resultado_fge = fuentes["FGE"]
 
     datos_ant = resultado_ant.get("datos") or {}
     citaciones_ant = datos_ant.get("citaciones") or {}

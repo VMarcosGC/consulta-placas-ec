@@ -47,6 +47,7 @@ from src.modules.consulta.models.cola_scraping import (
 from src.modules.consulta.services.cache import guardar_consulta, ESTADOS_CACHEABLES
 from src.modules.consulta.services.ant import consultar_ant
 from src.modules.consulta.services.amt import consultar_amt
+from src.modules.consulta.services.epmtsd import consultar_epmtsd
 from src.modules.consulta.services.fiscalia import consultar_fiscalia
 from src.modules.consulta.services.sri import consultar_sri
 
@@ -84,6 +85,7 @@ BACKOFF_SEGUNDOS = _leer_backoff()
 CONSULTORES = {
     "ANT": consultar_ant,
     "AMT": consultar_amt,
+    "EPMTSD": consultar_epmtsd,
     "FGE": consultar_fiscalia,
     "SRI": consultar_sri,
 }

@@ -10,6 +10,96 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-05-29 — Integración de las 3 fuentes restantes + rebranding "Revisa tu Carro EC" + rediseño claro
+
+**Rama:** `main`. Continuación del pivote a Perfil Consolidado.
+
+**Backend — `estado_fuentes` catálogo-driven + 3 fuentes nuevas (una por una, con descubrimiento §14)**
+- `consolidador.py`: `consolidar_placa(placa, resultados: dict[str,dict])` arma `estado_fuentes`
+  recorriendo `CATALOGO_FUENTES` (implementadas = estado vivo; resto = `no_integrada`). Sumar
+  fuente = catálogo + scraper + ruteo, sin tocar el consolidador. `_obtener_fuentes_placa` ahora
+  devuelve dict keyed por clave.
+- **EPMTSD** (oficial, multas): descubrimiento reveló que su portal corre sobre la **misma
+  plataforma AxisCloud que AMT** (`ps_empresa=06` vs `03`). Se extrajo el adaptador compartido
+  `services/_axiscloud.py` (flujo Playwright + parser de infracciones); `amt.py` y `epmtsd.py`
+  quedaron como wrappers delgados. Vía worker híbrido (mismo gotcha de IP datacenter que AMT).
+  Verificado en vivo (`consulta_realizada`); AMT re-verificado sin regresión.
+- **ConsultasEcuador** (no oficial, chasis/motor): descubrimiento mostró que es página de
+  afiliado (widget Bumper) tras **reCAPTCHA** — no scrapeable. Se integró como `consulta_externa`
+  (enlace + disclaimer no oficial), sin scraping. Mismo criterio que SRI.
+- **EcuadorLegalOnline** (no oficial): sitio de guías con ad-gate/reCAPTCHA y dato de propietario
+  de pago (PII). También `consulta_externa` (enlace + disclaimer). Las 7 fuentes quedan
+  `implementada=True`.
+- Reintento (`FUENTES_WORKER`) ahora incluye EPMTSD; `worker.py CONSULTORES` también.
+
+**Frontend (repo consulta-placas-web)**
+- `PerfilVehiculo.tsx`: sección **Identificación** (chasis/motor ofuscados + enlace externo de
+  ConsultasEcuador), marcadores **ⓘ no oficial** + disclaimer por ítem, chips del tablero
+  clicables cuando son `consulta_externa`.
+- **Rebranding** a **"Revisa tu Carro EC"** (antes ConsultaPlacas): nombre evita la ambigüedad de
+  "seguro" (póliza); monograma RC. Aplicado en layout/Header/Footer/metadata y páginas.
+- **Rediseño visual "Confianza clara"**: de tema oscuro neón (violeta-rosa-ámbar) a **tema claro**
+  (fondo #f6f8fc), gradiente de marca **azul→cian**, estados verde/ámbar/rojo, sombras suaves.
+  Decidido con el usuario: base clara + azul confianza, prioridad "atracción/que enganche".
+  Convertidas TODAS las pantallas (landing, consulta, resultado, login, registro, precios,
+  mi-garage, header, footer, inputs). `tsc` + `eslint` limpios; sin tokens `zinc-` restantes.
+
+**Pendiente**
+- **Imágenes referenciales del vehículo**: discutido (no hay foto del auto real por placa; opción
+  recomendada: híbrido render-por-modelo + ilustración por clase, con sello "referencial").
+  Pospuesto por decisión del usuario.
+- Licencia de CDN de imágenes si se va por render (imagin.studio u otro).
+- Deploy: el frontend en Vercel apunta a prod (Render), que necesita el deploy con los nuevos
+  endpoints (`/perfil`, fuentes) antes de que el front los consuma.
+
+---
+
+## 2026-05-29 — Pivote a "Perfil Consolidado de Vehículo" (catálogo + schema + endpoint + frontend)
+
+**Rama:** `main`. Plan de 3 pasos (catálogo → schema consolidado → frontend) + avance del
+endpoint consolidado.
+
+**Qué se hizo**
+- **Paso 1 — Catálogo de fuentes:** nuevo `src/modules/consulta/services/catalogo_fuentes.py`,
+  capa **estática** (no toca scraping). Enums `Prioridad`/`Origen`/`CategoriaDato`, dataclass
+  `FuenteCatalogo` y `CATALOGO_FUENTES` con 7 fuentes (ANT, SRI, AMT, FGE oficiales/implementadas;
+  EPMTSD, ConsultasEcuador, EcuadorLegalOnline pendientes). Helpers `fuentes_por_categoria`,
+  `fuentes_implementadas`.
+- **Paso 2 — Schema consolidado:** nuevo `src/modules/consulta/schemas.py` con
+  `VehiculoConsolidadoResponse` (secciones `datos_basicos`, `identificacion` ofuscada,
+  `valores_tributarios`, `multas_pendientes`, `novedades_legales`) + bloque `estado_fuentes`
+  (enum `EstadoFuente` + `desde_estado_servicio`). Listas con `default_factory` para no romper
+  con fuentes `en_proceso`.
+- **Avance — agregación server-side:** nuevo `services/consolidador.py` (`consolidar_placa`) que
+  mapea los dicts crudos por-fuente → `VehiculoConsolidadoResponse`. Router refactorizado: helper
+  compartido `_obtener_fuentes_placa` y nuevo endpoint **`GET /consultar/{placa}/perfil`**
+  (`response_model=VehiculoConsolidadoResponse`). El endpoint legacy `/consultar/{placa}` (vista
+  por fuente) se conserva.
+- **Paso 3 — Frontend (repo consulta-placas-web):** nuevo `PerfilVehiculo.tsx` orientado a la
+  entidad (tarjeta del auto + secciones Valores/Multas/Legal, skeletons mientras AMT/FGE cargan,
+  tablero de chips de fuentes con ⓘ para no oficiales). Migrado a consumir `/perfil` directo:
+  `consultarPerfil` en `api.ts`, `page.tsx` fetchea el endpoint consolidado, `consolidar.ts`
+  reducido a helpers de lectura (`hayFuentesEnProceso`, `estadoDeFuente`, `marcarFuenteEnProceso`).
+  Eliminado `ResultadoConsulta.tsx` (huérfano).
+
+**code-review (high) — 2 bugs corregidos**
+- Infracciones AMT **pagadas/anuladas** se contaban como pendientes (se volcaba todo `categorias`);
+  corregido a un ítem basado en `infracciones.pendientes` + `total_a_pagar`.
+- Tarjeta principal daba veredicto "Sin pendientes" prematuro mientras AMT/FGE cargaban; ahora
+  muestra estado neutral "Consultando…" si hay fuentes `en_proceso`.
+
+**Verificación**
+- Backend: `import main` registra `/consultar/{placa}/perfil`; `consolidar_placa` produce el JSON
+  esperado con fuentes mixtas (completada/consulta_externa/en_proceso/error_fuente).
+- Frontend: `tsc --noEmit` y `eslint` en verde.
+
+**Pendientes**
+- `identificacion` (chasis/motor) queda preparada pero vacía hasta integrar fuentes no oficiales
+  (ConsultasEcuador) — recién ahí se cablea ofuscación en la vista.
+- El gateo de secciones por scope del token de compra-venta sigue pendiente (heredado Fase 4).
+
+---
+
 ## 2026-05-29 — Resiliencia worker (`error_fuente`) + caché de doble velocidad
 
 **Rama:** `main`. Instrucciones del round-trip a Gemini (Instrucción 1 y 2; la 3 es del
