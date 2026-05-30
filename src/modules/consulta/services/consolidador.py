@@ -9,10 +9,12 @@ No scrapea ni toca la BD: solo transforma dicts ya obtenidos por el router.
 from __future__ import annotations
 
 from src.modules.consulta.schemas import (
+    CategoriaMulta,
     DatosBasicos,
     EstadoFuente,
     EstadoFuenteItem,
     Identificacion,
+    MultaDetalle,
     MultaItem,
     NovedadLegal,
     ValoresTributarios,
@@ -87,6 +89,8 @@ def consolidar_placa(
         color=ant_veh.get("color"),
         clase=ant_veh.get("clase"),
         servicio=ant_veh.get("servicio"),
+        fecha_matricula=ant_veh.get("fecha_matricula"),
+        fecha_caducidad=ant_veh.get("fecha_caducidad"),
         pais_origen=sri_veh.get("pais"),
     )
 
@@ -133,6 +137,61 @@ def consolidar_placa(
                 )
             )
 
+    # Detalle por fuente (desglose completo) para la vista. No repite datos del
+    # vehículo: solo el conteo de citaciones/infracciones por estado.
+    _ETIQUETAS = {
+        "pendientes": "Pendientes",
+        "pagadas": "Pagadas",
+        "anuladas": "Anuladas",
+        "en_convenio": "En convenio",
+        "en_coactiva": "En coactiva",
+        "en_impugnacion": "En impugnación",
+    }
+    multas_detalle: list[MultaDetalle] = []
+
+    # ANT: citaciones de tránsito (conteos por estado; ANT no informa montos).
+    if citaciones_ant:
+        cats_ant = [
+            CategoriaMulta(etiqueta=_ETIQUETAS.get(k, k), cantidad=citaciones_ant.get(k, 0) or 0)
+            for k in ("pendientes", "en_impugnacion", "anuladas", "pagadas", "en_convenio")
+        ]
+        multas_detalle.append(
+            MultaDetalle(
+                fuente="ANT",
+                ambito="Nacional (ANT)",
+                total_registros=citaciones_ant.get("total_registros", 0) or 0,
+                pendientes=pendientes_ant,
+                total_a_pagar_usd=None,
+                categorias=[c for c in cats_ant if c.cantidad > 0],
+            )
+        )
+
+    # AMT (Quito) y EPMTSD (Santo Domingo): infracciones con conteo + monto por categoría.
+    _AMBITO = {"AMT": "Quito (AMT)", "EPMTSD": "Santo Domingo (EPMTSD)"}
+    for clave in ("AMT", "EPMTSD"):
+        infr = (resultados.get(clave, {}).get("datos") or {}).get("infracciones") or {}
+        if not infr:
+            continue
+        cats = [
+            CategoriaMulta(
+                etiqueta=_ETIQUETAS.get(k, k.replace("_", " ").capitalize()),
+                cantidad=v.get("cantidad", 0) or 0,
+                monto_usd=v.get("monto"),
+            )
+            for k, v in (infr.get("categorias") or {}).items()
+            if (v.get("cantidad", 0) or 0) > 0
+        ]
+        multas_detalle.append(
+            MultaDetalle(
+                fuente=clave,
+                ambito=_AMBITO[clave],
+                total_registros=infr.get("total_registros", 0) or 0,
+                pendientes=infr.get("pendientes", 0) or 0,
+                total_a_pagar_usd=infr.get("total_a_pagar") or None,
+                categorias=cats,
+            )
+        )
+
     # Novedades legales: noticias del delito de FGE.
     detalle_fge = ((fge.get("datos") or {}).get("denuncias") or {}).get("detalle") or []
     novedades_legales = [
@@ -160,6 +219,7 @@ def consolidar_placa(
         identificacion=identificacion,
         valores_tributarios=valores_tributarios,
         multas_pendientes=multas_pendientes,
+        multas_detalle=multas_detalle,
         novedades_legales=novedades_legales,
         estado_fuentes=estado_fuentes,
     )

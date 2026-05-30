@@ -75,6 +75,8 @@ class DatosBasicos(BaseModel):
     color: str | None = None
     clase: str | None = None
     servicio: str | None = None
+    fecha_matricula: str | None = None
+    fecha_caducidad: str | None = Field(None, description="Vencimiento de la matrícula")
     pais_origen: str | None = None
 
 
@@ -88,13 +90,32 @@ class Identificacion(BaseModel):
 
 
 class MultaItem(BaseModel):
-    """Multa/citación/infracción combinada de las fuentes de tránsito."""
+    """Multa/citación/infracción combinada de las fuentes de tránsito (resumen)."""
 
     fuente: str = Field(..., description="Origen del registro (ANT, AMT, EPMTSD)")
     concepto: str | None = Field(None, description="Descripción o categoría de la multa")
     valor_usd: float | None = None
     estado: str | None = Field(None, description="pendiente, pagada, en_impugnacion, …")
     fecha: str | None = None
+
+
+class CategoriaMulta(BaseModel):
+    """Desglose de citaciones/infracciones por estado (pendientes, pagadas, …)."""
+
+    etiqueta: str
+    cantidad: int = 0
+    monto_usd: float | None = Field(None, description="None cuando la fuente no informa monto (ANT)")
+
+
+class MultaDetalle(BaseModel):
+    """Detalle por fuente de tránsito: total, pendientes y desglose por categoría."""
+
+    fuente: str = Field(..., description="ANT, AMT o EPMTSD")
+    ambito: str = Field(..., description="Cobertura legible: Nacional, Quito, Santo Domingo")
+    total_registros: int = 0
+    pendientes: int = 0
+    total_a_pagar_usd: float | None = None
+    categorias: list[CategoriaMulta] = Field(default_factory=list)
 
 
 class NovedadLegal(BaseModel):
@@ -131,6 +152,9 @@ class VehiculoConsolidadoResponse(BaseModel):
     identificacion: Identificacion = Field(default_factory=Identificacion)
     valores_tributarios: ValoresTributarios | None = None
     multas_pendientes: list[MultaItem] = Field(default_factory=list)
+    multas_detalle: list[MultaDetalle] = Field(
+        default_factory=list, description="Desglose por fuente (ANT/AMT/EPMTSD) con categorías"
+    )
     novedades_legales: list[NovedadLegal] = Field(default_factory=list)
     estado_fuentes: list[EstadoFuenteItem] = Field(default_factory=list)
 
