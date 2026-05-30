@@ -21,6 +21,8 @@ import re
 
 from playwright.async_api import async_playwright
 
+from src.core.proxy_apify import proxy_playwright
+
 
 def url_axiscloud(ps_empresa: str) -> str:
     return (
@@ -127,7 +129,10 @@ async def consultar_axiscloud(ps_empresa: str, fuente: str, placa: str) -> dict:
 
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            # Proxy residencial EC (Apify) si está configurado: permite scrapear el
+            # portal AxisCloud (AMT/EPMTSD) desde la nube, donde la IP de datacenter
+            # está bloqueada. Sin config → launch directo (comportamiento actual).
+            browser = await p.chromium.launch(headless=True, proxy=proxy_playwright())
             page = await browser.new_page()
 
             # Timeouts cortos (15s) para no dejar al usuario esperando en el frontend:

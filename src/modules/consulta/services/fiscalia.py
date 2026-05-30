@@ -18,6 +18,8 @@ el portal no distingue: pasa lo que tengas y devuelve denuncias asociadas.
 import re
 from playwright.async_api import async_playwright
 
+from src.core.proxy_apify import proxy_playwright
+
 
 URL_FGE = (
     "https://www.gestiondefiscalias.gob.ec/siaf/informacion/web/"
@@ -110,7 +112,9 @@ async def consultar_fiscalia(termino: str) -> dict:
 
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            # Proxy residencial EC (Apify) si está configurado: permite scrapear FGE
+            # desde la nube (datacenter bloqueado). Sin config → launch directo.
+            browser = await p.chromium.launch(headless=True, proxy=proxy_playwright())
             ctx = await browser.new_context(user_agent=USER_AGENT_REAL)
             page = await ctx.new_page()
             # Timeouts cortos (15s) para no dejar al usuario esperando en el frontend:
