@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -122,19 +123,21 @@ class ApifyExtractor:
 
         for intento in range(1, self._max_reintentos + 1):
             try:
-                # `.call()` (async) dispara el Actor y espera a que termine, con tope.
+                # `.call()` (async) dispara el Actor y espera a que termine. `run_timeout`
+                # (timedelta) acota cuánto puede correr el Actor (apify-client v3).
                 run = await cliente.actor(self._actor_id).call(
                     run_input=run_input,
-                    timeout_secs=self._actor_timeout_segundos,
+                    run_timeout=timedelta(seconds=self._actor_timeout_segundos),
                 )
 
-                if not run or run.get("status") != "SUCCEEDED":
+                # `Run` es un modelo pydantic (apify-client v3): atributos, no dict.
+                if run is None or run.status != "SUCCEEDED":
+                    estado = run.status if run is not None else "sin run"
                     raise ApifyExtractorError(
-                        f"Actor {self._actor_id} no terminó OK "
-                        f"(status={run.get('status') if run else 'sin run'})"
+                        f"Actor {self._actor_id} no terminó OK (status={estado})"
                     )
 
-                dataset_id = run.get("defaultDatasetId")
+                dataset_id = run.default_dataset_id
                 if not dataset_id:
                     raise ApifyExtractorError("La corrida del Actor no devolvió dataset.")
 
@@ -149,6 +152,12 @@ class ApifyExtractor:
             except ApifyExtractorError:
                 # Errores "de negocio" del extractor: no reintentar a ciegas, propagar.
                 raise
+            except (TypeError, AttributeError) as e:
+                # Error de programación / contrato de la librería: NO reintentar
+                # (cada reintento gasta una corrida del Actor).
+                raise ApifyExtractorError(
+                    f"Error de integración con apify-client: {e!r}"
+                ) from e
             except Exception as e:  # ApifyApiError, timeouts, red: transitorios
                 ultimo_error = e
                 logger.warning(
