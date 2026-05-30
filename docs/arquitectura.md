@@ -13,53 +13,69 @@ Vista de alto nivel: actores, componentes y fuentes externas.
 ```mermaid
 graph TD
     Usuario[Usuario]
-    Web[Next.js<br/><i>Vercel free</i>]:::wip
+    Web[Next.js · "Revisa tu Carro EC"<br/>tema claro · <i>Vercel free</i>]:::wip
 
     API[FastAPI<br/>main.py + routers/<br/><i>Render free</i>]
+    Consol[Consolidador<br/>catalogo_fuentes + consolidador.py<br/>arma VehiculoConsolidadoResponse]
     Cache[(PostgreSQL<br/>Neon)]
-    ANT[Servicio ANT<br/>src/modules/consulta/services/ant.py]
-    SRI[Servicio SRI<br/>src/modules/consulta/services/sri.py<br/><i>bloqueado_captcha</i>]:::limitado
-    AMT[Servicio AMT<br/>src/modules/consulta/services/amt.py]
-    FGE[Servicio Fiscalía<br/>src/modules/consulta/services/fiscalia.py]
-    OCR[Servicio OCR<br/>src/modules/consulta/services/vision.py]
+    ANT[Servicio ANT<br/>services/ant.py]
+    SRI[Servicio SRI<br/>services/sri.py<br/><i>consulta_externa</i>]:::limitado
+    AXIS[Adaptador AxisCloud<br/>services/_axiscloud.py]
+    AMT[Servicio AMT<br/>services/amt.py · ps_empresa=03]
+    EPMTSD[Servicio EPMTSD<br/>services/epmtsd.py · ps_empresa=06]
+    FGE[Servicio Fiscalía<br/>services/fiscalia.py]
+    NoOf[ConsultasEcuador + EcuadorLegalOnline<br/>NO oficiales · <i>consulta_externa</i>]:::limitado
+    OCR[Servicio OCR<br/>services/vision.py]
 
     Worker[worker.py · IP residencial<br/>pull-only]
     Cola[(cola_scraping<br/>Neon)]
 
     ANTWeb[(consultaweb.ant.gob.ec)]
     SRIWeb[(srienlinea.sri.gob.ec)]
-    AMTWeb[(servicios.axiscloud.ec<br/>portal AXIS - AMT)]
+    AXISWeb[(servicios.axiscloud.ec<br/>portal AXIS · AMT=03 / EPMTSD=06)]
     FGEWeb[(gestiondefiscalias.gob.ec<br/>SIAF Noticias del Delito)]
     VisionWeb[(vision.googleapis.com<br/>Cloud Vision TEXT_DETECTION)]
 
     Usuario --> Web
-    Usuario -->|/consultar/&#123;placa&#125; · ANT+SRI+AMT+FGE| API
+    Usuario -->|/consultar/&#123;placa&#125;/perfil · 7 fuentes consolidadas| API
+    Usuario -->|/consultar/&#123;placa&#125; · vista por fuente (legacy)| API
     Usuario -->|/consultar-judicial/&#123;cedula&#125; · FGE| API
     Usuario -->|/consultar-foto · foto → OCR → consulta| API
-    Usuario -->|/auth/* · /vehiculos/* · duenos · kilometraje<br/>mantenimientos · /tokens · /favoritos · /compartir| API
-    Usuario -->|/marketplace · /compartido/&#123;token&#125; · público| API
-    Web -.->|fetch + JWT Bearer<br/>CORS| API
+    Usuario -->|/auth/* · /vehiculos/* · /tokens · /favoritos · /marketplace · /compartido| API
+    Web -.->|fetch + JWT Bearer · CORS| API
 
+    API --> Consol
     API --> Cache
-    API --> ANT
-    API --> SRI
+    Consol --> ANT
+    Consol --> SRI
+    Consol --> NoOf
     API --> OCR
-    API -->|cache miss AMT/FGE · encola| Cola
+    Consol -->|cache miss AMT/EPMTSD/FGE · encola| Cola
 
     ANT -->|Playwright| ANTWeb
-    SRI -->|Playwright| SRIWeb
+    SRI -.->|passthrough · enlace portal| SRIWeb
+    NoOf -.->|enlace portal · reCAPTCHA/afiliado| ANTWeb
     OCR -->|REST + API key| VisionWeb
 
     Worker -->|poll FOR UPDATE SKIP LOCKED| Cola
     Worker -->|ejecuta · IP residencial| AMT
+    Worker -->|ejecuta · IP residencial| EPMTSD
     Worker -->|ejecuta · IP residencial| FGE
-    AMT -->|Playwright| AMTWeb
+    AMT --> AXIS
+    EPMTSD --> AXIS
+    AXIS -->|Playwright| AXISWeb
     FGE -->|Playwright| FGEWeb
     Worker -->|guarda en consultas| Cache
 
     classDef wip stroke-dasharray: 5 5, stroke:#d97706, color:#d97706;
     classDef limitado stroke:#dc2626, color:#dc2626;
 ```
+
+> **7 fuentes (catálogo-driven, `services/catalogo_fuentes.py`)**: ANT (oficial, directa),
+> AMT y EPMTSD (oficiales, plataforma AxisCloud compartida vía `_axiscloud.py`, worker híbrido),
+> FGE (oficial, worker), SRI + ConsultasEcuador + EcuadorLegalOnline (`consulta_externa`: enlace al
+> portal, no se scrapean por reCAPTCHA/afiliado/paywall). El consolidador arma `estado_fuentes`
+> recorriendo el catálogo; sumar una fuente no toca el consolidador.
 
 ---
 
@@ -112,9 +128,15 @@ sequenceDiagram
 
 Secuencia con el caché ya integrado.
 
-> **Nota (worker híbrido):** el flujo síncrono de abajo aplica a **ANT y SRI**. Desde el
-> cableado del worker, **AMT y FGE** no se scrapean en la API: en cache miss se encolan en
-> `cola_scraping` y la fuente devuelve `estado: en_proceso` (`datos: null`), dentro del mismo
+> **Nota (perfil consolidado):** la vista AS-IS del frontend usa
+> `GET /consultar/{placa}/perfil`, que corre la misma orquestación y devuelve un
+> `VehiculoConsolidadoResponse` (secciones temáticas + `estado_fuentes`). El endpoint
+> `/consultar/{placa}` (vista por fuente, abajo) se conserva.
+>
+> **Nota (worker híbrido):** el flujo síncrono aplica a **ANT** (directa) y a las fuentes
+> `consulta_externa` (**SRI**, **ConsultasEcuador**, **EcuadorLegalOnline**: passthrough con
+> enlace, sin scraping). **AMT, EPMTSD y FGE** no se scrapean en la API: en cache miss se encolan
+> en `cola_scraping` y la fuente devuelve `estado: en_proceso` (`datos: null`) dentro del mismo
 > 200. El worker (IP residencial) las procesa y llena `consultas`; el cliente reintenta.
 > Ver [arquitectura_hibrida.md](arquitectura_hibrida.md).
 

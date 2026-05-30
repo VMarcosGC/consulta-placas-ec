@@ -140,9 +140,19 @@ No saltar fases. Cada una asume las anteriores estables. Las reglas de negocio i
 - **Deploy**: Docker (imagen `mcr.microsoft.com/playwright/python:v1.48.0-jammy`) en Render.
 
 ### Frontend (repo `consulta-placas-web`)
+- **Marca**: **"Revisa tu Carro EC"** (monograma RC). Rebranding desde "ConsultaPlacas" (2026-05-29).
+  Se descartó "Carro Seguro EC" por su ambigüedad con seguro/póliza.
 - **Framework**: Next.js 16 (App Router, Turbopack, RSC).
 - **UI**: React 19 + Tailwind CSS 4 (theme inline con `@theme`).
-- **Tono visual**: moderno joven — theme dark, gradient `violet-500 → pink-500 → amber-500`.
+- **Tono visual**: **"Confianza clara"** — **tema claro** (fondo `#f6f8fc`), gradiente de marca
+  **azul → cian** (`--color-brand-from #2563eb → via #0ea5e9 → to #06b6d4`, en `src/app/globals.css`),
+  estados verde="al día" / ámbar / rojo="pendiente", sombras suaves (`.sombra-tarjeta`), glow
+  azul del hero (`.hero-glow`). Objetivo: serio y confiable pero atractivo, legible en celulares de
+  gama baja, pensado para público de clase media-baja. (Antes era tema oscuro neón violeta-rosa-ámbar.)
+- **Vista de resultados**: `PerfilVehiculo.tsx` consume el **perfil consolidado** del backend
+  (`GET /consultar/{placa}/perfil` → `VehiculoConsolidadoResponse`) y lo pinta por secciones
+  temáticas (Identificación, Valores, Multas, Legal). Las fuentes no oficiales se marcan con
+  **ⓘ + disclaimer**. El frontend ya **no transforma**: solo lee y pinta (helpers en `src/lib/consolidar.ts`).
 - **Cliente HTTP**: `fetch` nativo en wrapper tipado (`src/lib/api.ts`).
 - **Auth**: JWT en `localStorage` (sin SSR para páginas privadas).
 - **Deploy**: Vercel free.
