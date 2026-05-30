@@ -139,6 +139,74 @@ async def resolver_recaptcha(
         )
 
 
+async def resolver_hcaptcha(
+    *,
+    sitekey: str,
+    pageurl: str,
+    user_agent: str | None = None,
+    timeout_total_s: int = TIMEOUT_TOTAL_S,
+    intervalo_poll_s: int = INTERVALO_POLL_S,
+) -> str:
+    """Resuelve un **hCaptcha** vía 2Captcha y devuelve el token (`h-captcha-response`).
+
+    Caso FGE: el portal SIAF quedó tras WAF Imperva/Incapsula que sirve un hCaptcha
+    (sitekey extraído de la página, NO hardcodeado). El token se inyecta luego en los
+    textareas `h-captcha-response`/`g-recaptcha-response` y se dispara el callback para
+    que Incapsula valide y libere el acceso.
+
+    Raises: CaptchaNoConfigurado, CaptchaSinSaldo, CaptchaTimeout, CaptchaError.
+    """
+    api_key = os.getenv(API_KEY_ENV)
+    if not api_key:
+        raise CaptchaNoConfigurado(
+            f"Falta {API_KEY_ENV} en el entorno; solver de captcha deshabilitado."
+        )
+
+    payload = {
+        "key": api_key,
+        "method": "hcaptcha",
+        "sitekey": sitekey,
+        "pageurl": pageurl,
+        "json": 1,
+    }
+    if user_agent:
+        payload["userAgent"] = user_agent
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            r = await client.post(f"{BASE_URL}/in.php", data=payload)
+            inicio = r.json()
+        except (httpx.HTTPError, ValueError) as e:
+            raise CaptchaError(f"No se pudo contactar a 2Captcha (in.php): {e!r}")
+
+        if inicio.get("status") != 1:
+            _mapear_error(inicio.get("request", "ERROR_DESCONOCIDO"))
+        captcha_id = inicio["request"]
+
+        loop = asyncio.get_event_loop()
+        limite = loop.time() + timeout_total_s
+        while loop.time() < limite:
+            await asyncio.sleep(intervalo_poll_s)
+            try:
+                rr = await client.get(
+                    f"{BASE_URL}/res.php",
+                    params={"key": api_key, "action": "get", "id": captcha_id, "json": 1},
+                )
+                estado = rr.json()
+            except (httpx.HTTPError, ValueError) as e:
+                raise CaptchaError(f"No se pudo contactar a 2Captcha (res.php): {e!r}")
+
+            if estado.get("status") == 1:
+                return estado["request"]
+            if estado.get("request") == "CAPCHA_NOT_READY":
+                continue
+            _mapear_error(estado.get("request", "ERROR_DESCONOCIDO"))
+
+        raise CaptchaTimeout(
+            f"2Captcha no resolvió el hCaptcha en {timeout_total_s}s (id={captcha_id})."
+        )
+
+
 def _mapear_error(codigo: str) -> None:
     """Traduce el código de error de 2Captcha a una excepción del módulo."""
     if codigo == "ERROR_ZERO_BALANCE":
