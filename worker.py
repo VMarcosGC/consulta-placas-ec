@@ -48,7 +48,6 @@ from src.modules.consulta.services.cache import guardar_consulta, ESTADOS_CACHEA
 from src.modules.consulta.services.ant import consultar_ant
 from src.modules.consulta.services.amt import consultar_amt
 from src.modules.consulta.services.epmtsd import consultar_epmtsd
-from src.modules.consulta.services.fiscalia import consultar_fiscalia
 from src.modules.consulta.services.sri import consultar_sri
 
 
@@ -82,11 +81,11 @@ def _leer_backoff() -> list[int]:
 BACKOFF_SEGUNDOS = _leer_backoff()
 
 # fuente (código corto del contrato) → función de scraping.
+# FGE salió: su portal agregó hCaptcha → se sirve como consulta_externa, no por worker.
 CONSULTORES = {
     "ANT": consultar_ant,
     "AMT": consultar_amt,
     "EPMTSD": consultar_epmtsd,
-    "FGE": consultar_fiscalia,
     "SRI": consultar_sri,
 }
 

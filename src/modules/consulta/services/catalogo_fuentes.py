@@ -122,7 +122,8 @@ CATALOGO_FUENTES: dict[str, FuenteCatalogo] = {
         atributos=("denuncias", "noticias_delito"),
         implementada=True,
         descripcion=(
-            "Noticias del delito (SIAF) asociadas a placa, cédula, RUC o nombres."
+            "Noticias del delito (SIAF) por placa/cédula/RUC/nombres. Desde may-2026 el "
+            "portal exige hCaptcha → se expone como consulta_externa (enlace), no scraping."
         ),
     ),
     "EPMTSD": FuenteCatalogo(

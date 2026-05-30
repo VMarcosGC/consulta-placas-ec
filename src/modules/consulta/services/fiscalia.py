@@ -96,11 +96,27 @@ def parsear_respuesta_fge(texto_original: str) -> dict:
 
 
 async def consultar_fiscalia(termino: str) -> dict:
-    """Consulta el SIAF de Fiscalía con cualquier identificador (placa o cédula).
+    """FGE — passthrough a `consulta_externa` (el portal SIAF agregó hCaptcha).
 
-    El campo `fuente` siempre es 'FGE'. Quien llame puede pasar `termino_tipo`
-    en el resultado si necesita distinguir el tipo de búsqueda.
+    Desde mayo 2026 el portal exige **hCaptcha** ("Por tu seguridad, marca la casilla")
+    incluso desde IP residencial, así que ya NO es scrapeable de forma confiable —
+    mismo caso que el SRI. En vez de devolver `error`/`en_proceso`, exponemos el SERVICIO:
+    enlace al portal para que el usuario consulte ahí. El scraper queda DORMIDO en
+    `_consultar_fiscalia_scraping` por si se integra un solver de hCaptcha (2Captcha
+    soporta hCaptcha) — la vía dormida del SRI es el precedente.
     """
+    return {
+        "fuente": "FGE",
+        "termino": termino,
+        "estado": "consulta_externa",
+        "datos": None,
+        "url_consulta": URL_FGE,
+    }
+
+
+# ── Vía DORMIDA: scraping del SIAF. NO está en el path activo desde que el portal
+# agregó hCaptcha. Se conserva para reactivarlo con un solver de captcha (ver SRI).
+async def _consultar_fiscalia_scraping(termino: str) -> dict:
     resultado = {
         "fuente": "FGE",
         "termino": termino,

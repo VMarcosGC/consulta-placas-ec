@@ -3,14 +3,19 @@
 Extraídos de `main.py` en la mudanza a monolito modular. La lógica es idéntica:
 ANT/SRI vía Playwright con caché; AMT/FGE vía worker híbrido (encolado + en_proceso).
 """
+import asyncio
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
-from src.core.database import obtener_sesion
+from src.core.database import obtener_sesion, SessionLocal
 from src.core.validators import validar_placa, validar_cedula
 from src.modules.consulta.services.ant import consultar_ant
+from src.modules.consulta.services.amt import consultar_amt
+from src.modules.consulta.services.epmtsd import consultar_epmtsd
+from src.modules.consulta.services.fiscalia import consultar_fiscalia
 from src.modules.consulta.services.sri import consultar_sri
 from src.modules.consulta.services.consultasecuador import consultar_consultasecuador
 from src.modules.consulta.services.ecuadorlegalonline import consultar_ecuadorlegalonline
@@ -34,8 +39,41 @@ ESTADO_EN_PROCESO = "en_proceso"
 ESTADO_ERROR_FUENTE = "error_fuente"
 VENTANA_ERROR_FUENTE_MINUTOS = TTL_TRANSACCIONAL_MINUTOS
 
-# Fuentes servidas por el worker híbrido (las únicas reintentables).
-FUENTES_WORKER = {"AMT", "EPMTSD", "FGE"}
+# Fuentes servidas por el worker híbrido (las únicas reintentables). FGE salió: el
+# portal SIAF agregó hCaptcha y pasó a `consulta_externa` (ver fiscalia.py).
+FUENTES_WORKER = {"AMT", "EPMTSD"}
+
+# Modo SÍNCRONO: si el backend corre desde una IP que SÍ alcanza las fuentes (IP
+# residencial de Ecuador), scrapea AMT/EPMTSD/FGE en el acto (en paralelo) en vez de
+# encolarlas al worker. Así el endpoint devuelve datos reales en una sola llamada, sin
+# depender de un worker aparte ni dejar todo en `en_proceso`. Activar con
+# SCRAPING_SINCRONO=true (recomendado al desplegar el backend en una máquina residencial EC).
+# En la nube datacenter (Render) dejar en false: ahí AMT/EPMTSD/FGE están bloqueadas y van
+# por worker/proxy residencial.
+SCRAPING_SINCRONO = os.getenv("SCRAPING_SINCRONO", "false").strip().lower() in (
+    "1", "true", "yes", "si", "sí",
+)
+
+# Fuentes que se scrapean con Playwright en modo síncrono (clave → función de servicio).
+# FGE NO está: su portal agregó hCaptcha → es `consulta_externa` (passthrough instantáneo).
+_FUENTES_SCRAPING_DIRECTO = {
+    "ANT": consultar_ant,
+    "AMT": consultar_amt,
+    "EPMTSD": consultar_epmtsd,
+}
+
+
+async def _scrapear_con_cache_propia(identificador: str, fuente: str, fn_consultar) -> tuple[str, dict]:
+    """Scrapea una fuente con su PROPIA sesión de BD (segura para asyncio.gather).
+
+    Cada coroutine paralela necesita su sesión: las Session de SQLAlchemy no son
+    concurrency-safe. La caché (lectura/escritura) se hace sobre esa sesión propia.
+    """
+    sesion = SessionLocal()
+    try:
+        return fuente, await consultar_con_cache(sesion, identificador, fuente, fn_consultar)
+    finally:
+        sesion.close()
 
 
 def _normalizar_identificador_worker(fuente: str, identificador: str) -> str:
@@ -164,8 +202,9 @@ async def consultar_judicial(cedula: str, sesion: Session = Depends(obtener_sesi
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # FGE vía worker híbrido (encolado + en_proceso), no Playwright directo.
-    resultado = consultar_via_worker(sesion, cedula_limpia, "FGE", campo_id="termino")
+    # FGE pasó a consulta_externa (el SIAF agregó hCaptcha): passthrough instantáneo
+    # con enlace al portal, no scraping. Ver fiscalia.py.
+    resultado = await consultar_fiscalia(cedula_limpia)
 
     datos = resultado.get("datos") or {}
     denuncias = datos.get("denuncias") or {}
@@ -176,8 +215,8 @@ async def consultar_judicial(cedula: str, sesion: Session = Depends(obtener_sesi
         "fge": resultado,
         "resumen": {
             "fge_consultado": resultado.get("estado") == "consulta_realizada",
-            "fge_en_proceso": resultado.get("estado") == ESTADO_EN_PROCESO,
-            "fge_error_fuente": resultado.get("estado") == ESTADO_ERROR_FUENTE,
+            "fge_consulta_externa": resultado.get("estado") == "consulta_externa",
+            "url_consulta_fge": resultado.get("url_consulta"),
             "total_denuncias": total,
             "tiene_denuncias": total > 0,
         },
@@ -185,28 +224,41 @@ async def consultar_judicial(cedula: str, sesion: Session = Depends(obtener_sesi
 
 
 async def _obtener_fuentes_placa(sesion: Session, placa_limpia: str) -> dict:
-    """Obtiene las 4 respuestas por-fuente para una placa (sin construir resumen).
+    """Obtiene las respuestas por-fuente para una placa (keyed por clave de catálogo).
 
-    Compartido por `/consultar/{placa}` (vista por fuente) y
-    `/consultar/{placa}/perfil` (vista consolidada) para no duplicar la orquestación:
-    ANT cacheado, SRI passthrough, AMT/FGE vía worker híbrido.
+    Compartido por `/consultar/{placa}` (vista por fuente) y `/consultar/{placa}/perfil`
+    (vista consolidada). SRI + las no oficiales son passthrough instantáneo
+    (`consulta_externa`). ANT/AMT/EPMTSD/FGE se scrapean con Playwright:
+    - **Modo síncrono** (`SCRAPING_SINCRONO=true`, IP residencial EC): se scrapean en el
+      acto y EN PARALELO → datos reales en una sola llamada, sin worker.
+    - **Modo worker** (default, nube datacenter): AMT/EPMTSD/FGE se encolan y devuelven
+      `en_proceso`; el worker (IP residencial) las procesa. ANT siempre directo.
     """
-    resultado_ant = await consultar_con_cache(sesion, placa_limpia, "ANT", consultar_ant)
-    # SRI: passthrough instantáneo al portal oficial (no se scrapea por el reCAPTCHA
-    # Enterprise v3; devuelve url_consulta para que el usuario consulte ahí).
+    # Instantáneas (no se scrapean): SRI, FGE y las no oficiales → enlace al portal.
+    # FGE pasó a consulta_externa (hCaptcha en el SIAF, ver fiscalia.py).
     resultado_sri = await consultar_sri(placa_limpia)
-    # AMT y FGE se sirven vía worker híbrido (encolado + en_proceso), no Playwright.
-    resultado_amt = consultar_via_worker(sesion, placa_limpia, "AMT")
-    # EPMTSD: mismo portal AxisCloud que AMT (Santo Domingo) → también vía worker.
-    resultado_epmtsd = consultar_via_worker(sesion, placa_limpia, "EPMTSD")
-    resultado_fge = consultar_via_worker(sesion, placa_limpia, "FGE", campo_id="termino")
-    # ConsultasEcuador (no oficial): passthrough instantáneo a su portal (consulta_externa),
-    # igual que SRI; tras reCAPTCHA, no se scrapea (ver consultasecuador.py).
+    resultado_fge = await consultar_fiscalia(placa_limpia)
     resultado_consultasec = await consultar_consultasecuador(placa_limpia)
-    # EcuadorLegalOnline (no oficial): también consulta_externa (guía con paywall/reCAPTCHA).
     resultado_eclegal = await consultar_ecuadorlegalonline(placa_limpia)
-    # Keyed por la clave del catálogo — así el consolidador arma `estado_fuentes`
-    # desde el catálogo y las fuentes nuevas se suman aquí sin tocar nada más.
+
+    if SCRAPING_SINCRONO:
+        # ANT/AMT/EPMTSD directo y en paralelo (cada una con su sesión de caché).
+        pares = await asyncio.gather(
+            *[
+                _scrapear_con_cache_propia(placa_limpia, clave, fn)
+                for clave, fn in _FUENTES_SCRAPING_DIRECTO.items()
+            ]
+        )
+        directos = dict(pares)
+        resultado_ant = directos["ANT"]
+        resultado_amt = directos["AMT"]
+        resultado_epmtsd = directos["EPMTSD"]
+    else:
+        # Nube datacenter: ANT directo; AMT/EPMTSD vía worker híbrido (en_proceso).
+        resultado_ant = await consultar_con_cache(sesion, placa_limpia, "ANT", consultar_ant)
+        resultado_amt = consultar_via_worker(sesion, placa_limpia, "AMT")
+        resultado_epmtsd = consultar_via_worker(sesion, placa_limpia, "EPMTSD")
+
     return {
         "ANT": resultado_ant,
         "SRI": resultado_sri,
