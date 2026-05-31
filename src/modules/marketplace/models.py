@@ -193,7 +193,9 @@ class PublicacionReferenciada(Base):
     url_externa: Mapped[str] = mapped_column(
         String(500), nullable=False, unique=True, index=True
     )
-    imagen_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 2048: las URLs de imagen de CDNs (Facebook fbcdn, etc.) traen muchos parámetros
+    # firmados y superan los 500 con facilidad.
+    imagen_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     estado_moderacion: Mapped[str] = mapped_column(
         String(16),
         nullable=False,

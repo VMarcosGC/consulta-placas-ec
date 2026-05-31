@@ -304,7 +304,7 @@ class PublicacionReferenciadaCrear(BaseModel):
     modelo: str | None = Field(default=None, max_length=120)
     anio: int | None = Field(default=None, ge=1900, le=2100)
     precio_usd: Decimal | None = Field(default=None, gt=0)
-    imagen_url: str | None = Field(default=None, max_length=500)
+    imagen_url: str | None = Field(default=None, max_length=2048)
     placa: str | None = Field(default=None, max_length=10)
 
     @field_validator("url_externa")
@@ -329,7 +329,7 @@ class PublicacionReferenciadaActualizar(BaseModel):
     modelo: str | None = Field(default=None, max_length=120)
     anio: int | None = Field(default=None, ge=1900, le=2100)
     precio_usd: Decimal | None = Field(default=None, gt=0)
-    imagen_url: str | None = Field(default=None, max_length=500)
+    imagen_url: str | None = Field(default=None, max_length=2048)
     placa: str | None = Field(default=None, max_length=10)
     activa: bool | None = None
 
