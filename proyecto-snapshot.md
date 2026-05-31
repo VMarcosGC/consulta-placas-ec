@@ -1,5 +1,5 @@
 # Proyecto Snapshot — Revisa tu Carro EC (consulta_placas_ec)
-**Generado:** 2026-05-30 (-05:00) · rev. modo síncrono + detalle de multas + solvers
+**Generado:** 2026-05-30 (-05:00) · rev. desbloqueo PII por tokens + marketplace (publicaciones/referencias/moderación)
 **Herramienta origen:** Claude Code / VS Code
 **Propósito de este archivo:** Subir a Gemini para continuar planificación TO-BE
 
@@ -24,7 +24,13 @@ Plataforma (móvil + web) para que cualquier persona en Ecuador conozca el **est
 - **Fuentes con datos reales inline**: **ANT** (vehículo + citaciones por estado + fechas matrícula/vence), **AMT** (Quito) y **EPMTSD** (Santo Domingo) — infracciones por categoría con montos. Plataforma AxisCloud compartida (`_axiscloud.py`, `ps_empresa` 03/06).
 - **Detalle de multas** (`multas_detalle`): por fuente, con ámbito, total, pendientes, total a pagar y categorías (Pendientes/Pagadas/Anuladas/…); ANT sin monto. El frontend lo pinta por bloques, sin repetir datos del vehículo.
 - **Fuentes como enlace** (`consulta_externa`, no devuelven datos útiles/inline): **SRI** (reCAPTCHA Enterprise v3), **FGE** (ahora WAF Imperva + hCaptcha), **ConsultasEcuador** (reCAPTCHA + afiliado), **EcuadorLegalOnline** (ad-gate + paywall + PII), **EPMTSD Condición/“vehiculo_seguro”** (robo/prendas/remarcado/RTV/traspasos; ~50s y datos por placa inconsistentes → link destacado "Condición y antecedentes").
-- **Auth + dominio**: JWT, CRUD vehículos/dueños/kilometraje/mantenimientos/favoritos, billetera (lectura+auditoría), marketplace + enlaces compartidos.
+- **Auth + dominio**: JWT, CRUD vehículos/dueños/kilometraje/mantenimientos/favoritos, billetera (lectura+auditoría), enlaces compartidos.
+- **Débito real de tokens (Paso 2)**: `tokens/service.py::debitar_tokens` (lanza `SaldoInsuficiente`→**402**). Cableado en **desbloqueo de PII**: `POST /consultar/{placa}/desbloquear` (JWT) revela vin/motor/chasis en claro (el consolidador ofusca por default, `desbloqueado=True` muestra); no cobra si no hay dato sensible.
+- **Marketplace (Pilar 4) operativo de punta a punta**:
+  - **Publicaciones internas** (`publicaciones_internas`, plan `light` gratis / `premium` cobra tokens→402): `POST/GET mias/PATCH/DELETE /marketplace/publicaciones`. Premium queda destacado + verificación `pendiente`.
+  - **Referencias externas aportadas por el usuario** (`publicaciones_referenciadas`, decisión: **NO scraping** — el usuario pega el link de FB Marketplace/OLX/etc. y completa datos; `fuente` derivada del dominio; `url_externa` única): `POST/GET mias/PATCH/DELETE /marketplace/referencias`. Es **gratis**. Entran en **moderación `pendiente`**.
+  - **Moderación admin**: `GET /marketplace/referencias/pendientes` + `POST /{id}/moderar` (aprobar/rechazar). Admin por env var **`ADMIN_EMAILS`** (sin rol en BD); `dependencies.admin_actual` (403) y `/auth/me` expone `es_admin`.
+  - **Feed público mixto** `GET /marketplace/feed`: premium destacados → light → referenciadas (solo `aprobada`+`activa`). `selectinload` anti N+1. Frontend: `/marketplace`, `/marketplace/publicar`, `/marketplace/referenciar`, `/marketplace/mis-referencias`, `/admin/moderacion`.
 - **Solvers/infra listos (gateados, no cableados)**: `extractor_apify.py` (Apify, validado vs example.com), `proxy_apify.py` (proxy residencial provider-agnostic `SCRAPER_PROXY_URL`), `captcha.py` con `resolver_recaptcha`/`resolver_hcaptcha`/Capsolver.
 
 ### ⚠️ Decisiones/limitaciones clave
@@ -33,7 +39,9 @@ Plataforma (móvil + web) para que cualquier persona en Ecuador conozca el **est
 - **SRI** reCAPTCHA Enterprise v3 (score) → solver poco fiable; queda enlace.
 - **ConsultasEcuador/EcuadorLegalOnline**: ni captcha-solver ni proxy los vuelven útiles (sin endpoint de datos / paywall+PII). Enlace.
 - **identificacion** (chasis/motor) en el schema pero sin fuente scrapeable → enlace a ConsultasEcuador.
-- Pendientes operativos: rotar el token de Apify (se compartió por chat); imágenes referenciales del vehículo (pospuesto).
+- **Imágenes de referencias**: hoy el usuario pega una URL de imagen (`imagen_url` ampliado a 2048). Las URLs de **fbcdn (Facebook) son firmadas y EXPIRAN** en días → la foto se romperá. TO-BE: subir el archivo a hosting propio en vez de pegar URL ajena.
+- **Moderación sin UI de bandeja avanzada**: `/admin/moderacion` lista pendientes y aprueba/rechaza, pero no hay historial de decisiones ni reportes/anti-spam más allá del gate `ADMIN_EMAILS`.
+- Pendientes operativos: rotar el token de Apify (se compartió por chat); configurar `ADMIN_EMAILS` en Render (hecho por el usuario).
 
 ## 4. Estructura (backend)
 ```
@@ -41,7 +49,8 @@ src/
   registry.py
   core/  database.py · validators.py · ofuscacion.py · proxy_apify.py
   modules/
-    auth · tokens · vehiculos · marketplace
+    auth (router+dependencies: admin_actual/es_admin) · tokens (service.debitar_tokens→402)
+    vehiculos · marketplace (models · schemas · routers/{marketplace,publicaciones,referencias,compartidos})
     consulta/
       routers/ consulta.py (perfil + sync/worker) · ocr.py
       models/ consulta.py · cola_scraping.py
@@ -50,8 +59,9 @@ src/
                 consultasecuador · ecuadorlegalonline · catalogo_fuentes · consolidador ·
                 extractor_apify · captcha (recaptcha+hcaptcha) · cache · cola · vision
 worker.py (tarea ConsultaPlacasWorker) · run.py · main.py · scripts/worker_*.ps1
+alembic/versions/ 0001…0012 (0010 publicaciones, 0011 referencias+moderación, 0012 imagen_url 2048)
 ```
-Frontend: `src/components/PerfilVehiculo.tsx` (tarjeta vehículo + Multas detalle + Antecedentes(link) + Identificación + Valores + Legal), `src/lib/{api,perfil}`, `src/types/api.ts`.
+Frontend: `src/components/PerfilVehiculo.tsx` (tarjeta vehículo + Multas detalle + Antecedentes(link) + Identificación + Valores + Legal) + `Header.tsx` (enlace "Moderar" si `es_admin`); páginas `marketplace/{,publicar,referenciar,mis-referencias}` y `admin/moderacion`; `src/lib/{api,perfil,auth}`, `src/types/api.ts`.
 
 ## 5. Skills
 6 skills en `.claude/skills/` (agregar-fuente-consulta, scraping-respetuoso, respuesta-api-estandar, validacion-datos-ec, modelo-dominio-vehiculo, desplegar-mvp). `AGENTS.md` fuente de verdad (§4 al día con marca/tema claro).
@@ -65,15 +75,18 @@ Frontend: `src/components/PerfilVehiculo.tsx` (tarjeta vehículo + Multas detall
 
 ## 7. Últimos cambios (git log backend)
 ```
-d05e13a feat: solver de hCaptcha (2Captcha) reusable para el muro de FGE
-c47ad54 feat: detalle de multas/citaciones por fuente (ANT/AMT/EPMTSD) + fechas de matrícula
-71902e2 feat: modo síncrono (sin worker) + FGE a consulta_externa (hCaptcha en SIAF)
-f18d43e feat: soporte de proxy residencial (gateado) para AMT/EPMTSD/FGE
-9ff5e06 fix: ApifyExtractor compatible con apify-client v3
-d19686c feat: cliente de extracción Apify + docs al día
+396aa7c feat: exponer es_admin en /auth/me (habilita pantallas de moderación)
+3acab1b fix: ampliar imagen_url a 2048 (URLs de CDN de Facebook superan 500)
+39a42bc chore: documentar ADMIN_EMAILS en render.yaml
+6cae4cd feat: marketplace de referencias aportadas por el usuario (link externo + moderación)
+9246484 feat: desbloqueo de identificadores por tokens + marketplace de publicaciones
+bab748f docs: regenerar snapshot (modo síncrono + worker + detalle multas + solvers)
 ```
-Frontend: `8fd87e3 feat: sección 'Condición y antecedentes' (link EPMTSD) + reordena multas`,
-`b34fcb7 feat: vista de detalle de multas por fuente + matrícula/vence`.
+Frontend (`consulta-placas-web`):
+`30d586a feat: pantalla "mis referencias" (estado de moderación + eliminar)`,
+`2ef2017 feat: pantalla de moderación de referencias (admin)`,
+`233dec6 fix: mostrar errores de validación 422 legibles (no más "[object Object]")`,
+`42d286b feat: apartado para referenciar anuncios externos (link de Facebook/OLX/etc.)`.
 
 ## 8. Para continuar en Gemini — instrucciones
 > Eres un asistente de arquitectura y planificación de software con el contexto completo arriba.
@@ -82,8 +95,8 @@ Frontend: `8fd87e3 feat: sección 'Condición y antecedentes' (link EPMTSD) + re
 > 5) riesgos/dependencias.
 
 ## 9. Próximos pasos sugeridos
-1. **Persistencia/independencia del worker**: hoy corre en la máquina EC (debe estar encendida). Evaluar proxy residencial de pago + worker en la nube para 100% sin depender del equipo.
-2. **FGE con 2Captcha** (si se quiere reactivar): fondear `TWOCAPTCHA_API_KEY` y cablear el solver hCaptcha + handoff Incapsula, validando en vivo (es frágil; el enlace es el fallback).
-3. **Rotar el token de Apify** (expuesto por chat).
-4. **Imágenes referenciales** del vehículo (híbrido render-por-modelo + ilustración por clase).
-5. Roadmap: Fase 5 (OCR por foto) y débito real de tokens.
+1. **Imágenes de referencias estables**: reemplazar pegar-URL por **subir archivo** a hosting propio (las URLs de fbcdn expiran). Es el pendiente directo del flujo recién terminado.
+2. **Persistencia/independencia del worker**: hoy corre en la máquina EC (debe estar encendida). Evaluar proxy residencial de pago + worker en la nube para 100% sin depender del equipo.
+3. **FGE con 2Captcha** (si se quiere reactivar): fondear `TWOCAPTCHA_API_KEY` y cablear el solver hCaptcha + handoff Incapsula (frágil; el enlace es el fallback).
+4. **Rotar el token de Apify** (expuesto por chat).
+5. **Recarga real de tokens** (gateway de pago local) ahora que el débito ya cobra (desbloqueo PII + premium). Roadmap: Fase 5 (OCR por foto), Fase 6 (mobile + pagos).
