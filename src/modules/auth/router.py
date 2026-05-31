@@ -10,7 +10,7 @@ from src.modules.auth.models import Usuario, TransaccionToken
 from src.modules.auth.models import SALDO_INICIAL_TOKENS
 from src.modules.auth.schemas import UsuarioCrear, UsuarioSalida, Token
 from src.modules.auth.security import hashear_password, verificar_password, crear_token_acceso
-from src.modules.auth.dependencies import usuario_actual
+from src.modules.auth.dependencies import usuario_actual, es_email_admin
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -70,4 +70,6 @@ def iniciar_sesion(
 
 @router.get("/me", response_model=UsuarioSalida)
 def perfil(usuario: Usuario = Depends(usuario_actual)):
+    # Atributo transitorio (no columna): le dice al frontend si mostrar moderación.
+    usuario.es_admin = es_email_admin(usuario.email)
     return usuario

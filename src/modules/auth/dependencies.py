@@ -26,6 +26,12 @@ def _emails_admin() -> set[str]:
     return {e.strip().lower() for e in crudo.split(",") if e.strip()}
 
 
+def es_email_admin(email: str) -> bool:
+    """True si el email está en `ADMIN_EMAILS`. Lo usa /auth/me para que el frontend
+    sepa si mostrar las pantallas de moderación."""
+    return email.lower() in _emails_admin()
+
+
 def usuario_actual(
     token: str = Depends(oauth2_scheme),
     sesion: Session = Depends(obtener_sesion),

@@ -17,6 +17,9 @@ class UsuarioSalida(BaseModel):
     email: EmailStr
     nombre: str | None
     saldo_tokens: int
+    # True si el usuario está en ADMIN_EMAILS. El endpoint /auth/me lo setea; en otros
+    # contextos (registro) queda en el default. No es una columna de la BD.
+    es_admin: bool = False
     creado_en: datetime
 
 
