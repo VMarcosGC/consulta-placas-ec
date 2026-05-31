@@ -37,6 +37,19 @@ class EstadoVerificacion(str, enum.Enum):
     VERIFICADO = "verificado"
 
 
+class EstadoModeracion(str, enum.Enum):
+    """Estado de moderación de una referencia aportada por un usuario.
+
+    Las referencias las trae el propio usuario (un link de Facebook Marketplace u
+    otro portal), así que entran como `pendiente` y un administrador las aprueba
+    antes de que aparezcan en el feed público. `rechazada` las descarta sin borrar.
+    """
+
+    PENDIENTE = "pendiente"
+    APROBADA = "aprobada"
+    RECHAZADA = "rechazada"
+
+
 class EnlaceCompartido(Base):
     """Enlace temporal de solo lectura sobre un vehículo, para mostrarle el
     historial a un comprador interesado sin que necesite cuenta (Fase 4).
@@ -148,23 +161,46 @@ class PublicacionInterna(Base):
 
 
 class PublicacionReferenciada(Base):
-    """Anuncio de venta RASPADO de un portal externo (referencia, no interno).
+    """Anuncio de venta de un portal externo, REFERENCIADO en nuestro feed.
 
-    No pertenece a ningún usuario ni se verifica: da volumen al feed y siempre
-    enlaza a su anuncio de origen (`url_externa`). La placa puede ser desconocida.
+    No alojamos el anuncio: solo guardamos los datos mínimos que el aportante
+    teclea y un enlace a su origen (`url_externa`, p. ej. Facebook Marketplace).
+    Decisión 2026-05-30: NO se raspa el portal (FB exige login y bloquea bots);
+    es el usuario quien trae el link y completa marca/modelo/precio. El link puebla
+    nuestra BD de forma barata y siempre devuelve el tráfico al anuncio original.
+
+    `usuario_id` es el aportante (NULL si algún día se siembra por otra vía). Como
+    las trae el usuario, entran en `estado_moderacion=pendiente` y un admin las
+    aprueba antes de que el feed las muestre. `url_externa` es única (dedup: el
+    mismo anuncio no entra dos veces). La placa puede ser desconocida.
     """
 
     __tablename__ = "publicaciones_referenciadas"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    usuario_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("usuarios.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     placa: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
     marca: Mapped[str | None] = mapped_column(String(80), nullable=True)
     modelo: Mapped[str | None] = mapped_column(String(120), nullable=True)
     anio: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     precio_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     fuente: Mapped[str] = mapped_column(String(80), nullable=False)
-    url_externa: Mapped[str] = mapped_column(String(500), nullable=False)
+    url_externa: Mapped[str] = mapped_column(
+        String(500), nullable=False, unique=True, index=True
+    )
     imagen_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    estado_moderacion: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=EstadoModeracion.PENDIENTE.value,
+        default=EstadoModeracion.PENDIENTE.value,
+        index=True,
+    )
     activa: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true"), default=True
     )

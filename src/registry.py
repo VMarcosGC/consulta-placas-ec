@@ -27,6 +27,7 @@ from src.modules.consulta.models.cola_scraping import ColaScraping  # noqa: F401
 # marketplace
 from src.modules.marketplace.models import (  # noqa: F401
     EnlaceCompartido,
+    EstadoModeracion,
     PublicacionInterna,
     PublicacionReferenciada,
 )

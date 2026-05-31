@@ -23,6 +23,7 @@ from src.modules.auth.models import Usuario
 from src.modules.tokens.service import debitar_tokens, SaldoInsuficiente
 from src.modules.vehiculos.models.vehiculo import Vehiculo
 from src.modules.marketplace.models import (
+    EstadoModeracion,
     EstadoPublicacion,
     EstadoVerificacion,
     PlanPublicacion,
@@ -261,7 +262,13 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
     referenciadas = (
         sesion.execute(
             select(PublicacionReferenciada)
-            .where(PublicacionReferenciada.activa.is_(True))
+            .where(
+                and_(
+                    PublicacionReferenciada.activa.is_(True),
+                    PublicacionReferenciada.estado_moderacion
+                    == EstadoModeracion.APROBADA.value,
+                )
+            )
             .order_by(PublicacionReferenciada.creado_en.desc())
             .limit(LIMITE_REFERENCIADAS_FEED)
         )

@@ -25,6 +25,7 @@ from src.modules.vehiculos.routers.mantenimientos import router as mantenimiento
 from src.modules.vehiculos.routers.favoritos import router as favoritos_router
 from src.modules.marketplace.routers.marketplace import router as marketplace_router
 from src.modules.marketplace.routers.publicaciones import router as publicaciones_router
+from src.modules.marketplace.routers.referencias import router as referencias_router
 from src.modules.marketplace.routers.compartidos import router as compartidos_router
 
 app = FastAPI(title="Consulta de Placas Ecuador")
@@ -52,4 +53,5 @@ app.include_router(favoritos_router)
 # Compra-venta
 app.include_router(marketplace_router)
 app.include_router(publicaciones_router)
+app.include_router(referencias_router)
 app.include_router(compartidos_router)

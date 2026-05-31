@@ -8,12 +8,15 @@ historial privado en la vista compartida (`VehiculoCompartidoSalida`).
 
 from datetime import date, datetime
 from decimal import Decimal
+from urllib.parse import urlparse
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.core.ofuscacion import ofuscar_identificador
 from src.core.validators import validar_placa
 from src.modules.vehiculos.schemas.vehiculo import VehiculoSalidaCompartida
 from src.modules.marketplace.models import (
+    EstadoModeracion,
     EstadoPublicacion,
     EstadoVerificacion,
     PlanPublicacion,
@@ -254,8 +257,90 @@ class PublicacionInternaSalida(BaseModel):
         )
 
 
+# Dominio del anuncio → etiqueta de fuente legible. El primer match por substring
+# gana; lo no reconocido cae en "Otro portal" (igual guardamos el host real abajo).
+_FUENTES_POR_DOMINIO = {
+    "facebook.com": "Facebook Marketplace",
+    "fb.com": "Facebook Marketplace",
+    "olx.com": "OLX",
+    "patiotuerca.com": "PatioTuerca",
+    "mercadolibre.com": "Mercado Libre",
+    "marketplace.com": "Mercado Libre",  # mercadolibre acorta a varios TLD
+}
+
+
+def _derivar_fuente(url: str) -> str:
+    """Deriva la etiqueta de fuente a partir del host de la URL.
+
+    No accede a la red: solo parsea el dominio. Para hosts desconocidos devuelve el
+    propio host (sin `www.`), así el feed siempre muestra de dónde viene el anuncio.
+    """
+    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    for dominio, etiqueta in _FUENTES_POR_DOMINIO.items():
+        if dominio in host:
+            return etiqueta
+    return host or "Otro portal"
+
+
+def _validar_url_externa(v: str) -> str:
+    """Exige una URL http(s) con host. No verifica que el anuncio exista (sin red)."""
+    v = v.strip()
+    partes = urlparse(v)
+    if partes.scheme not in ("http", "https") or not partes.hostname:
+        raise ValueError("La URL debe ser un enlace http(s) válido con dominio.")
+    return v
+
+
+class PublicacionReferenciadaCrear(BaseModel):
+    """Alta de una referencia: el usuario pega el link y completa los datos a mano.
+
+    No raspamos el portal (decisión 2026-05-30): los campos los teclea el aportante.
+    `fuente` se deriva del dominio del link, no se acepta del cliente. Entra en
+    moderación `pendiente`.
+    """
+
+    url_externa: str = Field(max_length=500)
+    marca: str | None = Field(default=None, max_length=80)
+    modelo: str | None = Field(default=None, max_length=120)
+    anio: int | None = Field(default=None, ge=1900, le=2100)
+    precio_usd: Decimal | None = Field(default=None, gt=0)
+    imagen_url: str | None = Field(default=None, max_length=500)
+    placa: str | None = Field(default=None, max_length=10)
+
+    @field_validator("url_externa")
+    @classmethod
+    def _url_valida(cls, v: str) -> str:
+        return _validar_url_externa(v)
+
+    @field_validator("placa")
+    @classmethod
+    def _placa_valida(cls, v: str | None) -> str | None:
+        return validar_placa(v) if v else None
+
+    def fuente_derivada(self) -> str:
+        return _derivar_fuente(self.url_externa)
+
+
+class PublicacionReferenciadaActualizar(BaseModel):
+    """Edición parcial por el aportante. Cambiar el contenido vuelve a moderación
+    `pendiente` (lo decide el router) para evitar bait-and-switch tras aprobar."""
+
+    marca: str | None = Field(default=None, max_length=80)
+    modelo: str | None = Field(default=None, max_length=120)
+    anio: int | None = Field(default=None, ge=1900, le=2100)
+    precio_usd: Decimal | None = Field(default=None, gt=0)
+    imagen_url: str | None = Field(default=None, max_length=500)
+    placa: str | None = Field(default=None, max_length=10)
+    activa: bool | None = None
+
+    @field_validator("placa")
+    @classmethod
+    def _placa_valida(cls, v: str | None) -> str | None:
+        return validar_placa(v) if v else None
+
+
 class PublicacionReferenciadaSalida(BaseModel):
-    """Vista de un anuncio raspado de un portal externo."""
+    """Vista de un anuncio referenciado de un portal externo."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -268,7 +353,22 @@ class PublicacionReferenciadaSalida(BaseModel):
     fuente: str
     url_externa: str
     imagen_url: str | None
+    estado_moderacion: EstadoModeracion
+    activa: bool
     creado_en: datetime
+
+
+class ModeracionReferencia(BaseModel):
+    """Decisión de un admin sobre una referencia pendiente: aprobarla o rechazarla."""
+
+    decision: EstadoModeracion
+
+    @field_validator("decision")
+    @classmethod
+    def _decision_terminal(cls, v: EstadoModeracion) -> EstadoModeracion:
+        if v == EstadoModeracion.PENDIENTE:
+            raise ValueError("La decisión debe ser 'aprobada' o 'rechazada'.")
+        return v
 
 
 class FeedMarketplaceSalida(BaseModel):

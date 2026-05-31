@@ -1,0 +1,198 @@
+"""Referencias del marketplace aportadas por el usuario (Pilar 4).
+
+En vez de raspar portales (FB exige login y bloquea bots — decisión 2026-05-30), el
+usuario **pega el link** de un anuncio externo (Facebook Marketplace, OLX, PatioTuerca,
+Mercado Libre…) y completa marca/modelo/precio a mano. Eso puebla `publicaciones_referenciadas`
+de forma barata y siempre devuelve el tráfico al anuncio original.
+
+Flujo de moderación (requiere aprobación):
+- El aportante crea la referencia → entra `pendiente` (no aparece en el feed todavía).
+- Un admin (`admin_actual`, lista `ADMIN_EMAILS`) la aprueba o rechaza.
+- Editar el contenido de una ya aprobada la devuelve a `pendiente` (anti bait-and-switch).
+
+Es gratis (no cuesta tokens): da volumen al feed. Solo toca la BD propia (§10.2).
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, and_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from src.core.database import obtener_sesion
+from src.modules.auth.dependencies import admin_actual, usuario_actual
+from src.modules.auth.models import Usuario
+from src.modules.marketplace.models import (
+    EstadoModeracion,
+    PublicacionReferenciada,
+)
+from src.modules.marketplace.schemas import (
+    ModeracionReferencia,
+    PublicacionReferenciadaActualizar,
+    PublicacionReferenciadaCrear,
+    PublicacionReferenciadaSalida,
+)
+
+
+router = APIRouter(prefix="/marketplace/referencias", tags=["marketplace"])
+
+# Campos cuyo cambio invalida una aprobación previa (el anuncio "ya no es el mismo").
+_CAMPOS_CONTENIDO = ("marca", "modelo", "anio", "precio_usd", "imagen_url", "placa")
+
+
+def _mi_referencia(
+    sesion: Session, referencia_id: int, usuario: Usuario
+) -> PublicacionReferenciada:
+    """Resuelve una referencia del usuario o lanza 404 (no distingue ajena de inexistente)."""
+    ref = sesion.execute(
+        select(PublicacionReferenciada).where(
+            and_(
+                PublicacionReferenciada.id == referencia_id,
+                PublicacionReferenciada.usuario_id == usuario.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Referencia no encontrada"
+        )
+    return ref
+
+
+@router.post(
+    "", response_model=PublicacionReferenciadaSalida, status_code=status.HTTP_201_CREATED
+)
+def crear_referencia(
+    datos: PublicacionReferenciadaCrear,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Aporta una referencia externa. Entra `pendiente` hasta que un admin la apruebe.
+
+    `fuente` se deriva del dominio del link (no se confía en el cliente). Si el mismo
+    `url_externa` ya existe → 409 (dedup por índice único).
+    """
+    ref = PublicacionReferenciada(
+        usuario_id=usuario.id,
+        url_externa=datos.url_externa,
+        fuente=datos.fuente_derivada(),
+        marca=datos.marca,
+        modelo=datos.modelo,
+        anio=datos.anio,
+        precio_usd=datos.precio_usd,
+        imagen_url=datos.imagen_url,
+        placa=datos.placa,
+        estado_moderacion=EstadoModeracion.PENDIENTE.value,
+        activa=True,
+    )
+    sesion.add(ref)
+    try:
+        sesion.commit()
+    except IntegrityError:
+        sesion.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ese anuncio ya está referenciado.",
+        )
+    sesion.refresh(ref)
+    return PublicacionReferenciadaSalida.model_validate(ref)
+
+
+@router.get("/mias", response_model=list[PublicacionReferenciadaSalida])
+def listar_mis_referencias(
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Referencias que aportó el usuario (cualquier estado), de la más reciente a la más antigua."""
+    refs = (
+        sesion.execute(
+            select(PublicacionReferenciada)
+            .where(PublicacionReferenciada.usuario_id == usuario.id)
+            .order_by(PublicacionReferenciada.creado_en.desc())
+        )
+        .scalars()
+        .all()
+    )
+    return [PublicacionReferenciadaSalida.model_validate(r) for r in refs]
+
+
+@router.patch("/{referencia_id}", response_model=PublicacionReferenciadaSalida)
+def actualizar_referencia(
+    referencia_id: int,
+    datos: PublicacionReferenciadaActualizar,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Edita los datos de una referencia propia. Cambiar el contenido la regresa a
+    `pendiente` (vuelve a requerir aprobación). `activa` permite pausarla sin re-moderar."""
+    ref = _mi_referencia(sesion, referencia_id, usuario)
+
+    cambios = datos.model_dump(exclude_unset=True)
+    contenido_cambio = False
+    for campo in _CAMPOS_CONTENIDO:
+        if campo in cambios:
+            setattr(ref, campo, cambios[campo])
+            contenido_cambio = True
+    if "activa" in cambios:
+        ref.activa = cambios["activa"]
+
+    if contenido_cambio and ref.estado_moderacion == EstadoModeracion.APROBADA.value:
+        ref.estado_moderacion = EstadoModeracion.PENDIENTE.value
+
+    sesion.commit()
+    sesion.refresh(ref)
+    return PublicacionReferenciadaSalida.model_validate(ref)
+
+
+@router.delete("/{referencia_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_referencia(
+    referencia_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    ref = _mi_referencia(sesion, referencia_id, usuario)
+    sesion.delete(ref)
+    sesion.commit()
+    return None
+
+
+# ──────────────────────────── Moderación (admin) ────────────────────────────
+
+
+@router.get("/pendientes", response_model=list[PublicacionReferenciadaSalida])
+def listar_pendientes(
+    sesion: Session = Depends(obtener_sesion),
+    _: Usuario = Depends(admin_actual),
+):
+    """Cola de referencias por moderar (las más antiguas primero). Solo admin."""
+    refs = (
+        sesion.execute(
+            select(PublicacionReferenciada)
+            .where(
+                PublicacionReferenciada.estado_moderacion
+                == EstadoModeracion.PENDIENTE.value
+            )
+            .order_by(PublicacionReferenciada.creado_en.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return [PublicacionReferenciadaSalida.model_validate(r) for r in refs]
+
+
+@router.post("/{referencia_id}/moderar", response_model=PublicacionReferenciadaSalida)
+def moderar_referencia(
+    referencia_id: int,
+    decision: ModeracionReferencia,
+    sesion: Session = Depends(obtener_sesion),
+    _: Usuario = Depends(admin_actual),
+):
+    """Aprueba o rechaza una referencia. Solo admin. 404 si no existe."""
+    ref = sesion.get(PublicacionReferenciada, referencia_id)
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Referencia no encontrada"
+        )
+    ref.estado_moderacion = decision.decision.value
+    sesion.commit()
+    sesion.refresh(ref)
+    return PublicacionReferenciadaSalida.model_validate(ref)

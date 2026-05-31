@@ -1,5 +1,7 @@
 """Dependencias FastAPI para autenticar y autorizar acceso a recursos del usuario."""
 
+import os
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select, and_
@@ -12,6 +14,16 @@ from src.modules.auth.security import decodificar_token
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+def _emails_admin() -> set[str]:
+    """Lista blanca de administradores, por env var (config sensible, §12).
+
+    `ADMIN_EMAILS` es una lista separada por comas. No hay rol en la BD: para el MVP
+    el admin se define por configuración, sin migrar el modelo Usuario.
+    """
+    crudo = os.getenv("ADMIN_EMAILS", "")
+    return {e.strip().lower() for e in crudo.split(",") if e.strip()}
 
 
 def usuario_actual(
@@ -37,6 +49,19 @@ def usuario_actual(
     if usuario is None:
         raise credenciales_invalidas
 
+    return usuario
+
+
+def admin_actual(usuario: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Exige que el usuario autenticado esté en `ADMIN_EMAILS`. 403 si no lo está.
+
+    Se usa para moderar contenido (aprobar/rechazar referencias del marketplace).
+    """
+    if usuario.email.lower() not in _emails_admin():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Requiere privilegios de administrador",
+        )
     return usuario
 
 
