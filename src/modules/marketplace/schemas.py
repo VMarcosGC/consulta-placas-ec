@@ -11,7 +11,14 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.core.ofuscacion import ofuscar_identificador
+from src.core.validators import validar_placa
 from src.modules.vehiculos.schemas.vehiculo import VehiculoSalidaCompartida
+from src.modules.marketplace.models import (
+    EstadoPublicacion,
+    EstadoVerificacion,
+    PlanPublicacion,
+    PublicacionInterna,
+)
 
 # TTL máximo del enlace (regla 10.6 y skill modelo-dominio-vehiculo).
 DIAS_VALIDEZ_MAX = 7
@@ -143,3 +150,133 @@ class VehiculoCompartidoSalida(VehiculoSalidaCompartida):
             mantenimientos=mantenimientos,
             duenos_historico=duenos_historico,
         )
+
+
+# ════════════════ Publicaciones del marketplace (Pilar 4 — feed mixto) ════════════════
+#
+# Dos entidades: internas (las publica un usuario sobre su placa, con plan light/premium)
+# y referenciadas (anuncios raspados de portales externos). El feed público las mezcla en
+# tres niveles. Privacidad §10.6: nunca VIN completo ni nombre del dueño.
+
+
+class PublicacionInternaCrear(BaseModel):
+    """Alta de una publicación. El `plan` premium se cobra en el router (tokens)."""
+
+    placa: str = Field(min_length=6, max_length=10)
+    titulo: str | None = Field(default=None, max_length=160)
+    descripcion: str | None = Field(default=None, max_length=2000)
+    precio_usd: Decimal = Field(gt=0, description="Precio de venta; debe ser > 0")
+    plan: PlanPublicacion = PlanPublicacion.LIGHT
+    vehiculo_id: int | None = Field(
+        default=None,
+        description="Vehículo del garage a vincular (habilita detalles premium)",
+    )
+
+    @field_validator("placa")
+    @classmethod
+    def _placa_valida(cls, v: str) -> str:
+        return validar_placa(v)
+
+
+class PublicacionInternaActualizar(BaseModel):
+    """Edición parcial. `plan=premium` dispara el cobro de tokens en el router."""
+
+    titulo: str | None = Field(default=None, max_length=160)
+    descripcion: str | None = Field(default=None, max_length=2000)
+    precio_usd: Decimal | None = Field(default=None, gt=0)
+    plan: PlanPublicacion | None = None
+    estado: EstadoPublicacion | None = None
+
+
+class ResumenMantenimientos(BaseModel):
+    """Resumen de mantenimientos del vehículo vinculado (argumento de venta premium)."""
+
+    total: int = 0
+    ultima_fecha: date | None = None
+    ultimo_kilometraje: int | None = None
+
+
+class PublicacionInternaSalida(BaseModel):
+    """Vista pública de una publicación interna. Sin VIN ni nombre del dueño."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    placa: str
+    titulo: str | None
+    descripcion: str | None
+    precio_usd: Decimal
+    plan: PlanPublicacion
+    estado: EstadoPublicacion
+    estado_verificacion: EstadoVerificacion
+    destacado: bool
+    verificado: bool = False
+    # Características derivadas del vehículo vinculado (si lo hay). Nunca VIN.
+    marca: str | None = None
+    modelo: str | None = None
+    anio: int | None = None
+    # Argumento premium: solo presente si plan=premium y hay vehículo vinculado.
+    mantenimientos: ResumenMantenimientos | None = None
+    creado_en: datetime
+
+    @classmethod
+    def desde_modelo(cls, p: PublicacionInterna) -> "PublicacionInternaSalida":
+        """Deriva características y, si es premium, el resumen de mantenimientos del
+        vehículo vinculado (que el router debe cargar con selectinload)."""
+        veh = p.vehiculo
+        es_premium = p.plan == PlanPublicacion.PREMIUM.value
+
+        mantenimientos: ResumenMantenimientos | None = None
+        if es_premium and veh is not None and veh.mantenimientos:
+            regs = veh.mantenimientos
+            mantenimientos = ResumenMantenimientos(
+                total=len(regs),
+                ultima_fecha=max(m.fecha for m in regs),
+                ultimo_kilometraje=max(m.kilometraje_relacionado for m in regs),
+            )
+
+        return cls(
+            id=p.id,
+            placa=p.placa,
+            titulo=p.titulo,
+            descripcion=p.descripcion,
+            precio_usd=p.precio_usd,
+            plan=PlanPublicacion(p.plan),
+            estado=EstadoPublicacion(p.estado),
+            estado_verificacion=EstadoVerificacion(p.estado_verificacion),
+            destacado=p.destacado,
+            verificado=p.estado_verificacion == EstadoVerificacion.VERIFICADO.value,
+            marca=getattr(veh, "marca", None),
+            modelo=getattr(veh, "modelo", None),
+            anio=getattr(veh, "anio", None),
+            mantenimientos=mantenimientos,
+            creado_en=p.creado_en,
+        )
+
+
+class PublicacionReferenciadaSalida(BaseModel):
+    """Vista de un anuncio raspado de un portal externo."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    placa: str | None
+    marca: str | None
+    modelo: str | None
+    anio: int | None
+    precio_usd: Decimal | None
+    fuente: str
+    url_externa: str
+    imagen_url: str | None
+    creado_en: datetime
+
+
+class FeedMarketplaceSalida(BaseModel):
+    """Feed público en tres niveles: premium destacados, light, y referenciados.
+
+    El frontend pinta cada nivel en su sección (premium arriba, referenciados al pie).
+    """
+
+    premium: list[PublicacionInternaSalida] = Field(default_factory=list)
+    estandar: list[PublicacionInternaSalida] = Field(default_factory=list)
+    referenciadas: list[PublicacionReferenciadaSalida] = Field(default_factory=list)

@@ -25,4 +25,8 @@ from src.modules.consulta.models.consulta import Consulta  # noqa: F401
 from src.modules.consulta.models.cola_scraping import ColaScraping  # noqa: F401
 
 # marketplace
-from src.modules.marketplace.models import EnlaceCompartido  # noqa: F401
+from src.modules.marketplace.models import (  # noqa: F401
+    EnlaceCompartido,
+    PublicacionInterna,
+    PublicacionReferenciada,
+)

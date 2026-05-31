@@ -21,6 +21,7 @@ from src.modules.consulta.schemas import (
     VehiculoConsolidadoResponse,
 )
 from src.modules.consulta.services.catalogo_fuentes import CATALOGO_FUENTES
+from src.core.ofuscacion import decodificar_origen_vin, ofuscar_identificador
 
 
 def _item_estado(clave: str, crudo: dict | None) -> EstadoFuenteItem:
@@ -63,9 +64,39 @@ def _parsear_anio(*candidatos) -> int | None:
     return None
 
 
+def _construir_identificacion(
+    vin: str | None,
+    motor: str | None,
+    chasis: str | None,
+    pais: str | None,
+    desbloqueado: bool,
+) -> Identificacion:
+    """Arma la sección de identificadores sensibles según el nivel de acceso.
+
+    - `desbloqueado=False` (default, vista pública/anónima): solo los campos
+      `*_ofuscado` (primeros 3 caracteres + máscara). Los campos en claro van None.
+    - `desbloqueado=True` (usuario pagó tokens): los campos en claro traen el valor
+      completo, además de la vista ofuscada (por compatibilidad con el frontend).
+
+    El país de origen se decodifica del WMI del VIN si la fuente no lo aportó directo.
+    """
+    pais_origen = pais or decodificar_origen_vin(vin or "").get("pais")
+    return Identificacion(
+        bloqueado=not desbloqueado,
+        vin=vin if desbloqueado else None,
+        numero_motor=motor if desbloqueado else None,
+        numero_chasis=chasis if desbloqueado else None,
+        vin_ofuscado=ofuscar_identificador(vin),
+        numero_motor_ofuscado=ofuscar_identificador(motor),
+        numero_chasis_ofuscado=ofuscar_identificador(chasis),
+        pais_origen=pais_origen,
+    )
+
+
 def consolidar_placa(
     placa: str,
     resultados: dict[str, dict],
+    desbloqueado: bool = False,
 ) -> VehiculoConsolidadoResponse:
     """Agrega las respuestas por-fuente en el perfil consolidado.
 
@@ -94,9 +125,16 @@ def consolidar_placa(
         pais_origen=sri_veh.get("pais"),
     )
 
-    # Identificación: chasis/motor vienen de fuentes no oficiales aún sin integrar;
-    # por ahora solo el país de origen (cuando lo aporte el SRI).
-    identificacion = Identificacion(pais_origen=sri_veh.get("pais"))
+    # Identificación: VIN/motor/chasis vendrían de fuentes no oficiales aún sin
+    # integrar (ConsultasEcuador tras reCAPTCHA). Se extraen best-effort por si una
+    # fuente futura los aporta; se ofuscan salvo que `desbloqueado` sea True (el
+    # usuario pagó tokens en POST /consultar/{placa}/desbloquear).
+    vin_crudo = ant_veh.get("vin") or sri_veh.get("vin") or None
+    motor_crudo = ant_veh.get("numero_motor") or ant_veh.get("motor") or None
+    chasis_crudo = ant_veh.get("numero_chasis") or ant_veh.get("chasis") or None
+    identificacion = _construir_identificacion(
+        vin_crudo, motor_crudo, chasis_crudo, sri_veh.get("pais"), desbloqueado
+    )
 
     # Valores tributarios (SRI): enlace al portal (consulta_externa) o montos.
     valores_tributarios: ValoresTributarios | None = None

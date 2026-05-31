@@ -81,12 +81,44 @@ class DatosBasicos(BaseModel):
 
 
 class Identificacion(BaseModel):
-    """Identificadores sensibles, SIEMPRE ofuscados para terceros (AGENTS.md §7)."""
+    """Identificadores sensibles del vehículo (AGENTS.md §7).
 
+    Por defecto van OFUSCADOS para cualquiera (`bloqueado=True`): solo se exponen
+    los campos `*_ofuscado` (primeros 3 caracteres + máscara) y el país de origen.
+    Un usuario autenticado puede pagar tokens para desbloquearlos
+    (`POST /consultar/{placa}/desbloquear`): entonces `bloqueado=False` y los campos
+    en claro (`vin`, `numero_motor`, `numero_chasis`) traen el valor completo.
+
+    Nota AS-IS: hoy ninguna fuente del flujo público entrega VIN/motor/chasis en
+    claro (ConsultasEcuador, que los aportaría, está tras reCAPTCHA → consulta_externa).
+    El mecanismo de gateo/cobro queda listo; los campos en claro se llenan cuando esa
+    fuente se cablee. Por eso el endpoint de desbloqueo NO cobra si no hay dato sensible.
+    """
+
+    bloqueado: bool = Field(
+        True, description="True si los identificadores están ofuscados (no se pagó desbloqueo)"
+    )
+    # Valores en claro: solo presentes cuando bloqueado=False (tras pagar tokens).
+    vin: str | None = Field(None, description="VIN completo; solo si bloqueado=False")
+    numero_motor: str | None = Field(None, description="N° de motor; solo si bloqueado=False")
+    numero_chasis: str | None = Field(None, description="N° de chasis; solo si bloqueado=False")
+    # Vista ofuscada: siempre presente si la fuente aportó el identificador.
     vin_ofuscado: str | None = None
     numero_motor_ofuscado: str | None = None
     numero_chasis_ofuscado: str | None = None
     pais_origen: str | None = Field(None, description="País decodificado del WMI del VIN")
+
+    @property
+    def hay_dato_sensible(self) -> bool:
+        """True si la fuente aportó algún identificador sensible (ofuscado o no)."""
+        return bool(
+            self.vin
+            or self.numero_motor
+            or self.numero_chasis
+            or self.vin_ofuscado
+            or self.numero_motor_ofuscado
+            or self.numero_chasis_ofuscado
+        )
 
 
 class MultaItem(BaseModel):

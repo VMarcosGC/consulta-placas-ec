@@ -7,11 +7,14 @@ import asyncio
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.orm import Session
 
 from src.core.database import obtener_sesion, SessionLocal
 from src.core.validators import validar_placa, validar_cedula
+from src.modules.auth.dependencies import usuario_actual
+from src.modules.auth.models import Usuario
+from src.modules.tokens.service import debitar_tokens, SaldoInsuficiente
 from src.modules.consulta.services.ant import consultar_ant
 from src.modules.consulta.services.amt import consultar_amt
 from src.modules.consulta.services.epmtsd import consultar_epmtsd
@@ -42,6 +45,10 @@ VENTANA_ERROR_FUENTE_MINUTOS = TTL_TRANSACCIONAL_MINUTOS
 # Fuentes servidas por el worker híbrido (las únicas reintentables). FGE salió: el
 # portal SIAF agregó hCaptcha y pasó a `consulta_externa` (ver fiscalia.py).
 FUENTES_WORKER = {"AMT", "EPMTSD"}
+
+# Tokens que cuesta desbloquear los identificadores sensibles (VIN/motor/chasis) de
+# un perfil consultado. Configurable por env por si cambia el modelo de precios.
+TOKENS_DESBLOQUEO_PERFIL = int(os.getenv("TOKENS_DESBLOQUEO_PERFIL", "1"))
 
 # Modo SÍNCRONO: si el backend corre desde una IP que SÍ alcanza las fuentes (IP
 # residencial de Ecuador), scrapea AMT/EPMTSD/FGE en el acto (en paralelo) en vez de
@@ -285,6 +292,57 @@ async def consultar_perfil(placa: str, sesion: Session = Depends(obtener_sesion)
 
     fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
     return consolidar_placa(placa_limpia, fuentes)
+
+
+@router.post("/consultar/{placa}/desbloquear", response_model=VehiculoConsolidadoResponse)
+async def desbloquear_perfil(
+    placa: str,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Desbloquea los identificadores sensibles (VIN/motor/chasis) del perfil a
+    cambio de tokens de la billetera del usuario.
+
+    - Requiere JWT (401 si no hay sesión válida, vía `usuario_actual`).
+    - Si no hay ningún identificador sensible que revelar (caso AS-IS: las fuentes
+      del flujo público no entregan VIN en claro) → NO cobra y devuelve el perfil
+      desbloqueado igual, para no quemar tokens por nada.
+    - Si hay dato, debita `TOKENS_DESBLOQUEO_PERFIL`; si el saldo no alcanza →
+      **402 Payment Required** (excepción acordada al contrato 422 de §10.2, por ser
+      un flujo de pago). El débito + auditoría se commitean atómicamente.
+
+    Devuelve el mismo perfil que `GET .../perfil` pero con `identificacion.bloqueado=False`
+    y los campos en claro poblados.
+    """
+    try:
+        placa_limpia = validar_placa(placa)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Consolidar primero EN CLARO para saber si hay algo que cobrar.
+    fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
+    perfil = consolidar_placa(placa_limpia, fuentes, desbloqueado=True)
+
+    if not perfil.identificacion.hay_dato_sensible:
+        # Nada que desbloquear: gratis. (El frontend puede avisar "sin datos extra".)
+        return perfil
+
+    try:
+        debitar_tokens(
+            sesion,
+            usuario,
+            TOKENS_DESBLOQUEO_PERFIL,
+            motivo=f"desbloqueo_perfil:{placa_limpia}",
+        )
+        sesion.commit()
+    except SaldoInsuficiente as e:
+        sesion.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=str(e),
+        )
+
+    return perfil
 
 
 @router.get("/consultar/{placa}")

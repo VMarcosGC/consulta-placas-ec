@@ -39,7 +39,9 @@ src/
 `run.py`, `worker.py`, `scripts/discover.py`.
 
 **Dependencias entre módulos (dirección permitida):** `tokens`→`auth`, `vehiculos`→`auth`,
-`marketplace`→`vehiculos`+`tokens`, `consulta`→`core`; todos→`core`.
+`marketplace`→`vehiculos`+`tokens`, `consulta`→`core`+`auth`+`tokens`; todos→`core`.
+(`consulta`→`auth`+`tokens` se agregó al cablear el desbloqueo de identificadores por tokens:
+`POST /consultar/{placa}/desbloquear` usa `usuario_actual` y `debitar_tokens`, ambas interfaces públicas.)
 **Regla de oro:** los módulos se comunican por la **interfaz pública** del otro (funciones de
 servicio expuestas, ej. `debitar_tokens`); no se importan internals ajenos fuera de esa dirección.
 Un cambio en un dominio debe quedar contenido en su carpeta; si cruza módulos, queda como un
@@ -292,7 +294,7 @@ Reglas arquitectónicas **inmutables** para Billetera, Favoritos, Mantenimientos
 - **Migraciones manuales** (SQLAlchemy 2 + Alembic): no usar `--autogenerate` a ciegas. Cada archivo en `alembic/versions/` se revisa a mano y lleva nombre descriptivo (ej. `0004_billetera.py`). Ver skill [modelo-dominio-vehiculo](.claude/skills/modelo-dominio-vehiculo/SKILL.md).
 - **Eager loading en Marketplace**: las consultas de SQLAlchemy que carguen vehículos con sus relaciones para el Marketplace deben usar **`selectinload`** para evitar el problema N+1 y optimizar el listado.
 - **Idioma español estricto** (ver sección 5): tablas (`mantenimientos`, `vehiculos_favoritos`, `transacciones_tokens`), columnas (`kilometraje_relacionado`, `precio_venta_usd`, `url_externa`, `en_venta`), rutas (`/favoritos`, `/marketplace`) y variables.
-- **Contrato de API estándar** (ver sección 6 y skill [respuesta-api-estandar](.claude/skills/respuesta-api-estandar/SKILL.md)): todo error de negocio se maneja elegantemente con un JSON estructurado — **nunca un crash / HTTP 500**. Códigos según el precedente del proyecto: **422** para validación de negocio (ej. "no tienes tokens suficientes", igual que kilometraje no monotónico), **404** para "no es tu vehículo" (no distinguir 403 de 404, para no filtrar IDs ajenos), **400** para formato de input inválido, **409** para conflictos (placa/email duplicado).
+- **Contrato de API estándar** (ver sección 6 y skill [respuesta-api-estandar](.claude/skills/respuesta-api-estandar/SKILL.md)): todo error de negocio se maneja elegantemente con un JSON estructurado — **nunca un crash / HTTP 500**. Códigos según el precedente del proyecto: **422** para validación de negocio (ej. kilometraje no monotónico), **404** para "no es tu vehículo" (no distinguir 403 de 404, para no filtrar IDs ajenos), **400** para formato de input inválido, **409** para conflictos (placa/email duplicado). **Excepción acordada (2026-05-30):** los **flujos de pago con tokens** (saldo insuficiente al desbloquear un perfil o publicar premium) devuelven **402 Payment Required**, no 422. El servicio `debitar_tokens` sigue lanzando `SaldoInsuficiente`; el endpoint la traduce a 402. (Antes el spec decía 422 también para tokens; se reservó 422 para validación pura y 402 para "te falta saldo".)
 
 ### 10.3 Reglas de negocio — Billetera de tokens
 - **Saldo inicial**: todo usuario nuevo nace con **5 tokens** por defecto (saldo de cortesía).
