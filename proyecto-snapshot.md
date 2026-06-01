@@ -101,6 +101,9 @@ Frontend (`../consulta-placas-web/src`): `app/{page,consultar,consultar/[placa],
   Valor del token USD 0.05 → **USD 0.04**. `titular_validado`/`valores_matricula_sri`/
   `alertas_legales` `disponible=false` (enlace oficial / sin proveedor confiable). Paquetes de
   recarga referenciales ($1→25t … $10→280t). Sin proveedores reales ni evasión de captcha.
+  **Frontend alineado** (commit `ac418ed`): precios reescritos al modelo por tokens; ficha
+  pública sin candado (gratis); `PerfilVehiculo` con códigos nuevos; copy corregido ("Conoce";
+  no se promete SRI/Fiscalía automáticos). Listo para iniciar **Fase 3** sin inconsistencias.
 - **Microdesbloqueos por tokens v2** (migración **0015**): catálogo **en BD**
   (`productos_consulta`, fuente de verdad de precios; seed canónico en
   `services/catalogo_productos.py`) + `desbloqueos_consulta` (auditoría comercial:
@@ -118,7 +121,7 @@ Frontend (`../consulta-placas-web/src`): `app/{page,consultar,consultar/[placa],
 - Saldo de tokens visible en el header. Perfil sobrio; sesión persistente; ciudad en el garage;
   referencias como enlace vivo a Facebook; español de Ecuador; landing navegable.
 
-**Git** — backend HEAD: `2141cda` · frontend HEAD: `d6692ca`. Ambos repos limpios. **Prod**:
+**Git** — backend HEAD: `19fafd0` (+ docs) · frontend HEAD: `ac418ed`. Ambos repos limpios. **Prod**:
 Render + Vercel · BD Neon en `alembic head` **0016** (aplicar `alembic upgrade head`).
 
 ## 8. Para continuar en Gemini — instrucciones

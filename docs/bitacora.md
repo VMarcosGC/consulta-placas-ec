@@ -43,9 +43,16 @@ cobra por datos con **costo de proveedor externo, dificultad real o valor comerc
 ficha pública gratis, multas gateadas); imports de routers/consolidador/marketplace/registry OK;
 `alembic history` encadena `0015 → 0016 (head)`.
 
-**Pendiente:** **frontend** (repo separado) debe dejar de pintar candado sobre la ficha pública
-(ahora gratis) y mapear los nuevos códigos/copy; integrar proveedores reales para activar
-`titular_validado`/`valores_matricula_sri`/`alertas_legales` (hoy enlace oficial).
+**Frontend alineado** (repo `consulta-placas-web`, commit `ac418ed`): página de precios reescrita
+al modelo por tokens (1 token = USD 0.04; paquetes $1=25/$2.50=65/$5=135/$10=280); la ficha
+pública ya no se pinta con candado (gratis); `PerfilVehiculo` usa los códigos nuevos
+(`multas_con_montos`, `identificadores_tecnicos`) y el botón muestra el nombre-acción del
+producto; copy corregido ("Conoce"; no se promete SRI/Fiscalía automáticos, frase de enlaces
+oficiales). No se rediseñó el marketplace.
+
+**Pendiente:** integrar proveedores reales para activar `titular_validado`/
+`valores_matricula_sri`/`alertas_legales` (hoy enlace oficial). Iniciar **Fase 3** sin
+inconsistencias comerciales/visuales.
 
 ---
 
