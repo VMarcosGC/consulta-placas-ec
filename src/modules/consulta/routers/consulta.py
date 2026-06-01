@@ -7,17 +7,15 @@ import asyncio
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from src.core.database import obtener_sesion, SessionLocal
 from src.core.validators import validar_placa, validar_cedula
-from src.modules.auth.dependencies import usuario_actual, usuario_actual_opcional
+from src.modules.auth.dependencies import usuario_actual_opcional
 from src.modules.auth.models import Usuario
-from src.modules.tokens.service import SaldoInsuficiente
-from src.modules.consulta.services.catalogo_productos import producto as catalogo_producto
 from src.modules.consulta.services.desbloqueos import (
-    desbloquear_producto,
+    catalogo_activo,
     productos_desbloqueados,
 )
 from src.modules.consulta.services.ant import consultar_ant
@@ -301,89 +299,13 @@ async def consultar_perfil(
     desbloqueados = (
         productos_desbloqueados(sesion, usuario.id, placa_limpia) if usuario else set()
     )
+    catalogo = catalogo_activo(sesion)
     fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
-    return consolidar_placa(placa_limpia, fuentes, desbloqueados)
+    return consolidar_placa(placa_limpia, fuentes, desbloqueados, catalogo)
 
 
-async def _desbloquear_y_consolidar(
-    sesion: Session, usuario: Usuario, placa_limpia: str, codigo: str
-) -> VehiculoConsolidadoResponse:
-    """Lógica compartida de microdesbloqueo: valida producto, disponibilidad, cobra y
-    devuelve el perfil ya con la sección revelada. Contratos:
-    - producto inexistente → 400.
-    - dato no disponible para la placa → 409 (no cobra).
-    - ya desbloqueado → idempotente (no recobra).
-    - saldo insuficiente → 402.
-    """
-    prod = catalogo_producto(codigo)
-    if prod is None:
-        raise HTTPException(status_code=400, detail=f"Producto desconocido: {codigo!r}")
-
-    # Consolidar con lo ya desbloqueado para conocer disponibilidad real del producto.
-    desbloqueados = productos_desbloqueados(sesion, usuario.id, placa_limpia)
-    fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
-    perfil = consolidar_placa(placa_limpia, fuentes, desbloqueados)
-
-    estado = next((p for p in perfil.productos if p.codigo == codigo), None)
-    if estado is None or not estado.disponible:
-        # No hay dato que entregar → no se cobra (regla: cobrar solo lo entregado).
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Ese dato no está disponible para esta placa por ahora.",
-        )
-    if estado.desbloqueado:
-        return perfil  # idempotente: ya pagado, no se recobra
-
-    try:
-        desbloquear_producto(sesion, usuario, placa_limpia, prod)
-    except SaldoInsuficiente as e:
-        sesion.rollback()
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
-
-    # Re-consolidar con el producto ya desbloqueado para devolver la sección revelada.
-    desbloqueados = productos_desbloqueados(sesion, usuario.id, placa_limpia)
-    return consolidar_placa(placa_limpia, fuentes, desbloqueados)
-
-
-@router.post(
-    "/consultar/{placa}/desbloquear/{producto}", response_model=VehiculoConsolidadoResponse
-)
-async def desbloquear_producto_endpoint(
-    placa: str,
-    producto: str,
-    sesion: Session = Depends(obtener_sesion),
-    usuario: Usuario = Depends(usuario_actual),
-):
-    """Desbloquea un **producto** del catálogo para esta placa, cobrando tokens.
-
-    Requiere JWT. Ver `_desbloquear_y_consolidar` para los códigos de estado (400/409/402).
-    """
-    try:
-        placa_limpia = validar_placa(placa)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return await _desbloquear_y_consolidar(sesion, usuario, placa_limpia, producto)
-
-
-@router.post("/consultar/{placa}/desbloquear", response_model=VehiculoConsolidadoResponse)
-async def desbloquear_perfil(
-    placa: str,
-    sesion: Session = Depends(obtener_sesion),
-    usuario: Usuario = Depends(usuario_actual),
-):
-    """**Alias retrocompatible**: desbloquea los identificadores (VIN/motor/chasis).
-
-    Equivale a `POST /consultar/{placa}/desbloquear/vehiculo_identificadores`. Se mantiene
-    para el frontend ya desplegado; el costo ahora es el del producto del catálogo, no
-    `TOKENS_DESBLOQUEO_PERFIL`.
-    """
-    try:
-        placa_limpia = validar_placa(placa)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return await _desbloquear_y_consolidar(
-        sesion, usuario, placa_limpia, "vehiculo_identificadores"
-    )
+# Los endpoints de microdesbloqueo (GET productos / POST desbloquear / GET desbloqueos)
+# viven en src/modules/consulta/routers/desbloqueos.py (router dedicado).
 
 
 @router.get("/consultar/{placa}")

@@ -23,7 +23,11 @@ from src.modules.vehiculos.models.vehiculo_favorito import VehiculoFavorito  # n
 # consulta
 from src.modules.consulta.models.consulta import Consulta  # noqa: F401
 from src.modules.consulta.models.cola_scraping import ColaScraping  # noqa: F401
-from src.modules.consulta.models.desbloqueo import Desbloqueo  # noqa: F401
+from src.modules.consulta.models.desbloqueos import (  # noqa: F401
+    ProductoConsulta,
+    DesbloqueoConsulta,
+    CostoProveedorConsulta,
+)
 
 # marketplace
 from src.modules.marketplace.models import (  # noqa: F401

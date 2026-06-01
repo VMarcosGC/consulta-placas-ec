@@ -1,89 +1,136 @@
-"""Lógica de microdesbloqueos: qué productos tiene un usuario para una placa y cómo
-desbloquear uno nuevo cobrando tokens.
+"""Lógica de microdesbloqueos v2: catálogo en BD + registro de desbloqueos.
 
 Reglas (docs/producto/reglas_monetizacion_tokens.md):
 - Idempotente: un producto ya desbloqueado para (usuario, placa) NO se recobra.
-- Atómico: débito + filas de `desbloqueos` se commitean juntos (el caller no commitea).
+- Atómico: débito de tokens + filas de `desbloqueos_consulta` se commitean juntos.
 - Saldo insuficiente → `SaldoInsuficiente` (el router la traduce a HTTP 402).
-- La **disponibilidad** del dato la valida el router (necesita los datos consolidados);
-  este servicio no cobra a ciegas: el router solo llama a `desbloquear_producto` si hay dato.
+- Producto inactivo o inexistente → el router responde 422/400 (no se desbloquea).
+- La disponibilidad del dato la decide el consolidador (qué productos tienen datos); el
+  router solo cobra si el producto está disponible para esa placa.
 """
 from __future__ import annotations
+
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.modules.auth.models import Usuario
-from src.modules.consulta.models.desbloqueo import Desbloqueo
-from src.modules.consulta.services.catalogo_productos import CATALOGO_PRODUCTOS, ProductoConsulta
+from src.modules.consulta.models.desbloqueos import DesbloqueoConsulta, ProductoConsulta
+from src.modules.consulta.services.catalogo_productos import BUNDLE_INCLUYE, SEED_PRODUCTOS
 from src.modules.tokens.service import debitar_tokens
 
 
+def inicializar_catalogo(sesion: Session) -> int:
+    """Siembra el catálogo base de forma IDEMPOTENTE (no duplica). Devuelve cuántos creó.
+
+    Inserta solo los códigos que falten (la migración 0015 ya siembra; esto es la red de
+    seguridad para entornos nuevos o si se agrega un producto al seed)."""
+    existentes = set(sesion.execute(select(ProductoConsulta.codigo)).scalars().all())
+    creados = 0
+    for p in SEED_PRODUCTOS:
+        if p["codigo"] in existentes:
+            continue
+        sesion.add(
+            ProductoConsulta(
+                codigo=p["codigo"],
+                nombre=p["nombre"],
+                descripcion=p["descripcion"],
+                tokens=p["tokens"],
+                precio_referencial_usd=Decimal(p["precio_referencial_usd"]),
+                sensibilidad=p["sensibilidad"],
+                orden=p["orden"],
+            )
+        )
+        creados += 1
+    if creados:
+        sesion.commit()
+    return creados
+
+
+def catalogo_activo(sesion: Session) -> list[ProductoConsulta]:
+    """Productos activos del catálogo, ordenados para presentación."""
+    return list(
+        sesion.execute(
+            select(ProductoConsulta)
+            .where(ProductoConsulta.activo.is_(True))
+            .order_by(ProductoConsulta.orden.asc(), ProductoConsulta.id.asc())
+        ).scalars().all()
+    )
+
+
+def obtener_producto(sesion: Session, codigo: str) -> ProductoConsulta | None:
+    """Producto del catálogo por código (cualquier estado), o None si no existe."""
+    return sesion.execute(
+        select(ProductoConsulta).where(ProductoConsulta.codigo == codigo)
+    ).scalar_one_or_none()
+
+
 def productos_desbloqueados(sesion: Session, usuario_id: int, placa: str) -> set[str]:
-    """Conjunto de códigos de producto que el usuario ya desbloqueó para esa placa."""
+    """Conjunto de códigos que el usuario ya desbloqueó para esa placa."""
     filas = sesion.execute(
-        select(Desbloqueo.producto).where(
-            Desbloqueo.usuario_id == usuario_id,
-            Desbloqueo.placa == placa,
+        select(DesbloqueoConsulta.producto_codigo).where(
+            DesbloqueoConsulta.usuario_id == usuario_id,
+            DesbloqueoConsulta.placa == placa,
         )
     ).scalars().all()
     return set(filas)
 
 
-def desbloquear_producto(
-    sesion: Session, usuario: Usuario, placa: str, producto: ProductoConsulta
-) -> bool:
-    """Desbloquea `producto` para (usuario, placa). Devuelve True si cobró, False si ya
-    estaba desbloqueado (idempotente, sin recobro).
+def listar_desbloqueos(sesion: Session, usuario_id: int, placa: str) -> list[DesbloqueoConsulta]:
+    """Desbloqueos del usuario para esa placa, del más reciente al más antiguo."""
+    return list(
+        sesion.execute(
+            select(DesbloqueoConsulta)
+            .where(
+                DesbloqueoConsulta.usuario_id == usuario_id,
+                DesbloqueoConsulta.placa == placa,
+            )
+            .order_by(DesbloqueoConsulta.creado_en.desc())
+        ).scalars().all()
+    )
 
-    Cobra los tokens del producto y persiste una fila por el producto y por cada código
-    `incluye` (bundle) que no estuviera ya desbloqueado. Lanza `SaldoInsuficiente` si no
-    alcanza el saldo (sin mutar nada). Commitea al final (débito + filas juntos).
-    """
+
+def desbloquear(
+    sesion: Session,
+    usuario: Usuario,
+    placa: str,
+    producto: ProductoConsulta,
+    *,
+    resultado_cache_id: int | None = None,
+    proveedor_usado: str | None = None,
+    costo_estimado: Decimal | None = None,
+) -> bool:
+    """Desbloquea `producto` para (usuario, placa). True si cobró, False si ya estaba
+    desbloqueado (idempotente, sin recobro).
+
+    Cobra `producto.tokens` y registra una fila por el producto y por cada código incluido
+    (bundle) que falte. Lanza `SaldoInsuficiente` si no alcanza (sin mutar nada). Commitea
+    al final (débito + filas juntos)."""
     ya = productos_desbloqueados(sesion, usuario.id, placa)
     if producto.codigo in ya:
         return False
 
-    # Cobra una sola vez el precio del producto (el caller ya validó disponibilidad).
     debitar_tokens(
         sesion, usuario, producto.tokens, motivo=f"desbloqueo:{producto.codigo}:{placa}"
     )
 
-    # Persiste el producto comprado + los incluidos (bundle) que falten. El precio se
-    # imputa al producto comprado; los incluidos quedan con tokens_cobrados=0 (vienen "gratis").
-    codigos = {producto.codigo} | set(producto.incluye)
+    codigos = {producto.codigo} | set(BUNDLE_INCLUYE.get(producto.codigo, ()))
     for codigo in codigos:
         if codigo in ya:
             continue
+        es_principal = codigo == producto.codigo
         sesion.add(
-            Desbloqueo(
+            DesbloqueoConsulta(
                 usuario_id=usuario.id,
                 placa=placa,
-                producto=codigo,
-                tokens_cobrados=producto.tokens if codigo == producto.codigo else 0,
+                producto_codigo=codigo,
+                tokens_cobrados=producto.tokens if es_principal else 0,
+                precio_referencial_usd=producto.precio_referencial_usd if es_principal else None,
+                proveedor_usado=proveedor_usado if es_principal else None,
+                costo_estimado_usd=costo_estimado if es_principal else None,
+                resultado_cache_id=resultado_cache_id if es_principal else None,
             )
         )
     sesion.commit()
     return True
-
-
-def estado_catalogo(desbloqueados: set[str], disponibles: set[str]) -> list[dict]:
-    """Arma la lista de productos con su estado para el frontend.
-
-    `desbloqueados`: códigos ya comprados por el usuario para la placa.
-    `disponibles`: códigos cuyos datos SÍ se obtuvieron para esa placa (cobrables).
-    """
-    items = []
-    for p in CATALOGO_PRODUCTOS.values():
-        items.append(
-            {
-                "codigo": p.codigo,
-                "nombre": p.nombre,
-                "tokens": p.tokens,
-                "sensibilidad": p.sensibilidad.value,
-                "descripcion": p.descripcion,
-                "desbloqueado": p.codigo in desbloqueados,
-                "disponible": p.codigo in disponibles,
-            }
-        )
-    return items

@@ -17,6 +17,7 @@ from src.core.database import CORS_ORIGINS
 from src.modules.auth.router import router as auth_router
 from src.modules.tokens.router import router as tokens_router
 from src.modules.consulta.routers.consulta import router as consulta_router
+from src.modules.consulta.routers.desbloqueos import router as desbloqueos_router
 from src.modules.consulta.routers.ocr import router as ocr_router
 from src.modules.vehiculos.routers.vehiculos import router as vehiculos_router
 from src.modules.vehiculos.routers.duenos import router as duenos_router
@@ -40,6 +41,7 @@ app.add_middleware(
 
 # Consulta pública (incluye / y /health) + OCR
 app.include_router(consulta_router)
+app.include_router(desbloqueos_router)
 app.include_router(ocr_router)
 # Identidad y billetera
 app.include_router(auth_router)

@@ -11,9 +11,11 @@ la respuesta —el frontend muestra skeletons mientras se completan.
 """
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.modules.consulta.services.catalogo_fuentes import Origen, Prioridad
 
@@ -189,12 +191,74 @@ class ProductoEstado(BaseModel):
     codigo: str
     nombre: str
     tokens: int
+    precio_referencial_usd: Decimal | None = None
     sensibilidad: str
-    descripcion: str
+    descripcion: str | None = None
     desbloqueado: bool = False
     disponible: bool = Field(
         True, description="False si la fuente no entrega ese dato para esta placa (no cobrable)"
     )
+
+
+# ── Catálogo y desbloqueos (microdesbloqueos v2) ────────────────────────────
+
+class ProductoConsultaCreate(BaseModel):
+    """Alta/edición de un producto del catálogo (uso administrativo / seed)."""
+
+    codigo: str = Field(max_length=40)
+    nombre: str = Field(max_length=120)
+    descripcion: str | None = Field(default=None, max_length=500)
+    tokens: int = Field(ge=0)
+    precio_referencial_usd: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
+    sensibilidad: str = Field(default="baja", max_length=16)
+    activo: bool = True
+    orden: int = 0
+
+
+class ProductoConsultaResponse(BaseModel):
+    """Producto del catálogo tal como vive en BD."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    codigo: str
+    nombre: str
+    descripcion: str | None
+    tokens: int
+    precio_referencial_usd: Decimal
+    sensibilidad: str
+    activo: bool
+    orden: int
+
+
+class DesbloqueoConsultaRequest(BaseModel):
+    """Cuerpo (opcional) del POST de desbloqueo. El producto va en la ruta; reservado
+    para futuras opciones (ej. forzar un proveedor)."""
+
+    proveedor_preferido: str | None = Field(default=None, max_length=80)
+
+
+class DesbloqueoConsultaResponse(BaseModel):
+    """Registro de un desbloqueo realizado (auditoría comercial)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    placa: str
+    producto_codigo: str
+    tokens_cobrados: int
+    precio_referencial_usd: Decimal | None
+    proveedor_usado: str | None
+    costo_estimado_usd: Decimal | None
+    resultado_cache_id: int | None
+    creado_en: datetime
+
+
+class EstadoProductosPlacaResponse(BaseModel):
+    """Catálogo de productos con su estado (desbloqueado/disponible) para una placa."""
+
+    placa: str
+    productos: list[ProductoEstado] = Field(default_factory=list)
 
 
 class VehiculoConsolidadoResponse(BaseModel):

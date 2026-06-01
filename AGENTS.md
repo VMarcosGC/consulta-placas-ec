@@ -300,6 +300,7 @@ Reglas arquitectónicas **inmutables** para Billetera, Favoritos, Mantenimientos
 - **Saldo inicial**: todo usuario nuevo nace con **5 tokens** por defecto (saldo de cortesía).
 - **Límite inferior**: el saldo **nunca puede ser negativo** (`>= 0`). Toda operación de débito valida saldo suficiente antes de aplicar; si no alcanza, rechaza la operación con error de negocio (ver contrato HTTP en 10.2).
 - **Auditoría**: toda alteración del saldo genera un registro **obligatorio** en la tabla `transacciones_tokens`.
+- **Microdesbloqueos por tokens** (consulta por placa): el catálogo vive en BD (`productos_consulta`, fuente de verdad de precios; seed canónico en `services/catalogo_productos.py`). Cada compra se registra en `desbloqueos_consulta` (UK `usuario_id+placa+producto_codigo` → **no doble cobro**; idempotente). Reglas: **un producto inactivo no se desbloquea** (422); **no se cobra si el dato no está disponible** (409); saldo insuficiente → 402. Endpoints en `routers/desbloqueos.py`. Detalle en [docs/producto/modelo_tokens_microdesbloqueos.md](docs/producto/modelo_tokens_microdesbloqueos.md). **1 token ≈ USD 0.05.**
 
 ### 10.4 Reglas de negocio — Favoritos (`vehiculos_favoritos`)
 - **Desacoplamiento**: la tabla guarda la **placa como `String`**, **no** como clave foránea (FK) a `vehiculos`. Un usuario puede agregar a favoritos una placa que NO existe en nuestra BD ni le pertenece.

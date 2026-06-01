@@ -24,7 +24,6 @@ from src.modules.consulta.schemas import (
     VehiculoConsolidadoResponse,
 )
 from src.modules.consulta.services.catalogo_fuentes import CATALOGO_FUENTES
-from src.modules.consulta.services.catalogo_productos import CATALOGO_PRODUCTOS
 from src.core.ofuscacion import decodificar_origen_vin, ofuscar_identificador
 
 
@@ -117,6 +116,7 @@ def consolidar_placa(
     placa: str,
     resultados: dict[str, dict],
     productos_desbloqueados: frozenset[str] | set[str] = frozenset(),
+    catalogo: "list | tuple" = (),
 ) -> VehiculoConsolidadoResponse:
     """Agrega las respuestas por-fuente en el perfil consolidado, GATEADO por productos.
 
@@ -326,18 +326,19 @@ def consolidar_placa(
             m.model_copy(update={"valor_usd": None}) for m in multas_pendientes
         ]
 
-    # ── Catálogo con estado para el frontend ──
+    # ── Catálogo (BD) con estado para el frontend ──
     productos = [
         ProductoEstado(
             codigo=p.codigo,
             nombre=p.nombre,
             tokens=p.tokens,
-            sensibilidad=p.sensibilidad.value,
+            precio_referencial_usd=getattr(p, "precio_referencial_usd", None),
+            sensibilidad=p.sensibilidad,
             descripcion=p.descripcion,
             desbloqueado=p.codigo in productos_desbloqueados,
             disponible=p.codigo in disponibles,
         )
-        for p in CATALOGO_PRODUCTOS.values()
+        for p in catalogo
     ]
 
     return VehiculoConsolidadoResponse(

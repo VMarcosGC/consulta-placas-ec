@@ -10,6 +10,43 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-05-31 — Microdesbloqueos v2: catálogo en BD + auditoría comercial (backend)
+
+**Rama:** `main`. Evolución del v1 (catálogo en código + tabla `desbloqueos`) al v2 pedido.
+
+- **Migración 0015** (manual): crea `productos_consulta` (catálogo: codigo, nombre, tokens,
+  `precio_referencial_usd`, sensibilidad, activo, orden), `desbloqueos_consulta` (auditoría:
+  tokens_cobrados, precio_referencial_usd, proveedor_usado, costo_estimado_usd,
+  resultado_cache_id; UK usuario+placa+producto) y `costos_proveedor_consulta`. **Dropea**
+  `desbloqueos` (v1, solo prueba). **Siembra** el catálogo idempotente (ON CONFLICT DO NOTHING).
+- **Modelos** `ProductoConsulta` / `DesbloqueoConsulta` / `CostoProveedorConsulta` (reemplazan
+  `Desbloqueo`); registrados en `registry.py`.
+- **Catálogo en BD** como fuente de verdad; `catalogo_productos.py` queda como definición-semilla
+  (`SEED_PRODUCTOS` + `BUNDLE_INCLUYE`). `services/desbloqueos.inicializar_catalogo` siembra
+  idempotente; `catalogo_activo`, `obtener_producto`, `productos_desbloqueados`,
+  `listar_desbloqueos`, `desbloquear` (débito atómico, idempotente, expande bundle).
+- **Consolidador** ahora recibe `catalogo` (filas BD) para armar `productos`; el gateo de
+  secciones no cambia.
+- **Router dedicado** `routers/desbloqueos.py`: `GET /consultar/{placa}/productos`,
+  `POST /consultar/{placa}/desbloquear/{producto_codigo}` (400/422-inactivo/409/402, idempotente),
+  alias `POST .../desbloquear`, `GET /consultar/{placa}/desbloqueos`. Montado en `main.py`. Los
+  endpoints de desbloqueo salieron de `consulta.py` (el perfil sigue ahí, ahora pasa el catálogo).
+- **Schemas**: `ProductoConsultaCreate/Response`, `DesbloqueoConsultaRequest/Response`,
+  `EstadoProductosPlacaResponse` (+ `precio_referencial_usd` en `ProductoEstado`).
+- **Script de validación** `scripts/validar_desbloqueos.py` (sin BD): catálogo (7 productos,
+  1 token=USD0.05) + gateo teaser/unlock.
+
+**Compat:** el frontend desplegado NO cambia — mismos paths (`/desbloquear/{codigo}` y alias),
+el perfil mantiene `productos`; los GET nuevos son aditivos.
+
+**Verificación:** `configure_mappers` + carga app OK; 4 rutas presentes; migración 0015 renderiza
+(3 tablas + drop + seed ON CONFLICT); `scripts/validar_desbloqueos` pasa.
+
+**Pendientes:** proveedor externo para `titular_validado`/`tecnico` (siguen `disponible=false`);
+poblar `costos_proveedor_consulta` cuando exista proveedor; UI para `GET /desbloqueos` (historial).
+
+---
+
 ## 2026-05-31 — Cierre de pendientes: verificación 80 tokens + saldo en header + seam proveedor
 
 **Rama:** `main`.
