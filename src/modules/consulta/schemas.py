@@ -134,6 +134,32 @@ class Identificacion(BaseModel):
         )
 
 
+class Titular(BaseModel):
+    """Validación del titular del vehículo (PII de alta sensibilidad).
+
+    Política de datos sensibles: NUNCA se expone el nombre/cédula crudo del titular a un
+    tercero, ni siquiera tras pagar. El producto `titular_validado` revela, como máximo, una
+    **validación** (hay titular registrado) y el nombre **ofuscado** (iniciales). El valor
+    crudo solo lo ve el propio dueño en su garage, no esta vista pública.
+    """
+
+    bloqueado: bool = Field(
+        True, description="True si la validación del titular no se ha desbloqueado"
+    )
+    disponible: bool = Field(
+        False, description="True si el proveedor activo puede validar el titular de esta placa"
+    )
+    validado: bool | None = Field(
+        None, description="True si existe titular registrado validado (solo si desbloqueado)"
+    )
+    nombre_ofuscado: str | None = Field(
+        None, description="Iniciales del titular (J*** C*** P***); nunca el nombre completo"
+    )
+    mensaje: str | None = Field(
+        None, description="Texto para el frontend (es-EC, tuteo)"
+    )
+
+
 class MultaItem(BaseModel):
     """Multa/citación/infracción combinada de las fuentes de tránsito (resumen)."""
 
@@ -276,6 +302,7 @@ class VehiculoConsolidadoResponse(BaseModel):
     placa: str
     datos_basicos: DatosBasicos = Field(default_factory=DatosBasicos)
     identificacion: Identificacion = Field(default_factory=Identificacion)
+    titular: Titular = Field(default_factory=Titular)
     valores_tributarios: ValoresTributarios | None = None
     multas_pendientes: list[MultaItem] = Field(default_factory=list)
     multas_detalle: list[MultaDetalle] = Field(

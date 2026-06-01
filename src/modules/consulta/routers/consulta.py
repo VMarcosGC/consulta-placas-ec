@@ -32,6 +32,10 @@ from src.modules.consulta.services.cache import (
 )
 from src.modules.consulta.services.cola import encolar_scraping, fuente_en_error_reciente
 from src.modules.consulta.services.consolidador import consolidar_placa
+from src.modules.consulta.services.proveedor import (
+    capacidades_proveedor,
+    leer_proveedor_cacheado,
+)
 from src.modules.consulta.schemas import VehiculoConsolidadoResponse
 
 logger = logging.getLogger(__name__)
@@ -301,7 +305,17 @@ async def consultar_perfil(
     )
     catalogo = catalogo_activo(sesion)
     fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
-    return consolidar_placa(placa_limpia, fuentes, desbloqueados, catalogo)
+    # Proveedor: NO se llama en el preview gratis. Solo se lee lo ya cacheado (de un
+    # desbloqueo previo) y las capacidades (para marcar las tarjetas disponibles).
+    proveedor_datos = leer_proveedor_cacheado(sesion, placa_limpia)
+    return consolidar_placa(
+        placa_limpia,
+        fuentes,
+        desbloqueados,
+        catalogo,
+        proveedor_datos=proveedor_datos,
+        proveedor_capacidades=capacidades_proveedor(),
+    )
 
 
 # Los endpoints de microdesbloqueo (GET productos / POST desbloquear / GET desbloqueos)

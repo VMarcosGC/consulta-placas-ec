@@ -10,6 +10,55 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-06-01 — Fase 3: experiencia progresiva de desbloqueo + capa de proveedores
+
+**Rama:** `main`. Preview gratis → desbloqueo de bloques por tokens, con una capa de proveedores
+externos lista (sin credenciales reales todavía) y el frontend con tarjetas de desbloqueo.
+
+### Backend — capa de proveedores (`src/modules/consulta/providers/`)
+- **Contrato normalizado** `base.ResultadoVehicular` (placa, marca, modelo, anio, color, tipo,
+  clase, servicio, chasis, motor, vin, titular, multas, valores_pendientes, proveedor,
+  costo_estimado_usd, estado, raw_response) + interfaz `ProveedorVehicular` (capacidades + `consultar`).
+- **`mock_provider.py`** funcional: datos deterministas por placa (VIN 17 chars, titular, etc.);
+  capacidades `{identificadores_tecnicos, titular_validado}`. Default `PROVEEDOR_VEHICULAR_ACTIVO=mock`.
+- **Stubs reales** `consultas_ec.py` / `placaapi_ec.py` / `webservices_ec.py`: leen su API key;
+  sin credencial → `capacidades` vacío y `sin_credenciales` (no ofrecen ni cobran). Llamada HTTP = TODO.
+- **`selector.py`**: proveedor activo por env var (memoizado). NO scraping, NO captcha.
+- **Puente `services/proveedor.py`**: `capacidades_proveedor()` (sin llamar), `leer_proveedor_cacheado()`
+  y `asegurar_datos_proveedor()` (llama SOLO si no hay caché; cachea en `consultas` fuente `PROVEEDOR`).
+  Cumple "no llamar al proveedor en la consulta gratis" y "no re-llamar si está en caché".
+
+### Backend — perfil adaptado (consolidador + schemas)
+- Nuevo schema `Titular` (bloqueado/disponible/validado/nombre_ofuscado/mensaje) + `ofuscar_nombre`
+  en `core/ofuscacion.py`. **Nunca** se expone el nombre crudo: solo validación + iniciales.
+- `consolidar_placa` recibe `proveedor_datos` (cacheado) y `proveedor_capacidades`: llena VIN/motor/
+  chasis y el titular desde el proveedor; `disponible` se calcula por capacidad (sin llamar).
+  VIN/motor/chasis/titular siguen ofuscados si el bloque no está desbloqueado (regla #6).
+- `routers/consulta.py` (perfil) y `routers/desbloqueos.py` pasan proveedor (solo caché en el preview).
+  Al desbloquear un producto-proveedor (`identificadores_tecnicos`/`titular_validado` o el bundle),
+  se invoca al proveedor, se cobra **solo si entrega el dato** (409 si no), y se audita proveedor+costo.
+- `.env.example`: `PROVEEDOR_VEHICULAR_ACTIVO=mock`, `CONSULTAS_EC_API_KEY`, `PLACAAPI_EC_API_KEY`,
+  `WEBSERVICES_EC_API_KEY`.
+
+### Frontend (`consulta-placas-web`)
+- Componentes nuevos: `TokenBadge` (costo en tokens + USD ref.), `UnlockCard` (flujo completo:
+  login / 402→CTA recargar / 409 / éxito sin recargar / idempotente), `ProductoConsultaCard`
+  (preview seguro por código), `ReporteCompraSeguraCard` (bundle).
+- `PerfilVehiculo`: sección **"Completa tu revisión del vehículo"** con las tarjetas bloqueadas;
+  los datos revelados van a sus tarjetas dedicadas (Identificación, **Titular**, Multas). Se quitó
+  el botón inline anterior. Copy es-EC, sin lenguaje agresivo ("Desbloquea solo lo que necesitas").
+- `types/api.ts` (+`Titular`, `titular`), `consultar/[placa]` sin cambios de fetch.
+
+**Verificación:** `python -m scripts.validar_desbloqueos` OK (catálogo + gateo + capa mock:
+identificadores/titular disponibles por capacidad; titular SIEMPRE ofuscado, nunca crudo);
+imports de `main`/routers/proveedor OK; **frontend `tsc --noEmit` OK** (lint: 4 errores
+pre-existentes en Header/mis-publicaciones, no en archivos nuevos).
+
+**Pendiente:** integrar un proveedor real (implementar la llamada HTTP en su stub + cargar API key);
+SRI/Fiscalía siguen como enlace oficial (sin proveedor confiable / PII). No se agregó migración.
+
+---
+
 ## 2026-05-31 — Reajuste comercial del catálogo (Fase 2.5): solo se cobra por valor real
 
 **Rama:** `main`. No se debe cobrar con tokens **datos públicos simples** (clase, servicio,

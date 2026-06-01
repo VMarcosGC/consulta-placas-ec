@@ -27,11 +27,22 @@ from src.modules.consulta.schemas import (
 )
 from src.modules.consulta.services import desbloqueos as svc
 from src.modules.consulta.services.consolidador import consolidar_placa
+from src.modules.consulta.services.catalogo_productos import BUNDLE_INCLUYE
+from src.modules.consulta.services.proveedor import (
+    asegurar_datos_proveedor,
+    capacidades_proveedor,
+    leer_proveedor_cacheado,
+    proveedor_y_costo,
+)
 from src.modules.consulta.routers.consulta import _obtener_fuentes_placa
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["consulta"])
+
+# Productos cuyo dato lo entrega la capa de proveedores (providers/), no el scraping público.
+# Al desbloquearlos se invoca al proveedor (con caché) y se cobra SOLO si entrega el dato.
+PRODUCTOS_PROVEEDOR = {"identificadores_tecnicos", "titular_validado"}
 
 
 def _placa(placa: str) -> str:
@@ -41,16 +52,32 @@ def _placa(placa: str) -> str:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+def _hay_identificadores(datos: dict | None) -> bool:
+    """True si el resultado del proveedor trae al menos un identificador técnico."""
+    d = datos or {}
+    return bool(d.get("vin") or d.get("motor") or d.get("chasis"))
+
+
 async def _consolidar(
     sesion: Session, placa_limpia: str, usuario: Usuario | None
 ) -> VehiculoConsolidadoResponse:
-    """Consolida el perfil de la placa gateado por los desbloqueos del usuario (si hay)."""
+    """Consolida el perfil de la placa gateado por los desbloqueos del usuario (si hay).
+
+    Lee el proveedor SOLO de caché (no lo llama): el preview no debe gatillar un cobro externo.
+    """
     desbloqueados = (
         svc.productos_desbloqueados(sesion, usuario.id, placa_limpia) if usuario else set()
     )
     catalogo = svc.catalogo_activo(sesion)
     fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
-    return consolidar_placa(placa_limpia, fuentes, desbloqueados, catalogo)
+    return consolidar_placa(
+        placa_limpia,
+        fuentes,
+        desbloqueados,
+        catalogo,
+        proveedor_datos=leer_proveedor_cacheado(sesion, placa_limpia),
+        proveedor_capacidades=capacidades_proveedor(),
+    )
 
 
 @router.get("/consultar/{placa}/productos", response_model=EstadoProductosPlacaResponse)
@@ -90,7 +117,12 @@ async def _desbloquear(
     desbloqueados = svc.productos_desbloqueados(sesion, usuario.id, placa_limpia)
     catalogo = svc.catalogo_activo(sesion)
     fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
-    perfil = consolidar_placa(placa_limpia, fuentes, desbloqueados, catalogo)
+    capacidades = capacidades_proveedor()
+    proveedor_datos = leer_proveedor_cacheado(sesion, placa_limpia)
+    perfil = consolidar_placa(
+        placa_limpia, fuentes, desbloqueados, catalogo,
+        proveedor_datos=proveedor_datos, proveedor_capacidades=capacidades,
+    )
 
     estado = next((p for p in perfil.productos if p.codigo == codigo), None)
     if estado is None or not estado.disponible:
@@ -102,14 +134,39 @@ async def _desbloquear(
     if estado.desbloqueado:
         return perfil  # idempotente: ya pagado, no se recobra
 
+    # Si el producto (o el bundle) depende del proveedor y el proveedor puede entregarlo,
+    # se invoca AHORA (con caché) para obtener el dato real antes de cobrar.
+    proveedor_usado = costo = None
+    codigos_a_revisar = {codigo} | set(BUNDLE_INCLUYE.get(codigo, ()))
+    if PRODUCTOS_PROVEEDOR & codigos_a_revisar & capacidades:
+        proveedor_datos = await asegurar_datos_proveedor(sesion, placa_limpia)
+        proveedor_usado, costo = proveedor_y_costo(proveedor_datos)
+        # Cobrar solo lo entregado: para un producto-proveedor puntual, exigir su dato.
+        if codigo == "identificadores_tecnicos" and not _hay_identificadores(proveedor_datos):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No pudimos obtener los identificadores técnicos para esta placa.",
+            )
+        if codigo == "titular_validado" and not (proveedor_datos or {}).get("titular"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No pudimos validar el titular para esta placa.",
+            )
+
     try:
-        svc.desbloquear(sesion, usuario, placa_limpia, prod)
+        svc.desbloquear(
+            sesion, usuario, placa_limpia, prod,
+            proveedor_usado=proveedor_usado, costo_estimado=costo,
+        )
     except SaldoInsuficiente as e:
         sesion.rollback()
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
 
     desbloqueados = svc.productos_desbloqueados(sesion, usuario.id, placa_limpia)
-    return consolidar_placa(placa_limpia, fuentes, desbloqueados, catalogo)
+    return consolidar_placa(
+        placa_limpia, fuentes, desbloqueados, catalogo,
+        proveedor_datos=proveedor_datos, proveedor_capacidades=capacidades,
+    )
 
 
 @router.post(

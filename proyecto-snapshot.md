@@ -1,5 +1,5 @@
 # Proyecto Snapshot — Revisa tu Carro EC (consulta_placas_ec)
-**Generado:** 2026-05-31
+**Generado:** 2026-06-01
 **Herramienta origen:** Claude Code / VS Code
 **Propósito de este archivo:** Subir a Gemini para continuar planificación TO-BE
 
@@ -33,6 +33,7 @@ Plataforma (web + futura móvil) para que cualquier persona en Ecuador conozca e
 - **Auth**: registro, login, `/auth/me` (incluye `es_admin` según `ADMIN_EMAILS`).
 - **Billetera de tokens**: saldo inicial 5, débito real (`debitar_tokens`), auditoría inmutable.
 - **Microdesbloqueos por tokens (v2)**: catálogo en BD (`productos_consulta`) + registro `desbloqueos_consulta` (no doble cobro) + `costos_proveedor_consulta`. Router `routers/desbloqueos.py`: `GET /consultar/{placa}/productos`, `POST .../desbloquear/{producto_codigo}` (402/422/409, idempotente), `GET .../desbloqueos`. **Reajuste Fase 2.5 (migración 0016)**: ficha pública gratis (`consulta_publica_base`), solo se cobra por costo/dificultad/valor real. 1 token ≈ USD 0.04.
+- **Capa de proveedores vehiculares (Fase 3, `consulta/providers/`)**: contrato normalizado `ResultadoVehicular` + `MockProvider` funcional (default `PROVEEDOR_VEHICULAR_ACTIVO=mock`) + stubs `consultas_ec`/`placaapi_ec`/`webservices_ec` (sin credenciales → no ofrecen ni cobran). El proveedor entrega VIN/motor/chasis y validación de titular; se invoca SOLO al desbloquear (con caché en `consultas` fuente `PROVEEDOR`), nunca en el preview gratis. El titular **siempre** sale ofuscado/validado (nunca el nombre crudo). NO scraping, NO captcha.
 - **Garage privado**: vehículos (con `ciudad_registro`), dueños históricos, kilometraje (monotónico), mantenimientos, favoritos.
 - **Marketplace**:
   - *Publicaciones internas* (`publicaciones_internas`): plan light (gratis) / premium (cobra tokens, destacado, verificable). `GET /marketplace/feed` (feed mixto en 3 niveles).
@@ -42,7 +43,7 @@ Plataforma (web + futura móvil) para que cualquier persona en Ecuador conozca e
 
 ### 🔄 En progreso / parcial
 - **Verificación "Verificado por la plataforma"**: premium queda en `pendiente`; el flip a `verificado` es un paso admin **aún no construido**.
-- **Desbloqueo de PII**: el gateo/cobro está cableado, pero **ninguna fuente del flujo público entrega VIN/motor/chasis/dueño/traspasos en claro** todavía (ver deuda técnica) → hoy no hay nada que revelar y no cobra.
+- **Desbloqueo de PII**: el gateo/cobro está cableado y la **capa de proveedores** lo alimenta vía el `MockProvider` (demo). Falta integrar un **proveedor real** (implementar la llamada HTTP en su stub + cargar API key) para entregar VIN/motor/chasis/titular en producción.
 - **OCR / foto (Pilar 5)**: `routers/ocr.py` + `services/vision.py` esbozados; sin flujo completo.
 
 ### ⚠️ Problemas o deuda técnica identificada
@@ -62,11 +63,12 @@ src/core/        database, validators, ofuscacion, proxy_apify
 src/modules/
   auth/          models (Usuario, TransaccionToken), router, security, dependencies, schemas
   tokens/        service (debitar_tokens), router
-  consulta/      routers/{consulta,ocr}  schemas
+  consulta/      routers/{consulta,ocr,desbloqueos}  schemas
                  services/{ant,sri,amt,epmtsd,fiscalia,consultasecuador,ecuadorlegalonline,
-                           consolidador,catalogo_fuentes,cache,cola,captcha,vision,
-                           extractor_apify,_axiscloud}
-                 models/{consulta,cola_scraping}
+                           consolidador,catalogo_fuentes,catalogo_productos,desbloqueos,
+                           proveedor,cache,cola,captcha,vision,extractor_apify,_axiscloud}
+                 providers/{base,mock_provider,consultas_ec,placaapi_ec,webservices_ec,selector}
+                 models/{consulta,cola_scraping,desbloqueos}
   vehiculos/     models+routers+schemas (vehiculo, dueno_historico, kilometraje, mantenimiento, favorito)
   marketplace/   models, schemas, routers/{marketplace,publicaciones,referencias,compartidos}
 docs/            arquitectura(.md/_hibrida), bitacora, despliegue, worker
@@ -90,7 +92,15 @@ Frontend (`../consulta-placas-web/src`): `app/{page,consultar,consultar/[placa],
 - **Tolerancia a fallos**: una fuente caída nunca rompe la respuesta (siempre 200, fuente marcada con su estado).
 - **Pagos con tokens → HTTP 402**; validación de negocio → 422; "no es tuyo" → 404.
 
-## 7. Últimos cambios (sesión 2026-05-30/31)
+## 7. Últimos cambios (sesión 2026-05-30 / 06-01)
+- **Fase 3 — experiencia progresiva de desbloqueo + capa de proveedores**: nueva carpeta
+  `consulta/providers/` (contrato `ResultadoVehicular`, `MockProvider` funcional, stubs de 3
+  proveedores reales, `selector` por env var) + puente `services/proveedor.py` (capacidades sin
+  llamar, caché en `consultas`, "asegurar" solo al desbloquear). Consolidador adaptado: VIN/motor/
+  chasis y **Titular** (validación + nombre ofuscado, nunca crudo) desde el proveedor, gateados por
+  tokens. Frontend: `TokenBadge`, `UnlockCard`, `ProductoConsultaCard`, `ReporteCompraSeguraCard` y
+  la sección **"Completa tu revisión del vehículo"** (preview gratis → desbloqueo sin recargar,
+  401→login, 402→CTA recargar). Sin proveedores reales todavía (mock por defecto).
 - **Reajuste comercial del catálogo — Fase 2.5** (migración **0016**): no se cobran datos
   públicos simples (clase, servicio, marca, modelo, año, color, estado de matrícula) → **gratis**
   en `consulta_publica_base` (0 tokens). Solo se cobra por **costo de proveedor / dificultad /
@@ -121,7 +131,7 @@ Frontend (`../consulta-placas-web/src`): `app/{page,consultar,consultar/[placa],
 - Saldo de tokens visible en el header. Perfil sobrio; sesión persistente; ciudad en el garage;
   referencias como enlace vivo a Facebook; español de Ecuador; landing navegable.
 
-**Git** — backend HEAD: `19fafd0` (+ docs) · frontend HEAD: `ac418ed`. Ambos repos limpios. **Prod**:
+**Git** — backend y frontend con la Fase 3 (capa de proveedores + experiencia progresiva) recién commiteada. **Prod**:
 Render + Vercel · BD Neon en `alembic head` **0016** (aplicar `alembic upgrade head`).
 
 ## 8. Para continuar en Gemini — instrucciones

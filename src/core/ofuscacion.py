@@ -94,6 +94,23 @@ def ofuscar_identificador(
     return visible + oculto
 
 
+def ofuscar_nombre(nombre: str | None) -> str | None:
+    """Ofusca el nombre de una persona dejando solo la inicial de cada palabra.
+
+    Política de datos sensibles (PII): nunca exponer el nombre completo de un titular a un
+    tercero. Devolvemos las iniciales con máscara, suficiente para "validar" sin revelar.
+
+    >>> ofuscar_nombre("Juan Carlos Pérez Gómez")
+    'J*** C*** P*** G***'
+    >>> ofuscar_nombre(None)
+    None
+    """
+    if not nombre:
+        return None
+    partes = [p for p in nombre.strip().split() if p]
+    return " ".join(f"{p[0].upper()}***" for p in partes) or None
+
+
 def ofuscar_vin(vin: str | None, nivel: str = "origen") -> dict:
     """Devuelve un dict con el VIN según el nivel solicitado.
 

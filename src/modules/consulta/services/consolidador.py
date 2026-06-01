@@ -20,11 +20,12 @@ from src.modules.consulta.schemas import (
     MultaItem,
     NovedadLegal,
     ProductoEstado,
+    Titular,
     ValoresTributarios,
     VehiculoConsolidadoResponse,
 )
 from src.modules.consulta.services.catalogo_fuentes import CATALOGO_FUENTES
-from src.core.ofuscacion import decodificar_origen_vin, ofuscar_identificador
+from src.core.ofuscacion import decodificar_origen_vin, ofuscar_identificador, ofuscar_nombre
 
 
 def _matricula_vigente(fecha_caducidad: str | None) -> bool | None:
@@ -112,11 +113,49 @@ def _construir_identificacion(
     )
 
 
+def _construir_titular(
+    proveedor_datos: dict | None,
+    desbloqueado: bool,
+    disponible: bool,
+) -> Titular:
+    """Arma la sección del titular respetando la política de PII.
+
+    Nunca expone el nombre crudo: como máximo, validación + nombre ofuscado (iniciales). El
+    nombre crudo solo lo ve el dueño en su garage, no esta vista pública.
+    """
+    nombre_crudo = (proveedor_datos or {}).get("titular") if proveedor_datos else None
+    if not disponible:
+        return Titular(bloqueado=True, disponible=False, mensaje=None)
+    if not desbloqueado:
+        return Titular(
+            bloqueado=True,
+            disponible=True,
+            mensaje="Valida que el titular registrado coincide, sin exponer datos personales.",
+        )
+    # Desbloqueado: validación + nombre ofuscado (jamás el nombre completo).
+    if nombre_crudo:
+        return Titular(
+            bloqueado=False,
+            disponible=True,
+            validado=True,
+            nombre_ofuscado=ofuscar_nombre(nombre_crudo),
+            mensaje="Titular registrado validado.",
+        )
+    return Titular(
+        bloqueado=False,
+        disponible=True,
+        validado=False,
+        mensaje="No se pudo validar el titular con la fuente disponible.",
+    )
+
+
 def consolidar_placa(
     placa: str,
     resultados: dict[str, dict],
     productos_desbloqueados: frozenset[str] | set[str] = frozenset(),
     catalogo: "list | tuple" = (),
+    proveedor_datos: dict | None = None,
+    proveedor_capacidades: frozenset[str] | set[str] = frozenset(),
 ) -> VehiculoConsolidadoResponse:
     """Agrega las respuestas por-fuente en el perfil consolidado, GATEADO por productos.
 
@@ -134,6 +173,8 @@ def consolidar_placa(
     Ver docs/producto/modelo_tokens_microdesbloqueos.md.
     """
     productos_desbloqueados = set(productos_desbloqueados)
+    proveedor_capacidades = set(proveedor_capacidades)
+    prov = proveedor_datos or {}
     ant = resultados.get("ANT") or {}
     sri = resultados.get("SRI") or {}
     fge = resultados.get("FGE") or {}
@@ -143,24 +184,23 @@ def consolidar_placa(
     sri_veh = sri_datos.get("vehiculo") or {}
 
     datos_basicos = DatosBasicos(
-        marca=ant_veh.get("marca") or sri_veh.get("marca"),
-        modelo=ant_veh.get("modelo") or sri_veh.get("modelo"),
-        anio=_parsear_anio(ant_veh.get("anio_vehiculo"), sri_veh.get("anio_modelo")),
-        color=ant_veh.get("color"),
-        clase=ant_veh.get("clase"),
-        servicio=ant_veh.get("servicio"),
+        marca=ant_veh.get("marca") or sri_veh.get("marca") or prov.get("marca"),
+        modelo=ant_veh.get("modelo") or sri_veh.get("modelo") or prov.get("modelo"),
+        anio=_parsear_anio(ant_veh.get("anio_vehiculo"), sri_veh.get("anio_modelo"), prov.get("anio")),
+        color=ant_veh.get("color") or prov.get("color"),
+        clase=ant_veh.get("clase") or prov.get("clase"),
+        servicio=ant_veh.get("servicio") or prov.get("servicio"),
         fecha_matricula=ant_veh.get("fecha_matricula"),
         fecha_caducidad=ant_veh.get("fecha_caducidad"),
         pais_origen=sri_veh.get("pais"),
         matricula_vigente=_matricula_vigente(ant_veh.get("fecha_caducidad")),
     )
-    # Identificación: VIN/motor/chasis vendrían de fuentes no oficiales aún sin
-    # integrar (ConsultasEcuador tras reCAPTCHA). Se extraen best-effort por si una
-    # fuente futura los aporta; se ofuscan salvo que `desbloqueado` sea True (el
-    # usuario pagó tokens en POST /consultar/{placa}/desbloquear).
-    vin_crudo = ant_veh.get("vin") or sri_veh.get("vin") or None
-    motor_crudo = ant_veh.get("numero_motor") or ant_veh.get("motor") or None
-    chasis_crudo = ant_veh.get("numero_chasis") or ant_veh.get("chasis") or None
+    # Identificación: VIN/motor/chasis los entrega el PROVEEDOR (capa providers/), cacheado
+    # tras un desbloqueo pagado. Best-effort fallback a lo que aporte el scraping público.
+    # Se ofuscan salvo que `desbloqueado` sea True (el usuario pagó `identificadores_tecnicos`).
+    vin_crudo = prov.get("vin") or ant_veh.get("vin") or sri_veh.get("vin") or None
+    motor_crudo = prov.get("motor") or ant_veh.get("numero_motor") or ant_veh.get("motor") or None
+    chasis_crudo = prov.get("chasis") or ant_veh.get("numero_chasis") or ant_veh.get("chasis") or None
     identificacion = _construir_identificacion(
         vin_crudo,
         motor_crudo,
@@ -292,22 +332,34 @@ def consolidar_placa(
     # Regla comercial (Fase 2.5): solo se cobra por datos con costo de proveedor, dificultad
     # real o valor comercial. Los datos públicos simples (toda la ficha + estado de matrícula)
     # son GRATIS vía `consulta_publica_base` (0 tokens), así que no se gatea `datos_basicos`.
+    # Un dato es "disponible" si ya está (scraping/proveedor cacheado) O si el proveedor
+    # activo declara que PUEDE entregarlo (capacidad), sin tener que llamarlo en el preview.
     identificadores_disponible = bool(
         identificacion.vin_ofuscado
         or identificacion.numero_motor_ofuscado
         or identificacion.numero_chasis_ofuscado
-    )
+    ) or ("identificadores_tecnicos" in proveedor_capacidades)
+    titular_disponible = "titular_validado" in proveedor_capacidades
     multas_disponible = len(multas_detalle) > 0
     disponibles: set[str] = {"consulta_publica_base"}  # la base pública siempre se entrega
     if identificadores_disponible:
         disponibles.add("identificadores_tecnicos")
+    if titular_disponible:
+        disponibles.add("titular_validado")
     if multas_disponible:
         disponibles.add("multas_con_montos")
-    # `titular_validado`, `valores_matricula_sri` y `alertas_legales` quedan disponibles=false:
-    # sin proveedor autorizado / sin fuente estructurada legalmente segura todavía → se ofrece
-    # el enlace oficial asistido, no un cobro (ver politica_datos_sensibles.md).
-    if identificadores_disponible or multas_disponible:
+    # `valores_matricula_sri` y `alertas_legales` quedan disponibles=false: sin proveedor
+    # confiable / sin fuente estructurada legalmente segura todavía → se ofrece el enlace
+    # oficial asistido, no un cobro (ver politica_datos_sensibles.md).
+    if identificadores_disponible or multas_disponible or titular_disponible:
         disponibles.add("reporte_compra_segura")  # el bundle se ofrece si hay algo que agrupar
+
+    # ── Titular (PII): validación/ofuscación, nunca el nombre crudo ──
+    titular = _construir_titular(
+        proveedor_datos,
+        desbloqueado="titular_validado" in productos_desbloqueados,
+        disponible=titular_disponible,
+    )
 
     # ── Gateo de secciones según lo desbloqueado ──
     # `datos_basicos` ya NO se gatea: la ficha pública completa es gratis (consulta_publica_base).
@@ -338,6 +390,7 @@ def consolidar_placa(
         placa=placa,
         datos_basicos=datos_basicos,
         identificacion=identificacion,
+        titular=titular,
         valores_tributarios=valores_tributarios,
         multas_pendientes=multas_pendientes,
         multas_detalle=multas_detalle,

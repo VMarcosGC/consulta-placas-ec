@@ -79,7 +79,34 @@ def main() -> None:
     unlock = consolidar_placa("ABC1234", fuentes, {"multas_con_montos"}, cat)
     assert unlock.multas_bloqueado is False, "Desbloqueado: multas visibles"
 
-    print("OK · catálogo (8 productos, 1 token=USD0.04) y gateo (público gratis/multas) válidos.")
+    # 3) Proveedor (capa providers/): con capacidades, identificadores y titular quedan
+    #    disponibles; el titular NUNCA expone el nombre crudo (solo validación + ofuscado).
+    import asyncio
+    from src.modules.consulta.providers import obtener_proveedor
+
+    prov = obtener_proveedor()
+    res = asyncio.run(prov.consultar("ABC1234"))
+    assert res.estado == "consulta_realizada" and res.vin and res.titular, "Mock debe entregar datos"
+    capac = prov.capacidades
+
+    teaser_prov = consolidar_placa("ABC1234", fuentes, set(), cat, proveedor_capacidades=capac)
+    disp_prov = {p.codigo for p in teaser_prov.productos if p.disponible}
+    assert {"identificadores_tecnicos", "titular_validado"} <= disp_prov, f"Disponibles: {disp_prov}"
+    assert teaser_prov.titular.bloqueado is True, "Titular en teaser va bloqueado"
+    assert teaser_prov.titular.nombre_ofuscado is None, "Teaser no revela el titular"
+
+    unlock_prov = consolidar_placa(
+        "ABC1234", fuentes, {"identificadores_tecnicos", "titular_validado"}, cat,
+        proveedor_datos=res.to_dict(), proveedor_capacidades=capac,
+    )
+    assert unlock_prov.identificacion.vin == res.vin, "Desbloqueado: VIN visible"
+    assert unlock_prov.titular.validado is True, "Titular validado tras desbloqueo"
+    assert unlock_prov.titular.nombre_ofuscado and "***" in unlock_prov.titular.nombre_ofuscado, (
+        "El titular SIEMPRE va ofuscado, nunca crudo"
+    )
+    assert res.titular not in (unlock_prov.titular.nombre_ofuscado or ""), "Nunca el nombre crudo"
+
+    print("OK · catálogo (8 productos, 1 token=USD0.04), gateo y capa de proveedores (mock) válidos.")
 
 
 if __name__ == "__main__":
