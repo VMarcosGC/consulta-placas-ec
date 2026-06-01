@@ -126,9 +126,12 @@ def consolidar_placa(
     como `no_integrada` sin tener que tocar este archivo al sumarlas.
 
     `productos_desbloqueados` = códigos del catálogo que el usuario ya pagó para esta placa.
-    Las secciones cuyo producto NO esté ahí se devuelven gateadas (ofuscadas/ocultas), con
-    `bloqueado=True`, mientras el teaser (marca/modelo/año/color + matrícula vigente +
-    veredicto) queda siempre gratis. Ver docs/producto/modelo_tokens_microdesbloqueos.md.
+    GRATIS siempre (consulta_publica_base): la ficha pública completa (marca/modelo/año/color/
+    clase/servicio/fechas), el estado de matrícula, los enlaces oficiales y el veredicto sí/no.
+    Las secciones con costo/valor real (identificadores, multas con montos) se devuelven
+    gateadas (`bloqueado=True`) hasta desbloquear con tokens. Datos sin proveedor confiable
+    (titular, valores SRI, alertas legales) salen como enlace oficial, no como cobro.
+    Ver docs/producto/modelo_tokens_microdesbloqueos.md.
     """
     productos_desbloqueados = set(productos_desbloqueados)
     ant = resultados.get("ANT") or {}
@@ -151,12 +154,6 @@ def consolidar_placa(
         pais_origen=sri_veh.get("pais"),
         matricula_vigente=_matricula_vigente(ant_veh.get("fecha_caducidad")),
     )
-    # ¿La fuente entregó la ficha básica ampliada? (para marcar el producto disponible)
-    basico_disponible = any(
-        datos_basicos.__getattribute__(c)
-        for c in ("clase", "servicio", "fecha_matricula", "fecha_caducidad")
-    )
-
     # Identificación: VIN/motor/chasis vendrían de fuentes no oficiales aún sin
     # integrar (ConsultasEcuador tras reCAPTCHA). Se extraen best-effort por si una
     # fuente futura los aporta; se ofuscan salvo que `desbloqueado` sea True (el
@@ -169,7 +166,7 @@ def consolidar_placa(
         motor_crudo,
         chasis_crudo,
         sri_veh.get("pais"),
-        desbloqueado="vehiculo_identificadores" in productos_desbloqueados,
+        desbloqueado="identificadores_tecnicos" in productos_desbloqueados,
     )
 
     # Valores tributarios (SRI): enlace al portal (consulta_externa) o montos.
@@ -292,33 +289,29 @@ def consolidar_placa(
     tiene_pendientes = bool(multas_pendientes) or bool(novedades_legales) or bool(valor_sri)
 
     # ── Disponibilidad (qué productos SÍ se pueden cobrar para esta placa) ──
+    # Regla comercial (Fase 2.5): solo se cobra por datos con costo de proveedor, dificultad
+    # real o valor comercial. Los datos públicos simples (toda la ficha + estado de matrícula)
+    # son GRATIS vía `consulta_publica_base` (0 tokens), así que no se gatea `datos_basicos`.
     identificadores_disponible = bool(
         identificacion.vin_ofuscado
         or identificacion.numero_motor_ofuscado
         or identificacion.numero_chasis_ofuscado
     )
     multas_disponible = len(multas_detalle) > 0
-    disponibles: set[str] = set()
-    if basico_disponible:
-        disponibles.add("vehiculo_basico")
+    disponibles: set[str] = {"consulta_publica_base"}  # la base pública siempre se entrega
     if identificadores_disponible:
-        disponibles.add("vehiculo_identificadores")
+        disponibles.add("identificadores_tecnicos")
     if multas_disponible:
-        disponibles.add("vehiculo_multas")
-    # vehiculo_tecnico y vehiculo_titular_validado: sin fuente autorizada todavía → no disponibles.
-    if disponibles:  # el bundle se ofrece si hay al menos un dato que agrupa
-        disponibles.add("reporte_compra_segura")
+        disponibles.add("multas_con_montos")
+    # `titular_validado`, `valores_matricula_sri` y `alertas_legales` quedan disponibles=false:
+    # sin proveedor autorizado / sin fuente estructurada legalmente segura todavía → se ofrece
+    # el enlace oficial asistido, no un cobro (ver politica_datos_sensibles.md).
+    if identificadores_disponible or multas_disponible:
+        disponibles.add("reporte_compra_segura")  # el bundle se ofrece si hay algo que agrupar
 
     # ── Gateo de secciones según lo desbloqueado ──
-    if "vehiculo_basico" not in productos_desbloqueados:
-        # Teaser: se mantienen marca/modelo/año/color + matrícula vigente; se ocultan el resto.
-        datos_basicos.clase = None
-        datos_basicos.servicio = None
-        datos_basicos.fecha_matricula = None
-        datos_basicos.fecha_caducidad = None
-        datos_basicos.bloqueado = True
-
-    multas_bloqueado = "vehiculo_multas" not in productos_desbloqueados
+    # `datos_basicos` ya NO se gatea: la ficha pública completa es gratis (consulta_publica_base).
+    multas_bloqueado = "multas_con_montos" not in productos_desbloqueados
     if multas_bloqueado:
         # El detalle (montos/categorías) se oculta; el teaser solo dice si hay pendientes.
         multas_detalle = []

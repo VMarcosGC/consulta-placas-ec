@@ -1,7 +1,8 @@
 """Validación rápida de la lógica de microdesbloqueos (sin BD).
 
-Comprueba el seed del catálogo (precios y 1 token = USD 0.05) y el gateo del consolidador
-(teaser vs desbloqueado, bundle). No toca la base de datos: usa datos simulados.
+Comprueba el seed del catálogo (precios y 1 token = USD 0.04) y el gateo del consolidador
+(ficha pública gratis, multas/identificadores gateados, bundle). No toca la base de datos:
+usa datos simulados.
 
 Uso:  python -m scripts.validar_desbloqueos
 """
@@ -11,14 +12,16 @@ from types import SimpleNamespace
 from src.modules.consulta.services.catalogo_productos import BUNDLE_INCLUYE, SEED_PRODUCTOS
 from src.modules.consulta.services.consolidador import consolidar_placa
 
+# Precios en tokens del catálogo vigente (Fase 2.5: solo se cobra por costo/valor real).
 PRECIOS_ESPERADOS = {
-    "vehiculo_basico": 3,
-    "vehiculo_tecnico": 2,
-    "vehiculo_identificadores": 3,
-    "vehiculo_titular_validado": 5,
-    "vehiculo_multas": 8,
-    "reporte_compra_segura": 30,
-    "verificacion_marketplace": 80,
+    "consulta_publica_base": 0,
+    "identificadores_tecnicos": 3,
+    "titular_validado": 5,
+    "alertas_legales": 8,
+    "multas_con_montos": 10,
+    "valores_matricula_sri": 12,
+    "reporte_compra_segura": 40,
+    "verificacion_marketplace": 100,
 }
 
 
@@ -37,18 +40,19 @@ def _catalogo_simulado():
 
 
 def main() -> None:
-    # 1) Catálogo: códigos, precios en tokens y 1 token = USD 0.05.
+    # 1) Catálogo: códigos, precios en tokens y 1 token = USD 0.04.
     codigos = {p["codigo"] for p in SEED_PRODUCTOS}
     assert codigos == set(PRECIOS_ESPERADOS), f"Catálogo incompleto: {codigos}"
     for p in SEED_PRODUCTOS:
         assert p["tokens"] == PRECIOS_ESPERADOS[p["codigo"]], f"Precio mal en {p['codigo']}"
-        esperado = (Decimal(p["tokens"]) * Decimal("0.05")).quantize(Decimal("0.01"))
+        esperado = (Decimal(p["tokens"]) * Decimal("0.04")).quantize(Decimal("0.01"))
         assert Decimal(p["precio_referencial_usd"]) == esperado, (
             f"USD ref mal en {p['codigo']}: {p['precio_referencial_usd']} != {esperado}"
         )
     assert BUNDLE_INCLUYE["reporte_compra_segura"], "El bundle debe incluir productos"
 
-    # 2) Gateo: con datos de ANT (ficha + citación pendiente), teaser oculta; unlock revela.
+    # 2) Gateo: con datos de ANT (ficha + citación pendiente), la ficha pública es gratis,
+    #    el detalle de multas se oculta hasta desbloquear `multas_con_montos`.
     cat = _catalogo_simulado()
     fuentes = {
         "ANT": {
@@ -60,19 +64,22 @@ def main() -> None:
         }
     }
     teaser = consolidar_placa("ABC1234", fuentes, set(), cat)
-    assert teaser.datos_basicos.bloqueado is True, "Teaser debería ocultar la ficha"
-    assert teaser.datos_basicos.clase is None, "Teaser no debe revelar clase"
+    assert teaser.datos_basicos.bloqueado is False, "La ficha pública debe ser gratis"
+    assert teaser.datos_basicos.clase == "AUTOMOVIL", "Clase es dato público gratis"
     assert teaser.multas_bloqueado is True, "Teaser debe ocultar el detalle de multas"
     assert teaser.tiene_pendientes is True, "El veredicto gratis debe ser True"
     disp = {p.codigo for p in teaser.productos if p.disponible}
-    assert "vehiculo_basico" in disp and "vehiculo_multas" in disp, f"Disponibles: {disp}"
+    assert "consulta_publica_base" in disp, f"Base pública debe estar disponible: {disp}"
+    assert "multas_con_montos" in disp, f"Multas debe estar disponible: {disp}"
+    # Sin proveedor confiable: no se ofrecen como cobrables.
+    assert "titular_validado" not in disp, "Titular no debe ser disponible (sin proveedor)"
+    assert "valores_matricula_sri" not in disp, "Valores SRI no disponibles (enlace oficial)"
+    assert "alertas_legales" not in disp, "Alertas legales no disponibles (enlace oficial)"
 
-    unlock = consolidar_placa("ABC1234", fuentes, {"vehiculo_basico", "vehiculo_multas"}, cat)
-    assert unlock.datos_basicos.bloqueado is False, "Desbloqueado: ficha visible"
-    assert unlock.datos_basicos.clase == "AUTOMOVIL", "Desbloqueado: clase visible"
+    unlock = consolidar_placa("ABC1234", fuentes, {"multas_con_montos"}, cat)
     assert unlock.multas_bloqueado is False, "Desbloqueado: multas visibles"
 
-    print("OK · catálogo (7 productos, 1 token=USD0.05) y gateo (teaser/unlock) válidos.")
+    print("OK · catálogo (8 productos, 1 token=USD0.04) y gateo (público gratis/multas) válidos.")
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ Plataforma (web + futura móvil) para que cualquier persona en Ecuador conozca e
 **Backend** (repo `consulta_placas_ec`):
 - Python 3.11+, **FastAPI** (monolito modular por dominio, DDD).
 - **Playwright** async (Chromium) para scraping; `httpx` donde aplica.
-- **PostgreSQL 16 (Neon)** + **SQLAlchemy 2** + **Alembic** (migraciones manuales 0001–0015).
+- **PostgreSQL 16 (Neon)** + **SQLAlchemy 2** + **Alembic** (migraciones manuales 0001–0016).
 - **Pydantic 2**; auth `passlib[bcrypt<4.0]` + `python-jose` (JWT HS256).
 - Solvers de captcha: 2Captcha (hCaptcha), extractor vía **Apify** + proxy residencial gateado.
 - Deploy: **Docker** (imagen oficial Playwright) en **Render**.
@@ -32,7 +32,7 @@ Plataforma (web + futura móvil) para que cualquier persona en Ecuador conozca e
 - **Arquitectura híbrida**: modo síncrono (IP residencial EC) o worker (encola AMT/EPMTSD) para sortear el bloqueo de IPs datacenter.
 - **Auth**: registro, login, `/auth/me` (incluye `es_admin` según `ADMIN_EMAILS`).
 - **Billetera de tokens**: saldo inicial 5, débito real (`debitar_tokens`), auditoría inmutable.
-- **Microdesbloqueos por tokens (v2)**: catálogo en BD (`productos_consulta`) + registro `desbloqueos_consulta` (no doble cobro) + `costos_proveedor_consulta`. Router `routers/desbloqueos.py`: `GET /consultar/{placa}/productos`, `POST .../desbloquear/{producto_codigo}` (402/422/409, idempotente), `GET .../desbloqueos`. Teaser gratis + gateo en el consolidador. 1 token ≈ USD 0.05.
+- **Microdesbloqueos por tokens (v2)**: catálogo en BD (`productos_consulta`) + registro `desbloqueos_consulta` (no doble cobro) + `costos_proveedor_consulta`. Router `routers/desbloqueos.py`: `GET /consultar/{placa}/productos`, `POST .../desbloquear/{producto_codigo}` (402/422/409, idempotente), `GET .../desbloqueos`. **Reajuste Fase 2.5 (migración 0016)**: ficha pública gratis (`consulta_publica_base`), solo se cobra por costo/dificultad/valor real. 1 token ≈ USD 0.04.
 - **Garage privado**: vehículos (con `ciudad_registro`), dueños históricos, kilometraje (monotónico), mantenimientos, favoritos.
 - **Marketplace**:
   - *Publicaciones internas* (`publicaciones_internas`): plan light (gratis) / premium (cobra tokens, destacado, verificable). `GET /marketplace/feed` (feed mixto en 3 niveles).
@@ -57,7 +57,7 @@ Plataforma (web + futura móvil) para que cualquier persona en Ecuador conozca e
 ## 4. Estructura de archivos actual (backend)
 ```
 main.py · run.py · worker.py · registry.py
-alembic/versions/0001..0015   (migraciones manuales)
+alembic/versions/0001..0016   (migraciones manuales)
 src/core/        database, validators, ofuscacion, proxy_apify
 src/modules/
   auth/          models (Usuario, TransaccionToken), router, security, dependencies, schemas
@@ -91,6 +91,16 @@ Frontend (`../consulta-placas-web/src`): `app/{page,consultar,consultar/[placa],
 - **Pagos con tokens → HTTP 402**; validación de negocio → 422; "no es tuyo" → 404.
 
 ## 7. Últimos cambios (sesión 2026-05-30/31)
+- **Reajuste comercial del catálogo — Fase 2.5** (migración **0016**): no se cobran datos
+  públicos simples (clase, servicio, marca, modelo, año, color, estado de matrícula) → **gratis**
+  en `consulta_publica_base` (0 tokens). Solo se cobra por **costo de proveedor / dificultad /
+  valor comercial**. Renombres: `vehiculo_identificadores`→`identificadores_tecnicos` (3t),
+  `vehiculo_titular_validado`→`titular_validado` (5t), `vehiculo_multas`→`multas_con_montos` (10t);
+  desactivados `vehiculo_basico`/`vehiculo_tecnico`; nuevos `valores_matricula_sri` (12t),
+  `alertas_legales` (8t); reprecio `reporte_compra_segura` 40t y `verificacion_marketplace` 100t.
+  Valor del token USD 0.05 → **USD 0.04**. `titular_validado`/`valores_matricula_sri`/
+  `alertas_legales` `disponible=false` (enlace oficial / sin proveedor confiable). Paquetes de
+  recarga referenciales ($1→25t … $10→280t). Sin proveedores reales ni evasión de captcha.
 - **Microdesbloqueos por tokens v2** (migración **0015**): catálogo **en BD**
   (`productos_consulta`, fuente de verdad de precios; seed canónico en
   `services/catalogo_productos.py`) + `desbloqueos_consulta` (auditoría comercial:
@@ -99,18 +109,17 @@ Frontend (`../consulta-placas-web/src`): `app/{page,consultar,consultar/[placa],
   Router dedicado `routers/desbloqueos.py`: `GET /consultar/{placa}/productos`,
   `POST /consultar/{placa}/desbloquear/{producto_codigo}` (400/422-inactivo/409/402, idempotente),
   alias `.../desbloquear`, `GET /consultar/{placa}/desbloqueos`. Teaser gratis (marca/modelo/
-  año/color + matrícula vigente + veredicto); gateo en el consolidador. `tecnico`/
-  `titular_validado` `disponible=false` (sin proveedor autorizado). 1 token ≈ USD 0.05.
-  Validación: `scripts/validar_desbloqueos.py`.
+  año/color + matrícula vigente + veredicto); gateo en el consolidador.
+  Validación: `scripts/validar_desbloqueos.py`. (Reajustado por la Fase 2.5, ver arriba.)
 - **Verificación premium del marketplace** (sello "Verificado por la plataforma"): flujo admin
   (`/admin/verificaciones`) + `verificado_en` (migración 0013). Reconciliado: destacar premium
-  = 3 tokens; **solicitar verificación = 80 tokens** (`/solicitar-verificacion`, pantalla
+  = 3 tokens; **solicitar verificación = 100 tokens** (`/solicitar-verificacion`, pantalla
   `/marketplace/mis-publicaciones`).
 - Saldo de tokens visible en el header. Perfil sobrio; sesión persistente; ciudad en el garage;
   referencias como enlace vivo a Facebook; español de Ecuador; landing navegable.
 
 **Git** — backend HEAD: `2141cda` · frontend HEAD: `d6692ca`. Ambos repos limpios. **Prod**:
-Render + Vercel · BD Neon en `alembic head` **0015**.
+Render + Vercel · BD Neon en `alembic head` **0016** (aplicar `alembic upgrade head`).
 
 ## 8. Para continuar en Gemini — instrucciones
 > Eres un asistente de arquitectura y planificación de software.

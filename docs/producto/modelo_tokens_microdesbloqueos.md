@@ -1,10 +1,13 @@
 # Modelo de microdesbloqueos por tokens — Revisa tu Carro EC
 
-**Estado:** IMPLEMENTADO (backend + frontend) el 2026-05-31. Productos activos hoy con
-datos reales: `vehiculo_basico`, `vehiculo_multas`, `vehiculo_identificadores` (+ bundle).
-`vehiculo_tecnico` y `vehiculo_titular_validado` quedan en el catálogo pero `disponible=false`
-hasta tener fuente/proveedor autorizado. `verificacion_marketplace` NO se cableó al flujo de
-consulta (sigue siendo el flujo admin del marketplace).
+**Estado:** IMPLEMENTADO (backend + frontend) el 2026-05-31. **Reajuste comercial Fase 2.5
+(2026-05-31, migración `0016`):** la ficha pública completa es **gratis** (`consulta_publica_base`,
+0 tokens); solo se cobra por datos con costo/dificultad/valor real. Productos con datos reales
+hoy: `multas_con_montos` y `identificadores_tecnicos` (cuando la fuente los aporta) + bundle.
+`titular_validado`, `valores_matricula_sri` y `alertas_legales` quedan en el catálogo con
+`disponible=false` (enlace oficial / sin proveedor confiable). `verificacion_marketplace` NO se
+cableó al flujo de consulta (sigue siendo el flujo admin del marketplace, 100 tokens).
+**1 token ≈ USD 0.04.**
 **Fecha:** 2026-05-31.
 **Relacionados:** [catalogo_productos_consulta.md](catalogo_productos_consulta.md) · [reglas_monetizacion_tokens.md](reglas_monetizacion_tokens.md) · [politica_datos_sensibles.md](politica_datos_sensibles.md) · [AGENTS.md](../../AGENTS.md) · [proyecto-snapshot.md](../../proyecto-snapshot.md).
 
@@ -101,4 +104,27 @@ Resumen en la sección final de este documento y en el mensaje de la tarea.
 
 ## 8. Resoluciones (2026-05-31)
 - **#2 `verificacion_marketplace`** → RESUELTO: separado del premium. Publicar premium = 3 tokens (destaca, nace `no_verificado`); el dueño **solicita** el sello con `POST /marketplace/publicaciones/{id}/solicitar-verificacion` = **80 tokens** → `pendiente` → cola admin. Saldo en el header ya visible.
-- **#3 titular / #técnico (seam de proveedor)** → BLOQUEADO por dependencia externa: requieren un **proveedor de datos autorizado** (API/convenio) que aún no existe. Por eso `vehiculo_titular_validado` y `vehiculo_tecnico` quedan en el catálogo con `disponible=false` (no se ofrecen ni cobran). **Punto de integración**: cuando exista el proveedor, se agrega un servicio `services/proveedor_<x>.py` que pueble esos campos en `consolidar_placa`, y el producto pasará a `disponible=true` automáticamente (la lógica de cobro/gateo ya está lista). No se implementa scraping de padrones (límite ético/legal).
+- **#3 titular / #técnico (seam de proveedor)** → BLOQUEADO por dependencia externa: requieren un **proveedor de datos autorizado** (API/convenio) que aún no existe. Por eso `titular_validado`, `valores_matricula_sri` y `alertas_legales` quedan en el catálogo con `disponible=false` (no se ofrecen ni cobran; se muestra enlace oficial). **Punto de integración**: cuando exista el proveedor, se agrega un servicio `services/proveedor_<x>.py` que pueble esos campos en `consolidar_placa`, y el producto pasará a `disponible=true` automáticamente (la lógica de cobro/gateo ya está lista). No se implementa scraping de padrones (límite ético/legal).
+
+## 9. Reajuste comercial — Fase 2.5 (2026-05-31, migración `0016`)
+Motivo: no cobrar tokens por **datos públicos simples** que ya vienen de fuentes públicas
+(clase, servicio, marca, modelo, año, color, estado de matrícula). Solo se cobra por datos con
+**costo de proveedor externo, dificultad real o valor comercial relevante**.
+
+- **Valor del token:** USD 0.05 → **USD 0.04**. Precios `precio_referencial_usd = tokens × 0.04`.
+- **Gratis** (`consulta_publica_base`, 0 tokens): ficha pública completa + estado de matrícula +
+  enlaces oficiales + estado de fuentes + veredicto sí/no. El consolidador ya **no gatea**
+  `datos_basicos`.
+- **Desactivados** (migración `0016`, `activo=false`): `vehiculo_basico`, `vehiculo_tecnico`
+  (cobraban datos públicos poco relevantes).
+- **Renombrados:** `vehiculo_identificadores`→`identificadores_tecnicos` (3t),
+  `vehiculo_titular_validado`→`titular_validado` (5t), `vehiculo_multas`→`multas_con_montos`
+  (10t). El alias `POST /consultar/{placa}/desbloquear` ahora apunta a `identificadores_tecnicos`.
+- **Nuevos:** `valores_matricula_sri` (12t, SRI vía enlace oficial), `alertas_legales` (8t, FGE).
+- **Reprecio:** `reporte_compra_segura` 30→40t; `verificacion_marketplace` 80→100t (constante
+  `TOKENS_VERIFICACION_MARKETPLACE`).
+- **Regla técnica:** la consulta gratuita **no** llama a proveedores externos; el proveedor se
+  invoca solo al desbloquear un producto pagado y su respuesta se cachea; si otro producto usa
+  un dato ya cacheado, no se vuelve a llamar (ver [reglas_monetizacion_tokens.md](reglas_monetizacion_tokens.md) §6).
+- **Catálogo y precios** en [catalogo_productos_consulta.md](catalogo_productos_consulta.md);
+  paquetes de recarga en [reglas_monetizacion_tokens.md](reglas_monetizacion_tokens.md) §1.1.

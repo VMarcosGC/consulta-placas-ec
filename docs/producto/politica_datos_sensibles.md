@@ -8,7 +8,7 @@ Minimización: **no exponer un dato sensible si no es necesario**, y cuando se e
 
 ## 2. El titular / dueño es dato sensible (alta sensibilidad)
 - El **nombre y la cédula del titular** son PII de una persona. **No** se publican crudos en vistas públicas ni en el marketplace (regla §10.6: el marketplace nunca expone el nombre real del dueño).
-- Producto `vehiculo_titular_validado` (ver catálogo): preferir, en orden:
+- Producto `titular_validado` (ver catálogo): preferir, en orden:
   1. **Validación** ("el titular **coincide** con la cédula `09######47`" → sí/no), sin revelar el nombre. Ideal para compra-venta: el comprador confirma que quien vende es el titular, sin recibir el dato.
   2. **Ofuscación** (nombre parcial: "J*** P*** G***", cédula parcial). Solo si el proveedor autorizado lo permite.
   3. Valor completo **solo** al propio titular autenticado sobre su vehículo (garage), nunca a un tercero.
@@ -17,11 +17,12 @@ Minimización: **no exponer un dato sensible si no es necesario**, y cuando se e
 ## 3. Identificadores (VIN, motor, chasis) — sensibilidad media
 - Por defecto **ofuscados a nivel `origen`** (primeros 3 caracteres + país del WMI), vía `src/core/ofuscacion.py`.
 - El valor **completo** solo se muestra al **dueño autenticado** del vehículo en su garage. Para terceros (consulta/compartido), nivel `origen` u `oculto`.
-- El producto `vehiculo_identificadores` revela el nivel ofuscado, no el crudo, salvo dueño.
+- El producto `identificadores_tecnicos` revela el nivel ofuscado, no el crudo, salvo dueño.
 
 ## 4. Datos transaccionales (multas, valores) — sensibilidad media
-- Las multas/citaciones son del vehículo (placa), no PII de un tercero identificado. Se pueden mostrar con montos tras desbloqueo.
-- Los **valores del SRI** (matrícula/impuestos) hoy no se obtienen automáticamente (reCAPTCHA): se ofrece **enlace oficial asistido**, no bypass.
+- Las multas/citaciones son del vehículo (placa), no PII de un tercero identificado. Se pueden mostrar con montos tras desbloqueo (`multas_con_montos`, 10 tokens).
+- Los **valores del SRI** (matrícula/impuestos) hoy no se obtienen automáticamente (reCAPTCHA): el producto `valores_matricula_sri` queda **`disponible=false`** y se ofrece **enlace oficial asistido**, no bypass ni cobro.
+- Las **alertas legales** (FGE): el producto `alertas_legales` queda **`disponible=false`** mientras no exista una **fuente estructurada y legalmente segura**; hasta entonces se ofrece el **enlace oficial**, no un cobro. El teaser solo expone el veredicto sí/no, nunca el detalle del delito ni PII de terceros de forma pública.
 
 ## 5. Retención y caché
 - No almacenar PII de terceros más de lo necesario. La caché (`consultas`) guarda respuestas de fuente con TTL; los datos de **titular** validado **no** deben persistirse crudos: guardar el resultado de la **validación** (booleano/ofuscado), no el nombre/cédula.

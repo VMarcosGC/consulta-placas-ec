@@ -46,8 +46,9 @@ router = APIRouter(prefix="/marketplace", tags=["marketplace"])
 # Tokens que cuesta destacar una publicación como premium. Configurable.
 TOKENS_PUBLICACION_PREMIUM = int(os.getenv("TOKENS_PUBLICACION_PREMIUM", "3"))
 # Tokens que cuesta SOLICITAR la verificación "Verificado por la plataforma" (revisión
-# humana + validaciones). Separado del premium: destacar (3) ≠ verificar (80).
-TOKENS_VERIFICACION_MARKETPLACE = int(os.getenv("TOKENS_VERIFICACION_MARKETPLACE", "80"))
+# humana + validaciones). Separado del premium: destacar (3) ≠ verificar (100).
+# Alineado con el producto `verificacion_marketplace` del catálogo (1 token ≈ USD 0.04).
+TOKENS_VERIFICACION_MARKETPLACE = int(os.getenv("TOKENS_VERIFICACION_MARKETPLACE", "100"))
 
 # Cuántos anuncios referenciados se traen al feed (para no inflar la respuesta).
 LIMITE_REFERENCIADAS_FEED = 30

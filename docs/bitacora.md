@@ -10,6 +10,45 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-05-31 — Reajuste comercial del catálogo (Fase 2.5): solo se cobra por valor real
+
+**Rama:** `main`. No se debe cobrar con tokens **datos públicos simples** (clase, servicio,
+marca, modelo, año, color, estado de matrícula) que ya vienen de fuentes públicas. Solo se
+cobra por datos con **costo de proveedor externo, dificultad real o valor comercial relevante**.
+
+- **Valor del token:** USD 0.05 → **USD 0.04**. `precio_referencial_usd = tokens × 0.04`.
+- **Migración 0016** (manual): desactiva `vehiculo_basico`/`vehiculo_tecnico` (`activo=false`);
+  renombra `vehiculo_identificadores`→`identificadores_tecnicos` (3t),
+  `vehiculo_titular_validado`→`titular_validado` (5t), `vehiculo_multas`→`multas_con_montos`
+  (10t); reprecia `reporte_compra_segura` 30→40t y `verificacion_marketplace` 80→100t; siembra
+  `consulta_publica_base` (0t), `valores_matricula_sri` (12t) y `alertas_legales` (8t); migra los
+  `desbloqueos_consulta` existentes al nuevo código (datos de prueba). Reversible.
+- **Seed** (`catalogo_productos.py`): nuevo catálogo de 8 productos + `BUNDLE_INCLUYE` ampliado.
+- **Consolidador**: ya **no gatea** `datos_basicos` (ficha pública gratis); identificadores →
+  `identificadores_tecnicos`, multas → `multas_con_montos`. `titular_validado`,
+  `valores_matricula_sri` y `alertas_legales` salen `disponible=false` (enlace oficial / sin
+  proveedor confiable). Alias `POST .../desbloquear` → `identificadores_tecnicos`.
+- **Marketplace**: `TOKENS_VERIFICACION_MARKETPLACE` default 80 → 100 (alineado al catálogo).
+- **Copy es-EC (tuteo)**: "Validar titular registrado", "Ver identificadores técnicos", "Ver
+  multas con valores", "Ver valores de matrícula (SRI)", "Ver alertas legales", "Generar reporte
+  compra segura". Sin "paga para ver el dueño".
+- **Regla técnica documentada**: la consulta gratuita no llama a proveedores externos; el
+  proveedor se invoca solo al desbloquear un producto pagado y su respuesta se cachea; si otro
+  producto usa un dato ya cacheado, no se vuelve a llamar.
+- **Docs**: `catalogo_productos_consulta.md`, `reglas_monetizacion_tokens.md` (+ paquetes de
+  recarga: $1→25t, $2.50→65t, $5→135t, $10→280t), `modelo_tokens_microdesbloqueos.md` (§9),
+  `politica_datos_sensibles.md`, AGENTS.md §10.3.
+
+**Verificación:** `python -m scripts.validar_desbloqueos` OK (8 productos, 1 token=USD0.04,
+ficha pública gratis, multas gateadas); imports de routers/consolidador/marketplace/registry OK;
+`alembic history` encadena `0015 → 0016 (head)`.
+
+**Pendiente:** **frontend** (repo separado) debe dejar de pintar candado sobre la ficha pública
+(ahora gratis) y mapear los nuevos códigos/copy; integrar proveedores reales para activar
+`titular_validado`/`valores_matricula_sri`/`alertas_legales` (hoy enlace oficial).
+
+---
+
 ## 2026-05-31 — Microdesbloqueos v2: catálogo en BD + auditoría comercial (backend)
 
 **Rama:** `main`. Evolución del v1 (catálogo en código + tabla `desbloqueos`) al v2 pedido.

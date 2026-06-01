@@ -3,7 +3,7 @@
 Endpoints (contrato §6 / respuesta-api-estandar):
 - `GET  /consultar/{placa}/productos`            → catálogo con estado para la placa (auth opcional).
 - `POST /consultar/{placa}/desbloquear/{codigo}` → desbloquea un producto (cobra tokens).
-- `POST /consultar/{placa}/desbloquear`          → alias retrocompatible (vehiculo_identificadores).
+- `POST /consultar/{placa}/desbloquear`          → alias retrocompatible (identificadores_tecnicos).
 - `GET  /consultar/{placa}/desbloqueos`          → historial de desbloqueos del usuario para la placa.
 
 Reutiliza el débito de tokens (402), el consolidador (gateo) y `_obtener_fuentes_placa`.
@@ -137,8 +137,8 @@ async def desbloquear_alias(
     sesion: Session = Depends(obtener_sesion),
     usuario: Usuario = Depends(usuario_actual),
 ):
-    """Alias retrocompatible: equivale a desbloquear `vehiculo_identificadores`."""
-    return await _desbloquear(sesion, usuario, _placa(placa), "vehiculo_identificadores")
+    """Alias retrocompatible: equivale a desbloquear `identificadores_tecnicos`."""
+    return await _desbloquear(sesion, usuario, _placa(placa), "identificadores_tecnicos")
 
 
 @router.get("/consultar/{placa}/desbloqueos", response_model=list[DesbloqueoConsultaResponse])
