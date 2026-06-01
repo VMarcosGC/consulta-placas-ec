@@ -30,11 +30,17 @@ class EstadoPublicacion(str, enum.Enum):
 
 
 class EstadoVerificacion(str, enum.Enum):
-    """Estado de verificación 'Verificado por la plataforma' (solo premium)."""
+    """Estado de verificación 'Verificado por la plataforma' (solo premium).
+
+    Flujo: una publicación premium nace `pendiente`; un admin la marca `verificado`
+    (muestra el sello) o `rechazado` (sin sello, no vuelve a la cola). `no_verificado`
+    es el estado de las publicaciones light (no aplican a verificación).
+    """
 
     NO_VERIFICADO = "no_verificado"
     PENDIENTE = "pendiente"
     VERIFICADO = "verificado"
+    RECHAZADO = "rechazado"
 
 
 class EstadoModeracion(str, enum.Enum):
@@ -140,6 +146,11 @@ class PublicacionInterna(Base):
         nullable=False,
         server_default=EstadoVerificacion.NO_VERIFICADO.value,
         default=EstadoVerificacion.NO_VERIFICADO.value,
+    )
+    # Momento en que un admin marcó la publicación como verificada (auditoría).
+    # NULL mientras no esté verificada (pendiente/rechazado/no_verificado).
+    verificado_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     destacado: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False

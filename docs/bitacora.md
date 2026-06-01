@@ -10,6 +10,29 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-05-31 — Verificación premium del marketplace (flujo admin completo)
+
+**Rama:** `main`.
+
+**Backend**
+- `models.py`: `EstadoVerificacion` suma el valor terminal **`rechazado`** (columna String, sin migración). Nueva columna **`verificado_en`** (timestamp, nullable) en `publicaciones_internas` para auditar cuándo se selló → **migración 0013** (manual, revisada a mano).
+- `schemas.py`: `PublicacionInternaSalida` expone `verificado_en`; nuevo `VerificacionPublicacion` (body `decision`, solo `verificado`/`rechazado`, validación de estado terminal).
+- `routers/publicaciones.py` (espeja la moderación de referencias):
+  - `GET /marketplace/publicaciones/pendientes-verificacion` — cola de premium `pendiente`, más antiguas primero (solo `admin_actual`).
+  - `POST /marketplace/publicaciones/{id}/verificar` — marca `verificado` (sella + `verificado_en=now`) o `rechazado` (quita sello). 404 si no existe; **422 si no es premium**.
+
+**Frontend**
+- `types/api.ts`: `EstadoVerificacion` suma `rechazado`; `PublicacionInterna` suma `verificado_en`.
+- `lib/api.ts`: `listarPublicacionesPendientesVerificacion()` y `verificarPublicacion(id, decision)`.
+- Nueva pantalla **`/admin/verificaciones`** (mismo molde que `/admin/moderacion`): cola de premium pendientes con su argumento (mantenimientos) + botones Verificar/Rechazar. Acceso admin en el Header ("Verificar").
+- El sello "Verificado por la plataforma" ya vivía en `ListingCard` (se muestra solo con `verificado`).
+
+**Verificación:** `configure_mappers` + carga de `app` OK; rutas nuevas presentes; migración 0013 renderiza el `ADD COLUMN verificado_en`; `tsc` + `next build` del frontend en verde.
+
+**Pendientes:** definir si el sello debe condicionar el orden/box del feed premium; notificar al dueño cuando su premium queda verificada/rechazada (hoy no hay notificaciones).
+
+---
+
 ## 2026-05-29 — Integración de las 3 fuentes restantes + rebranding "Revisa tu Carro EC" + rediseño claro
 
 **Rama:** `main`. Continuación del pivote a Perfil Consolidado.

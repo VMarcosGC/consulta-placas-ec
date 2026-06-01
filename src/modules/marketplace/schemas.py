@@ -214,6 +214,7 @@ class PublicacionInternaSalida(BaseModel):
     estado_verificacion: EstadoVerificacion
     destacado: bool
     verificado: bool = False
+    verificado_en: datetime | None = None
     # Características derivadas del vehículo vinculado (si lo hay). Nunca VIN.
     marca: str | None = None
     modelo: str | None = None
@@ -249,6 +250,7 @@ class PublicacionInternaSalida(BaseModel):
             estado_verificacion=EstadoVerificacion(p.estado_verificacion),
             destacado=p.destacado,
             verificado=p.estado_verificacion == EstadoVerificacion.VERIFICADO.value,
+            verificado_en=p.verificado_en,
             marca=getattr(veh, "marca", None),
             modelo=getattr(veh, "modelo", None),
             anio=getattr(veh, "anio", None),
@@ -368,6 +370,23 @@ class ModeracionReferencia(BaseModel):
     def _decision_terminal(cls, v: EstadoModeracion) -> EstadoModeracion:
         if v == EstadoModeracion.PENDIENTE:
             raise ValueError("La decisión debe ser 'aprobada' o 'rechazada'.")
+        return v
+
+
+class VerificacionPublicacion(BaseModel):
+    """Decisión de un admin sobre una publicación premium pendiente de verificación.
+
+    Solo acepta los estados terminales `verificado` o `rechazado`; no se puede
+    devolver a `pendiente` ni a `no_verificado` desde este endpoint.
+    """
+
+    decision: EstadoVerificacion
+
+    @field_validator("decision")
+    @classmethod
+    def _decision_terminal(cls, v: EstadoVerificacion) -> EstadoVerificacion:
+        if v not in (EstadoVerificacion.VERIFICADO, EstadoVerificacion.RECHAZADO):
+            raise ValueError("La decisión debe ser 'verificado' o 'rechazado'.")
         return v
 
 

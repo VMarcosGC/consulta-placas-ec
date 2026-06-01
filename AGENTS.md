@@ -317,6 +317,10 @@ Coexisten dos mecanismos de compra-venta:
 - **Marketplace público** (`GET /marketplace`):
   - **Condición de venta**: un auto aparece en el listado solo si `en_venta` es `True` **y** `precio_venta_usd` es mayor a `0`.
   - **Privacidad**: el listado **nunca** expone el **VIN completo** (usar nivel `oculto` u `origen`, ver sección 7) ni el **nombre real del dueño**. Solo se publican las características del auto y la `url_externa` de contacto.
+- **Publicaciones internas + verificación premium** (`publicaciones_internas`): plan `light` (gratis) / `premium` (cobra tokens, ver §10.3). El estado de verificación (`estado_verificacion`: `no_verificado` / `pendiente` / `verificado` / `rechazado`) gobierna el sello **"Verificado por la plataforma"**:
+  - Una premium nace `pendiente`. Solo un **admin** (`admin_actual`, lista `ADMIN_EMAILS`) la marca `verificado` o `rechazado` vía `POST /marketplace/publicaciones/{id}/verificar` (decisión terminal). La cola se lee con `GET /marketplace/publicaciones/pendientes-verificacion` (solo admin). Verificar registra `verificado_en` (auditoría, migración 0013).
+  - Solo las **premium** se verifican (verificar una light → 422). El sello solo se muestra cuando `estado_verificacion == verificado`. Mismo patrón que la moderación de referencias (§ referencias).
+- **Referencias aportadas** (`publicaciones_referenciadas`): el usuario pega un link externo (FB/OLX/…); NO se raspa; entra `pendiente` y un admin la aprueba/rechaza (`/marketplace/referencias/...`). En el feed es un **enlace vivo** al anuncio original.
 
 ---
 

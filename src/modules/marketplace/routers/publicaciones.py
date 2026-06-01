@@ -12,13 +12,14 @@ por ser un flujo de pago, igual que el desbloqueo de perfil). Solo toca la BD pr
 """
 
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, and_
 from sqlalchemy.orm import Session, selectinload
 
 from src.core.database import obtener_sesion
-from src.modules.auth.dependencies import usuario_actual
+from src.modules.auth.dependencies import usuario_actual, admin_actual
 from src.modules.auth.models import Usuario
 from src.modules.tokens.service import debitar_tokens, SaldoInsuficiente
 from src.modules.vehiculos.models.vehiculo import Vehiculo
@@ -36,6 +37,7 @@ from src.modules.marketplace.schemas import (
     PublicacionInternaCrear,
     PublicacionInternaSalida,
     PublicacionReferenciadaSalida,
+    VerificacionPublicacion,
 )
 
 
@@ -281,3 +283,86 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
         estandar=estandar,
         referenciadas=[PublicacionReferenciadaSalida.model_validate(r) for r in referenciadas],
     )
+
+
+# ──────────────── Verificación premium (admin) ────────────────
+
+
+def _cargar_publicacion(sesion: Session, publicacion_id: int) -> PublicacionInterna | None:
+    """Carga una publicación por id con vehículo+mantenimientos (eager, sin scope de dueño)."""
+    return sesion.execute(
+        select(PublicacionInterna)
+        .where(PublicacionInterna.id == publicacion_id)
+        .options(
+            selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos)
+        )
+    ).scalar_one_or_none()
+
+
+@router.get(
+    "/publicaciones/pendientes-verificacion",
+    response_model=list[PublicacionInternaSalida],
+)
+def listar_pendientes_verificacion(
+    sesion: Session = Depends(obtener_sesion),
+    _: Usuario = Depends(admin_actual),
+):
+    """Cola de publicaciones premium por verificar (las más antiguas primero). Solo admin."""
+    pubs = (
+        sesion.execute(
+            select(PublicacionInterna)
+            .where(
+                and_(
+                    PublicacionInterna.plan == PlanPublicacion.PREMIUM.value,
+                    PublicacionInterna.estado_verificacion
+                    == EstadoVerificacion.PENDIENTE.value,
+                )
+            )
+            .options(
+                selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos)
+            )
+            .order_by(PublicacionInterna.creado_en.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return [PublicacionInternaSalida.desde_modelo(p) for p in pubs]
+
+
+@router.post(
+    "/publicaciones/{publicacion_id}/verificar",
+    response_model=PublicacionInternaSalida,
+)
+def verificar_publicacion(
+    publicacion_id: int,
+    decision: VerificacionPublicacion,
+    sesion: Session = Depends(obtener_sesion),
+    _: Usuario = Depends(admin_actual),
+):
+    """Marca una publicación premium como **verificada** o **rechazada**. Solo admin.
+
+    - 404 si no existe.
+    - 422 si la publicación no es premium (las light no aplican a verificación).
+    - `verificado` sella la publicación y registra `verificado_en` (auditoría).
+    - `rechazado` quita el sello y limpia `verificado_en`.
+    """
+    pub = _cargar_publicacion(sesion, publicacion_id)
+    if pub is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Publicación no encontrada"
+        )
+    if pub.plan != PlanPublicacion.PREMIUM.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Solo las publicaciones premium se verifican.",
+        )
+
+    pub.estado_verificacion = decision.decision.value
+    pub.verificado_en = (
+        datetime.now(timezone.utc)
+        if decision.decision == EstadoVerificacion.VERIFICADO
+        else None
+    )
+    sesion.commit()
+
+    return PublicacionInternaSalida.desde_modelo(_cargar_publicacion(sesion, publicacion_id))
