@@ -8,6 +8,8 @@ No scrapea ni toca la BD: solo transforma dicts ya obtenidos por el router.
 """
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from src.modules.consulta.schemas import (
     CategoriaMulta,
     DatosBasicos,
@@ -17,11 +19,29 @@ from src.modules.consulta.schemas import (
     MultaDetalle,
     MultaItem,
     NovedadLegal,
+    ProductoEstado,
     ValoresTributarios,
     VehiculoConsolidadoResponse,
 )
 from src.modules.consulta.services.catalogo_fuentes import CATALOGO_FUENTES
+from src.modules.consulta.services.catalogo_productos import CATALOGO_PRODUCTOS
 from src.core.ofuscacion import decodificar_origen_vin, ofuscar_identificador
+
+
+def _matricula_vigente(fecha_caducidad: str | None) -> bool | None:
+    """Interpreta la fecha de caducidad (DD-MM-YYYY o ISO) → vigente/vencida.
+
+    Devuelve None si no hay fecha o no se puede parsear (no afirmamos nada).
+    """
+    if not fecha_caducidad:
+        return None
+    texto = fecha_caducidad.strip()
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(texto, fmt).date() >= date.today()
+        except ValueError:
+            continue
+    return None
 
 
 def _item_estado(clave: str, crudo: dict | None) -> EstadoFuenteItem:
@@ -96,15 +116,21 @@ def _construir_identificacion(
 def consolidar_placa(
     placa: str,
     resultados: dict[str, dict],
-    desbloqueado: bool = False,
+    productos_desbloqueados: frozenset[str] | set[str] = frozenset(),
 ) -> VehiculoConsolidadoResponse:
-    """Agrega las respuestas por-fuente en el perfil consolidado.
+    """Agrega las respuestas por-fuente en el perfil consolidado, GATEADO por productos.
 
     `resultados` viene keyed por la clave del catálogo (ej. {"ANT": {...}, "AMT": {...}}):
     solo contiene las fuentes efectivamente consultadas. `estado_fuentes` se arma desde
     `CATALOGO_FUENTES`, así que las fuentes del catálogo aún no implementadas aparecen
     como `no_integrada` sin tener que tocar este archivo al sumarlas.
+
+    `productos_desbloqueados` = códigos del catálogo que el usuario ya pagó para esta placa.
+    Las secciones cuyo producto NO esté ahí se devuelven gateadas (ofuscadas/ocultas), con
+    `bloqueado=True`, mientras el teaser (marca/modelo/año/color + matrícula vigente +
+    veredicto) queda siempre gratis. Ver docs/producto/modelo_tokens_microdesbloqueos.md.
     """
+    productos_desbloqueados = set(productos_desbloqueados)
     ant = resultados.get("ANT") or {}
     sri = resultados.get("SRI") or {}
     fge = resultados.get("FGE") or {}
@@ -123,6 +149,12 @@ def consolidar_placa(
         fecha_matricula=ant_veh.get("fecha_matricula"),
         fecha_caducidad=ant_veh.get("fecha_caducidad"),
         pais_origen=sri_veh.get("pais"),
+        matricula_vigente=_matricula_vigente(ant_veh.get("fecha_caducidad")),
+    )
+    # ¿La fuente entregó la ficha básica ampliada? (para marcar el producto disponible)
+    basico_disponible = any(
+        datos_basicos.__getattribute__(c)
+        for c in ("clase", "servicio", "fecha_matricula", "fecha_caducidad")
     )
 
     # Identificación: VIN/motor/chasis vendrían de fuentes no oficiales aún sin
@@ -133,7 +165,11 @@ def consolidar_placa(
     motor_crudo = ant_veh.get("numero_motor") or ant_veh.get("motor") or None
     chasis_crudo = ant_veh.get("numero_chasis") or ant_veh.get("chasis") or None
     identificacion = _construir_identificacion(
-        vin_crudo, motor_crudo, chasis_crudo, sri_veh.get("pais"), desbloqueado
+        vin_crudo,
+        motor_crudo,
+        chasis_crudo,
+        sri_veh.get("pais"),
+        desbloqueado="vehiculo_identificadores" in productos_desbloqueados,
     )
 
     # Valores tributarios (SRI): enlace al portal (consulta_externa) o montos.
@@ -251,6 +287,59 @@ def consolidar_placa(
         _item_estado(clave, resultados.get(clave)) for clave in CATALOGO_FUENTES
     ]
 
+    # ── Veredicto GRATIS (antes de gatear): ¿hay algo pendiente? sí/no, sin detalle ──
+    valor_sri = valores_tributarios.total_a_pagar_usd if valores_tributarios else None
+    tiene_pendientes = bool(multas_pendientes) or bool(novedades_legales) or bool(valor_sri)
+
+    # ── Disponibilidad (qué productos SÍ se pueden cobrar para esta placa) ──
+    identificadores_disponible = bool(
+        identificacion.vin_ofuscado
+        or identificacion.numero_motor_ofuscado
+        or identificacion.numero_chasis_ofuscado
+    )
+    multas_disponible = len(multas_detalle) > 0
+    disponibles: set[str] = set()
+    if basico_disponible:
+        disponibles.add("vehiculo_basico")
+    if identificadores_disponible:
+        disponibles.add("vehiculo_identificadores")
+    if multas_disponible:
+        disponibles.add("vehiculo_multas")
+    # vehiculo_tecnico y vehiculo_titular_validado: sin fuente autorizada todavía → no disponibles.
+    if disponibles:  # el bundle se ofrece si hay al menos un dato que agrupa
+        disponibles.add("reporte_compra_segura")
+
+    # ── Gateo de secciones según lo desbloqueado ──
+    if "vehiculo_basico" not in productos_desbloqueados:
+        # Teaser: se mantienen marca/modelo/año/color + matrícula vigente; se ocultan el resto.
+        datos_basicos.clase = None
+        datos_basicos.servicio = None
+        datos_basicos.fecha_matricula = None
+        datos_basicos.fecha_caducidad = None
+        datos_basicos.bloqueado = True
+
+    multas_bloqueado = "vehiculo_multas" not in productos_desbloqueados
+    if multas_bloqueado:
+        # El detalle (montos/categorías) se oculta; el teaser solo dice si hay pendientes.
+        multas_detalle = []
+        multas_pendientes = [
+            m.model_copy(update={"valor_usd": None}) for m in multas_pendientes
+        ]
+
+    # ── Catálogo con estado para el frontend ──
+    productos = [
+        ProductoEstado(
+            codigo=p.codigo,
+            nombre=p.nombre,
+            tokens=p.tokens,
+            sensibilidad=p.sensibilidad.value,
+            descripcion=p.descripcion,
+            desbloqueado=p.codigo in productos_desbloqueados,
+            disponible=p.codigo in disponibles,
+        )
+        for p in CATALOGO_PRODUCTOS.values()
+    ]
+
     return VehiculoConsolidadoResponse(
         placa=placa,
         datos_basicos=datos_basicos,
@@ -258,6 +347,9 @@ def consolidar_placa(
         valores_tributarios=valores_tributarios,
         multas_pendientes=multas_pendientes,
         multas_detalle=multas_detalle,
+        multas_bloqueado=multas_bloqueado,
         novedades_legales=novedades_legales,
         estado_fuentes=estado_fuentes,
+        productos=productos,
+        tiene_pendientes=tiene_pendientes,
     )

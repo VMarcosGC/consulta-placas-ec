@@ -10,6 +10,44 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-05-31 — Microdesbloqueos por tokens (implementación backend + frontend)
+
+**Rama:** `main`.
+
+**Backend**
+- Modelo `Desbloqueo` (`src/modules/consulta/models/desbloqueo.py`) + migración **0014**
+  (tabla `desbloqueos`, UK usuario+placa+producto; guarda qué se compró, no el dato).
+- `services/catalogo_productos.py`: catálogo en código (precios/descripciones/bundle).
+- `services/desbloqueos.py`: `productos_desbloqueados`, `desbloquear_producto` (débito atómico
+  idempotente, expande bundle), `estado_catalogo`.
+- `consolidador.consolidar_placa(placa, resultados, productos_desbloqueados)`: gatea secciones;
+  teaser gratis = marca/modelo/año/color + matrícula vigente + veredicto `tiene_pendientes`.
+- `auth.dependencies.usuario_actual_opcional` (auth opcional, no 401).
+- Endpoints: `GET /consultar/{placa}/perfil` (auth opcional, gateado), `POST
+  /consultar/{placa}/desbloquear/{producto}` (400/409/402), y el viejo `/desbloquear` queda
+  como **alias** de `vehiculo_identificadores`.
+
+**Frontend**
+- Tipos `ProductoEstado`, `DatosBasicos.{matricula_vigente,bloqueado}`, `VehiculoConsolidado.
+  {multas_bloqueado,productos,tiene_pendientes}`.
+- `consultarPerfil` envía el token si hay sesión (auth opcional) → revela lo ya pagado;
+  `desbloquearProducto(placa,codigo)`.
+- `PerfilVehiculo`: veredicto desde el backend; `BotonDesbloqueo` (🔓 N tokens, maneja 401/402/409)
+  en Datos/ Multas/ Identificación; re-fetch con token al montar.
+
+**Decisiones aplicadas (defaults del plan):** teaser mínimo; `verificacion_marketplace` no se
+cablea a la consulta; `tecnico`/`titular_validado` sin fuente → `disponible=false`; bundle no
+descuenta lo ya pagado; **402** si falta saldo; **no cobrar** si el dato no está disponible.
+
+**Verificación:** `configure_mappers` + carga de app OK; gateo probado con datos simulados
+(teaser oculta clase/multas/VIN, unlock revela); migración 0014 renderiza; `tsc`+`next build` ok.
+
+**Pendientes:** proveedor para `titular_validado`/`tecnico`; reconciliar precio de
+`verificacion_marketplace` (80) con el premium=3 actual; mostrar saldo de tokens en el header;
+regenerar `proyecto-snapshot.md`.
+
+---
+
 ## 2026-05-31 — PLAN: modelo de microdesbloqueos por tokens (solo documentación)
 
 **Rama:** `main` (commit local, **sin push** — no se toca producción todavía).

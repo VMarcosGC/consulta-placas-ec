@@ -67,7 +67,12 @@ class EstadoFuenteItem(BaseModel):
 
 
 class DatosBasicos(BaseModel):
-    """Características generales del vehículo (sección de carga rápida)."""
+    """Características generales del vehículo.
+
+    Microdesbloqueo (`vehiculo_basico`): marca/modelo/año/color son **gratis** (teaser);
+    clase/servicio/fechas quedan ocultos (`bloqueado=True`) hasta desbloquear. El indicador
+    `matricula_vigente` (sí/no) es gratis aunque la fecha exacta esté bloqueada.
+    """
 
     marca: str | None = None
     modelo: str | None = None
@@ -78,6 +83,12 @@ class DatosBasicos(BaseModel):
     fecha_matricula: str | None = None
     fecha_caducidad: str | None = Field(None, description="Vencimiento de la matrícula")
     pais_origen: str | None = None
+    matricula_vigente: bool | None = Field(
+        None, description="True si la matrícula no está vencida (gratis, sin revelar la fecha)"
+    )
+    bloqueado: bool = Field(
+        False, description="True si clase/servicio/fechas están ocultos (falta vehiculo_basico)"
+    )
 
 
 class Identificacion(BaseModel):
@@ -172,11 +183,30 @@ class ValoresTributarios(BaseModel):
     )
 
 
+class ProductoEstado(BaseModel):
+    """Estado de un producto del catálogo de microdesbloqueos para esta placa+usuario."""
+
+    codigo: str
+    nombre: str
+    tokens: int
+    sensibilidad: str
+    descripcion: str
+    desbloqueado: bool = False
+    disponible: bool = Field(
+        True, description="False si la fuente no entrega ese dato para esta placa (no cobrable)"
+    )
+
+
 class VehiculoConsolidadoResponse(BaseModel):
     """Perfil consolidado del vehículo agregado desde todas las fuentes.
 
     Orientado a la entidad, no al proveedor. Las listas pueden venir vacías
     mientras `estado_fuentes` reporte fuentes `en_proceso`.
+
+    Microdesbloqueos: las secciones sensibles vienen gateadas. `productos` lista el
+    catálogo con su estado (desbloqueado/disponible/tokens) para que el frontend
+    pinte los candados. `multas_bloqueado` indica que el detalle de multas está oculto
+    (el teaser solo dice si hay pendientes, vía `tiene_pendientes`).
     """
 
     placa: str
@@ -187,18 +217,21 @@ class VehiculoConsolidadoResponse(BaseModel):
     multas_detalle: list[MultaDetalle] = Field(
         default_factory=list, description="Desglose por fuente (ANT/AMT/EPMTSD) con categorías"
     )
+    multas_bloqueado: bool = Field(
+        False, description="True si el detalle de multas está oculto (falta vehiculo_multas)"
+    )
     novedades_legales: list[NovedadLegal] = Field(default_factory=list)
     estado_fuentes: list[EstadoFuenteItem] = Field(default_factory=list)
+    productos: list[ProductoEstado] = Field(
+        default_factory=list, description="Catálogo de microdesbloqueos con su estado"
+    )
+    tiene_pendientes: bool = Field(
+        False,
+        description="Veredicto GRATIS (sí/no): hay multas/valores/novedades. Se calcula "
+        "antes del gateo, para que el teaser muestre el semáforo sin revelar el detalle.",
+    )
 
     @property
     def cargando(self) -> bool:
         """True si alguna fuente sigue `en_proceso` (el frontend muestra loader)."""
         return any(f.estado is EstadoFuente.EN_PROCESO for f in self.estado_fuentes)
-
-    @property
-    def tiene_pendientes(self) -> bool:
-        """True si hay multas, valores tributarios o novedades legales."""
-        valor_sri = (
-            self.valores_tributarios.total_a_pagar_usd if self.valores_tributarios else None
-        )
-        return bool(self.multas_pendientes) or bool(self.novedades_legales) or bool(valor_sri)

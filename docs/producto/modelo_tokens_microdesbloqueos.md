@@ -1,6 +1,10 @@
 # Modelo de microdesbloqueos por tokens — Revisa tu Carro EC
 
-**Estado:** PLAN (no implementado todavía; no tocar producción).
+**Estado:** IMPLEMENTADO (backend + frontend) el 2026-05-31. Productos activos hoy con
+datos reales: `vehiculo_basico`, `vehiculo_multas`, `vehiculo_identificadores` (+ bundle).
+`vehiculo_tecnico` y `vehiculo_titular_validado` quedan en el catálogo pero `disponible=false`
+hasta tener fuente/proveedor autorizado. `verificacion_marketplace` NO se cableó al flujo de
+consulta (sigue siendo el flujo admin del marketplace).
 **Fecha:** 2026-05-31.
 **Relacionados:** [catalogo_productos_consulta.md](catalogo_productos_consulta.md) · [reglas_monetizacion_tokens.md](reglas_monetizacion_tokens.md) · [politica_datos_sensibles.md](politica_datos_sensibles.md) · [AGENTS.md](../../AGENTS.md) · [proyecto-snapshot.md](../../proyecto-snapshot.md).
 

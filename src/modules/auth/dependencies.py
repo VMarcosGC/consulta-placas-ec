@@ -14,6 +14,9 @@ from src.modules.auth.security import decodificar_token
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# Variante que NO exige token (auto_error=False): para endpoints públicos que dan más
+# datos si hay sesión (ej. el perfil con microdesbloqueos del usuario).
+oauth2_opcional = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 def _emails_admin() -> set[str]:
@@ -56,6 +59,25 @@ def usuario_actual(
         raise credenciales_invalidas
 
     return usuario
+
+
+def usuario_actual_opcional(
+    token: str | None = Depends(oauth2_opcional),
+    sesion: Session = Depends(obtener_sesion),
+) -> Usuario | None:
+    """Devuelve el Usuario si hay un Bearer token válido, o None si no hay/está mal.
+
+    No lanza 401: el endpoint es público y solo enriquece la respuesta cuando hay sesión.
+    """
+    if not token:
+        return None
+    try:
+        email = decodificar_token(token)
+    except ValueError:
+        return None
+    return sesion.execute(
+        select(Usuario).where(Usuario.email == email)
+    ).scalar_one_or_none()
 
 
 def admin_actual(usuario: Usuario = Depends(usuario_actual)) -> Usuario:
