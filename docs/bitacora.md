@@ -10,6 +10,45 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-05-31 — PLAN: modelo de microdesbloqueos por tokens (solo documentación)
+
+**Rama:** `main` (commit local, **sin push** — no se toca producción todavía).
+
+**Qué se hizo:** planificación y documentación de producto para pasar del desbloqueo
+**monolítico** actual (`POST /consultar/{placa}/desbloquear`, revela todos los identificadores
+por 1 token) a **microdesbloqueos progresivos**: consulta inicial gratuita (teaser) + productos
+pequeños desbloqueables con tokens. Se crearon 4 docs en `docs/producto/`:
+`modelo_tokens_microdesbloqueos.md`, `catalogo_productos_consulta.md`,
+`reglas_monetizacion_tokens.md`, `politica_datos_sensibles.md`.
+
+**Decisiones tomadas:**
+- **1 token = USD 0.05** (referencial). Saldo inicial de cortesía sigue en 5 tokens.
+- **Catálogo inicial** (códigos en español, estables como clave de `desbloqueos`):
+  `vehiculo_basico` 3 · `vehiculo_tecnico` 2 · `vehiculo_identificadores` 3 ·
+  `vehiculo_titular_validado` 5 · `vehiculo_multas` 8 · `reporte_compra_segura` 30 (bundle) ·
+  `verificacion_marketplace` 80.
+- **Titular = dato sensible (PII):** se maneja **ofuscado o validado** (coincide/no coincide),
+  nunca crudo a terceros; valor completo solo al dueño autenticado. Fuente: proveedor autorizado.
+- **No cobrar si no hay dato** entregado; **402** si falta saldo; **idempotencia** vía tabla
+  `desbloqueos` (UK usuario+placa+producto): no se recobra lo ya comprado.
+- **Sin evasión de captcha / anti-bot**: datos vía fuentes ya obtenidas + caché + proveedores
+  autorizados + enlaces oficiales asistidos (SRI). El token cobra el acceso, no el bypass.
+- El catálogo de productos vive en **código** (`services/catalogo_productos.py`), no en BD
+  (precios versionados sin migración); solo `desbloqueos` es tabla nueva (migración 0014, manual).
+
+**Decisiones abiertas (a confirmar antes de implementar):** alcance exacto del teaser gratis;
+reconciliar `verificacion_marketplace` (80) con el flujo admin ya construido (premium=3 hoy);
+proveedor del titular validado; si el bundle descuenta lo ya pagado.
+
+**Verificación:** sin cambios de código ejecutable; solo documentación. `proyecto-snapshot.md`
+sigue vigente (regenerado el 2026-05-31).
+
+**Pendientes / siguiente etapa:** ver "Plan de archivos" en `modelo_tokens_microdesbloqueos.md`
+(modelo `Desbloqueo` + migración 0014, `catalogo_productos.py`, `desbloqueos.py`, endpoints
+`/productos` y `/desbloquear/{producto}`, gating del consolidador, UI con `BotonDesbloqueo`).
+
+---
+
 ## 2026-05-31 — Verificación premium del marketplace (flujo admin completo)
 
 **Rama:** `main`.
