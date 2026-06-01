@@ -43,8 +43,11 @@ from src.modules.marketplace.schemas import (
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
 
-# Tokens que cuesta una publicación premium (destacada + verificable). Configurable.
+# Tokens que cuesta destacar una publicación como premium. Configurable.
 TOKENS_PUBLICACION_PREMIUM = int(os.getenv("TOKENS_PUBLICACION_PREMIUM", "3"))
+# Tokens que cuesta SOLICITAR la verificación "Verificado por la plataforma" (revisión
+# humana + validaciones). Separado del premium: destacar (3) ≠ verificar (80).
+TOKENS_VERIFICACION_MARKETPLACE = int(os.getenv("TOKENS_VERIFICACION_MARKETPLACE", "80"))
 
 # Cuántos anuncios referenciados se traen al feed (para no inflar la respuesta).
 LIMITE_REFERENCIADAS_FEED = 30
@@ -137,11 +140,9 @@ def crear_publicacion(
         precio_usd=datos.precio_usd,
         plan=datos.plan.value,
         estado=EstadoPublicacion.ACTIVA.value,
-        estado_verificacion=(
-            EstadoVerificacion.PENDIENTE.value
-            if es_premium
-            else EstadoVerificacion.NO_VERIFICADO.value
-        ),
+        # Premium compra el "destacado"; la verificación es un paso aparte que el dueño
+        # SOLICITA con tokens (POST .../solicitar-verificacion). Nace no_verificado.
+        estado_verificacion=EstadoVerificacion.NO_VERIFICADO.value,
         destacado=es_premium,
     )
     sesion.add(pub)
@@ -206,12 +207,9 @@ def actualizar_publicacion(
     )
     if datos.plan is not None:
         pub.plan = datos.plan.value
-        if datos.plan == PlanPublicacion.PREMIUM:
-            pub.destacado = True
-            if pub.estado_verificacion == EstadoVerificacion.NO_VERIFICADO.value:
-                pub.estado_verificacion = EstadoVerificacion.PENDIENTE.value
-        else:  # baja a light
-            pub.destacado = False
+        # Premium = destacado. La verificación NO se activa aquí: el dueño la solicita
+        # aparte con tokens. Bajar a light quita el destacado (y el sello deja de aplicar).
+        pub.destacado = datos.plan == PlanPublicacion.PREMIUM
 
     if asciende_a_premium:
         _cobrar_premium(sesion, usuario, pub.placa)
@@ -231,6 +229,51 @@ def eliminar_publicacion(
     sesion.delete(pub)
     sesion.commit()
     return None
+
+
+@router.post(
+    "/publicaciones/{publicacion_id}/solicitar-verificacion",
+    response_model=PublicacionInternaSalida,
+)
+def solicitar_verificacion(
+    publicacion_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """El dueño SOLICITA el sello "Verificado por la plataforma" para su publicación.
+
+    - Solo el dueño (404 si no es suya).
+    - Solo premium (422 si es light: primero hay que destacarla).
+    - Si ya está `pendiente` o `verificado` → idempotente (no recobra).
+    - Cobra `TOKENS_VERIFICACION_MARKETPLACE`; **402** si no alcanza. Deja la publicación
+      en `pendiente` → entra a la cola admin (`/admin/verificaciones`).
+    """
+    pub = _mi_publicacion(sesion, publicacion_id, usuario)
+    if pub.plan != PlanPublicacion.PREMIUM.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Primero haz tu publicación premium; luego puedes solicitar la verificación.",
+        )
+    if pub.estado_verificacion in (
+        EstadoVerificacion.PENDIENTE.value,
+        EstadoVerificacion.VERIFICADO.value,
+    ):
+        return PublicacionInternaSalida.desde_modelo(pub)  # idempotente: ya en cola o sellada
+
+    try:
+        debitar_tokens(
+            sesion,
+            usuario,
+            TOKENS_VERIFICACION_MARKETPLACE,
+            motivo=f"verificacion_marketplace:{pub.id}",
+        )
+        pub.estado_verificacion = EstadoVerificacion.PENDIENTE.value
+        sesion.commit()
+    except SaldoInsuficiente as e:
+        sesion.rollback()
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
+
+    return PublicacionInternaSalida.desde_modelo(_mi_publicacion(sesion, pub.id, usuario))
 
 
 @router.get("/feed", response_model=FeedMarketplaceSalida)

@@ -98,3 +98,7 @@ Resumen en la sección final de este documento y en el mensaje de la tarea.
 3. **Titular validado**: definir el proveedor autorizado y si se muestra ofuscado o solo "validación" (coincide/no coincide). Ver política.
 4. **Reembolso/idempotencia de bundle**: si el usuario ya desbloqueó multas (8) y luego compra `reporte_compra_segura` (30), ¿se descuenta lo ya pagado? Propuesta inicial: no se descuenta (el bundle ya es barato); documentarlo.
 5. **Saldo inicial 5 vs precios**: con 5 tokens de cortesía ($0.25) el usuario alcanza 1–2 microproductos. Confirmar si está bien como "prueba".
+
+## 8. Resoluciones (2026-05-31)
+- **#2 `verificacion_marketplace`** → RESUELTO: separado del premium. Publicar premium = 3 tokens (destaca, nace `no_verificado`); el dueño **solicita** el sello con `POST /marketplace/publicaciones/{id}/solicitar-verificacion` = **80 tokens** → `pendiente` → cola admin. Saldo en el header ya visible.
+- **#3 titular / #técnico (seam de proveedor)** → BLOQUEADO por dependencia externa: requieren un **proveedor de datos autorizado** (API/convenio) que aún no existe. Por eso `vehiculo_titular_validado` y `vehiculo_tecnico` quedan en el catálogo con `disponible=false` (no se ofrecen ni cobran). **Punto de integración**: cuando exista el proveedor, se agrega un servicio `services/proveedor_<x>.py` que pueble esos campos en `consolidar_placa`, y el producto pasará a `disponible=true` automáticamente (la lógica de cobro/gateo ya está lista). No se implementa scraping de padrones (límite ético/legal).

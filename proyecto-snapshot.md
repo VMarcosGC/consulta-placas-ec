@@ -12,7 +12,7 @@ Plataforma (web + futura móvil) para que cualquier persona en Ecuador conozca e
 **Backend** (repo `consulta_placas_ec`):
 - Python 3.11+, **FastAPI** (monolito modular por dominio, DDD).
 - **Playwright** async (Chromium) para scraping; `httpx` donde aplica.
-- **PostgreSQL 16 (Neon)** + **SQLAlchemy 2** + **Alembic** (migraciones manuales 0001–0012).
+- **PostgreSQL 16 (Neon)** + **SQLAlchemy 2** + **Alembic** (migraciones manuales 0001–0014).
 - **Pydantic 2**; auth `passlib[bcrypt<4.0]` + `python-jose` (JWT HS256).
 - Solvers de captcha: 2Captcha (hCaptcha), extractor vía **Apify** + proxy residencial gateado.
 - Deploy: **Docker** (imagen oficial Playwright) en **Render**.
@@ -57,7 +57,7 @@ Plataforma (web + futura móvil) para que cualquier persona en Ecuador conozca e
 ## 4. Estructura de archivos actual (backend)
 ```
 main.py · run.py · worker.py · registry.py
-alembic/versions/0001..0012   (migraciones manuales)
+alembic/versions/0001..0014   (migraciones manuales)
 src/core/        database, validators, ofuscacion, proxy_apify
 src/modules/
   auth/          models (Usuario, TransaccionToken), router, security, dependencies, schemas
@@ -91,11 +91,20 @@ Frontend (`../consulta-placas-web/src`): `app/{page,consultar,consultar/[placa],
 - **Pagos con tokens → HTTP 402**; validación de negocio → 422; "no es tuyo" → 404.
 
 ## 7. Últimos cambios (sesión 2026-05-30/31)
-Backend: desbloqueo PII por tokens (402); marketplace publicaciones (feed mixto) + migración 0010; referencias aportadas + moderación + `es_admin` en `/auth/me`; migraciones 0011/0012 (imagen_url ampliada).
-Frontend: perfil rediseñado (Bento → versión sobria y ordenada: Datos tras el nombre, Multas izq + Matrícula der, consulta oficial subida, FGE/EPMTSD desactivados); spinner de carga al buscar placa; **fix de sesión persistente** (evento `sesion-cambiada` en login/logout) + nombre del usuario en el header; campo **ciudad** en el garage; tarjeta de referencia como **enlace vivo a Facebook**; barrido a **español de Ecuador**; enlaces navegables en la landing.
+- **Verificación premium del marketplace** (sello "Verificado por la plataforma"): flujo admin
+  (`/admin/verificaciones`) + estado `verificado_en` (migración 0013). Reconciliado: destacar
+  premium = 3 tokens; **solicitar verificación = 80 tokens** (`/solicitar-verificacion`).
+- **Microdesbloqueos por tokens** (migración 0014, tabla `desbloqueos`): consulta con teaser
+  gratis + productos desbloqueables (`vehiculo_basico` 3, `vehiculo_multas` 8,
+  `vehiculo_identificadores` 3, bundle `reporte_compra_segura` 30; `tecnico`/`titular_validado`
+  `disponible=false` sin proveedor). Catálogo en `services/catalogo_productos.py`; gateo en el
+  consolidador; endpoints `/consultar/{placa}/desbloquear/{producto}` + perfil con auth opcional.
+  Docs en `docs/producto/` (modelo/catálogo/reglas/política; 1 token ≈ USD 0.05).
+- Saldo de tokens visible en el header. Perfil rediseñado sobrio; sesión persistente; ciudad en
+  el garage; referencias como enlace vivo a Facebook; español de Ecuador; landing navegable.
 
-**Git** — backend HEAD: `1ee1f94` · frontend HEAD: `dd16b29`. Ambos repos limpios.
-**Prod**: Backend Render `consulta-placas-ec.onrender.com` · Frontend Vercel `consulta-placas-web.vercel.app` · BD Neon en `alembic head` 0012.
+**Git** — backend HEAD: `c706bdd`+ · frontend HEAD: `df71c72`+. **Prod**: Render + Vercel · BD Neon
+en `alembic head` **0014**.
 
 ## 8. Para continuar en Gemini — instrucciones
 > Eres un asistente de arquitectura y planificación de software.

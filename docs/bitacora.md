@@ -10,6 +10,30 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-05-31 — Cierre de pendientes: verificación 80 tokens + saldo en header + seam proveedor
+
+**Rama:** `main`.
+
+- **Verificación marketplace reconciliada (decisión #2):** se separó *destacar* de *verificar*.
+  Publicar premium = 3 tokens (solo destaca, nace `no_verificado`). Nuevo endpoint
+  `POST /marketplace/publicaciones/{id}/solicitar-verificacion` (dueño): cobra
+  `TOKENS_VERIFICACION_MARKETPLACE`=**80** (402 si falta), deja `pendiente` → cola admin.
+  422 si la publicación es light; idempotente si ya está pendiente/verificada. `crear_publicacion`
+  y `actualizar_publicacion` ya NO ponen `pendiente` automáticamente.
+- **Frontend:** `solicitarVerificacion(id)` + nueva pantalla `/marketplace/mis-publicaciones`
+  (lista del dueño con estado de verificación y botón "Solicitar verificación · 80 tokens",
+  maneja 402/422) + enlace desde el marketplace. **Saldo de tokens** (🪙 N) visible en el Header.
+- **Proveedor titular/técnico (decisión #3):** BLOQUEADO por dependencia externa (no hay proveedor
+  autorizado). `vehiculo_titular_validado` y `vehiculo_tecnico` siguen `disponible=false` (no
+  cobran). Documentado el punto de integración (`services/proveedor_<x>.py` → poblar en el
+  consolidador) para activarlos sin tocar el cobro. NO se hace scraping de padrones.
+- **Snapshot** regenerado.
+
+**Verificación:** rutas backend cargan (incluye solicitar-verificacion); `tsc`+`next build` ok.
+Sin migración nueva (usa `estado_verificacion`/`verificado_en` existentes).
+
+---
+
 ## 2026-05-31 — Microdesbloqueos por tokens (implementación backend + frontend)
 
 **Rama:** `main`.

@@ -20,7 +20,7 @@
 
 ### Notas por producto
 - **`reporte_compra_segura` (30)** cuesta menos que comprar por separado (3+2+3+8 = 16 tokens los datos del vehículo, + condición legal): el descuento está en agrupar la **condición legal** (lo más caro de obtener) en el combo. Define explícitamente qué incluye vía `incluye=[...]` en el catálogo.
-- **`verificacion_marketplace` (80)** se relaciona con el flujo admin ya existente (`estado_verificacion`, [checklist_verificacion_marketplace.md](checklist_verificacion_marketplace.md)). Decisión abierta: separar "premium destacado" (3 tokens, ya implementado) de "verificación" (80, este producto). Ver decisión abierta #2 del modelo.
+- **`verificacion_marketplace` (80)** — RESUELTO (2026-05-31): se separó "destacar premium" de "verificar". Publicar premium cuesta **3 tokens** (solo destaca, nace `no_verificado`); el dueño luego **solicita** el sello con `POST /marketplace/publicaciones/{id}/solicitar-verificacion` (**80 tokens** → `pendiente` → cola admin `/admin/verificaciones`). Es un producto del **marketplace**, no de la consulta por placa. Ver [checklist_verificacion_marketplace.md](checklist_verificacion_marketplace.md).
 - **`vehiculo_titular_validado`**: por política, **nunca** se expone el dato crudo del titular sin necesidad; preferir validación/ofuscación (ver [politica_datos_sensibles.md](politica_datos_sensibles.md)).
 
 ## Gratis (teaser, sin tokens)
