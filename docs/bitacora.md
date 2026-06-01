@@ -10,6 +10,39 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-06-01 — POC proveedor real (`consultas_ec`) + fix de precios en la home
+
+**Rama:** `main`. Integración HTTP real de **un** proveedor para medir costo/cobertura/latencia/
+margen, sin activar nada en prod todavía.
+
+- **`providers/consultas_ec.py`**: llamada HTTP real (httpx async, timeout configurable) + mapeo
+  **defensivo** al contrato (`_mapear`, nombres es/en, datos anidados). Tolerante a fallos
+  (red/HTTP≠200/no-JSON → `estado=error`, nunca lanza). Sin `CONSULTAS_EC_API_KEY`+`BASE_URL` →
+  `sin_credenciales`, capacidades vacío (no ofrece ni cobra). Verificado.
+- **Costo en `costos_proveedor_consulta`**: `services/proveedor.registrar_costos_proveedor`
+  (upsert por producto+proveedor) se llama al cachear un resultado OK con costo.
+- **Harness `scripts/evaluar_proveedor.py`**: corre 50–100 placas contra el proveedor activo y
+  mide % éxito, latencia (prom/min/max/p95), cobertura de campos, costo y errores. Secuencial
+  (`--delay`), `--placas archivo`, `--json`. **Dry-run con mock (60 placas): 100% éxito, cobertura
+  total salvo `valores_pendientes`** → valida el harness y el flujo end-to-end.
+- **Doc `docs/producto/evaluacion_proveedor_real.md`**: metodología, config, resultados (mock +
+  plantilla real PENDIENTE), margen (1 llamada ≈ $0.08 alimenta identificadores+titular; bundle
+  margen ~$1.52) y criterio de activación (≥70% éxito, p95 ≤3s, cobertura ≥60%, margen positivo).
+- **`.env.example`**: `CONSULTAS_EC_BASE_URL`, `CONSULTAS_EC_COSTO_USD`.
+- **Frontend home (`page.tsx`)**: la sección "Planes simples" mostraba el modelo viejo de
+  suscripción (Gratis 5 consultas/mes, **Pro $4.99/mes**) que contradecía el modelo por tokens.
+  Reescrita a "Precios claros": **Gratis** (datos públicos) + **Datos por tokens** ($0.04,
+  desde $1=25), alineada con `/precios`.
+
+**Verificación:** `scripts/validar_desbloqueos` OK; `consultas_ec` sin credenciales degrada limpio;
+imports `main`/proveedor OK; harness dry-run mock OK; frontend `tsc --noEmit` OK.
+
+**Pendiente (criterio de salida del POC):** cargar `CONSULTAS_EC_API_KEY` + `BASE_URL`, confirmar
+el contrato real (ajustar `_mapear` si difiere), correr el harness con placas reales y decidir
+activar o no según §8 del doc. No se agregó migración.
+
+---
+
 ## 2026-06-01 — Fase 3: experiencia progresiva de desbloqueo + capa de proveedores
 
 **Rama:** `main`. Preview gratis → desbloqueo de bloques por tokens, con una capa de proveedores

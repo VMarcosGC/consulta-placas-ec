@@ -18,6 +18,9 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from sqlalchemy import select
+
+from src.modules.consulta.models.desbloqueos import CostoProveedorConsulta
 from src.modules.consulta.providers import obtener_proveedor
 from src.modules.consulta.providers.base import ESTADO_OK, ResultadoVehicular
 from src.modules.consulta.services.cache import (
@@ -77,7 +80,49 @@ async def asegurar_datos_proveedor(sesion: Session, placa: str) -> dict | None:
         logger.warning("Cache write del proveedor falló para %s: %r", placa, e)
         sesion.rollback()
 
+    # Auditoría de margen: registra el costo del proveedor por cada producto que cubre.
+    if resultado.estado == ESTADO_OK and resultado.costo_estimado_usd is not None:
+        try:
+            registrar_costos_proveedor(
+                sesion,
+                resultado.proveedor,
+                resultado.costo_estimado_usd,
+                obtener_proveedor().capacidades,
+            )
+        except Exception as e:
+            logger.warning("Registro de costo del proveedor falló: %r", e)
+            sesion.rollback()
+
     return datos if resultado.estado == ESTADO_OK else None
+
+
+def registrar_costos_proveedor(
+    sesion: Session,
+    proveedor: str,
+    costo: Decimal,
+    productos: "frozenset[str] | set[str]",
+) -> None:
+    """Upsert del costo estimado del proveedor por producto en `costos_proveedor_consulta`.
+
+    Para análisis de margen (precio en tokens vs costo real). Idempotente por UK
+    (producto_codigo, proveedor): si ya existe, actualiza el costo.
+    """
+    for codigo in productos:
+        fila = sesion.execute(
+            select(CostoProveedorConsulta).where(
+                CostoProveedorConsulta.producto_codigo == codigo,
+                CostoProveedorConsulta.proveedor == proveedor,
+            )
+        ).scalar_one_or_none()
+        if fila is None:
+            sesion.add(
+                CostoProveedorConsulta(
+                    producto_codigo=codigo, proveedor=proveedor, costo_estimado_usd=costo
+                )
+            )
+        else:
+            fila.costo_estimado_usd = costo
+    sesion.commit()
 
 
 def proveedor_y_costo(datos: dict | None) -> tuple[str | None, Decimal | None]:
