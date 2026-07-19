@@ -10,6 +10,38 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-19 — Market M2 (frontend): uploader + galería de fotos
+
+**Repo:** `consulta-placas-web`. Implementado por el **controller** (el subagente dev-frontend se
+cortó por límite de sesión a mitad); revisado por **revisor-calidad** (APTO, sin bloqueantes).
+
+**Qué se hizo**
+- **`types/api.ts` + `lib/api.ts`**: tipos `BloqueFoto`/`FirmaSubida`/`FotoRegistrar`/`FotoSalida`,
+  `fotos` en `PublicacionDetalle`, `foto_portada` en `PublicacionInterna`. Funciones
+  `firmarSubidaFoto`, `subirACloudinary` (fetch **directo** a Cloudinary, no al backend),
+  `registrarFoto`, `reordenarFotos`, `eliminarFoto`. Nueva clase `CloudinaryError` para no
+  confundir los códigos HTTP de Cloudinary con los del backend propio.
+- **Galería pública** en `marketplace/[id]/page.tsx`: portada grande + miniaturas (solo lectura).
+- **`GaleriaFotosEditor.tsx`** (dueño, en `mis-publicaciones`): subir (flujo firma→Cloudinary→
+  registrar), borrar y reordenar (optimista con reversión). **Límite 12** (botón deshabilitado +
+  corte del bucle + 409). Degrada con gracia ante **503** (Cloudinary no configurado). Carga con
+  el patrón IIFE-async-en-useEffect (como FichaEditor) → sin error de lint nuevo.
+- **`ListingCard.tsx`**: usa `foto_portada` como portada del feed (publicaciones internas).
+
+**Verificación:** `tsc --noEmit` limpio; `npm run lint` → **4 errores (los preexistentes**;
+`GaleriaFotosEditor` no agrega ninguno). Revisor: contrato fiel al backend, flujo de subida
+correcto, manejo 503/409, privacidad (galería pública solo lectura, mutaciones con Bearer),
+sin deps nuevas. Menor detectado y **corregido en la sesión**: errores de Cloudinary ahora se
+distinguen de los del backend (`CloudinaryError`).
+
+**Pendientes**
+- **E2E real de fotos** requiere cargar `CLOUDINARY_*` en el backend (dev responde 503) y la
+  **migración `0018` aplicada en Neon** (la corre Marcos). Sin eso, subir/registrar no opera.
+- Compuerta M2: código listo en ambos repos; falta la verificación E2E con Cloudinary configurado
+  (subir/borrar/reordenar + portada en el feed).
+
+---
+
 ## 2026-07-19 — Market M2 (backend): fotos de la publicación (Cloudinary firmado)
 
 **Rama:** `main`. Ejecutado por **dev-backend**, revisado por **revisor-calidad** (APTO).
