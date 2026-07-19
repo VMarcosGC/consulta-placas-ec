@@ -61,10 +61,11 @@ Regla heredada del proyecto: **no saltar etapas sin acordarlo**. Cada etapa tien
 3 bloques (`motor_suspension`, `carroceria`, `interiores`) + `extras`, JSONB validado por
 Pydantic (`extra="forbid"`), completitud derivada, `PATCH .../ficha` (dueño, gratis) y
 `GET /marketplace/publicaciones/{id}` (público). Migración `0017`.
-**Compuerta pendiente:** `alembic upgrade head` contra Neon + commit. ⬅ **primer paso de la próxima sesión**.
+**Compuerta:** ✅ cerrada — `0017` aplicada en Neon (`alembic current` = `0017`), revisión
+`revisor-calidad` APTA, commit `45c7da9`.
 
-### M1 — Ficha técnica (frontend)
-**Repo:** `consulta-placas-web` · **Agente:** dev-frontend
+### M1 — Ficha técnica (frontend) ✅ hecha (2026-07-18)
+**Repo:** `consulta-placas-web` · **Agente:** dev-frontend · commit `1c0bd95`
 - Página de detalle `consultar` → `/marketplace/[id]`: anuncio + ficha por bloques
   (tarjetas: Motor y suspensión / Carrocería / Interiores / Extras), barra de
   **completitud**, etiqueta "declarado por el vendedor" en campos sensibles
@@ -73,8 +74,11 @@ Pydantic (`extra="forbid"`), completitud derivada, `PATCH .../ficha` (dueño, gr
   guardado parcial por bloque (un PATCH por bloque), sin obligar ningún campo.
 - Feed: chip "Ficha N% completa" en `ListingCard` cuando `completitud_ficha != null`.
 - Actualizar `src/types/api.ts` (mirror de los schemas nuevos).
-**Compuerta M1:** `tsc --noEmit` limpio; flujo manual completo (crear publicación →
-llenar 2 bloques → ver detalle público con completitud correcta); copy no agresivo.
+**Compuerta M1:** ✅ cerrada — `tsc --noEmit` limpio (sin lint nuevo; 4 preexistentes),
+revisión `revisor-calidad` APTA (contrato fiel, guardado parcial correcto, privacidad/copy es-EC).
+Deuda menor anotada: mapear el 422 de rango a copy es-EC; editar ficha de publicación pausada
+requeriría un GET de ficha con scope de dueño (hoy el prellenado usa el GET público que solo
+sirve `activa`).
 
 ### M2 — Fotos de la publicación
 **Repos:** ambos · **Agentes:** dev-backend + dev-frontend

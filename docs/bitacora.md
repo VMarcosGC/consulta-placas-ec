@@ -10,6 +10,37 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-18 — Market M1: ficha técnica en el frontend (detalle + editor)
+
+**Repo:** `consulta-placas-web` (commit `1c0bd95`). **Backend M0** cerrado antes: migración
+`0017` aplicada en Neon (`alembic current` = `0017`), commits `45c7da9` (ficha) + `5855abb`
+(agentes + plan). Ejecutado por el agente **dev-frontend**, revisado por **revisor-calidad**.
+
+**Qué se hizo**
+- **Detalle público** `app/marketplace/[id]/page.tsx`: consume `GET /marketplace/publicaciones/{id}`;
+  pinta el anuncio + la ficha en 4 tarjetas (Motor y suspensión / Carrocería / Interiores /
+  Extras), **barra de completitud** y etiqueta **"declarado por el vendedor"** en los campos de
+  condición. Maneja 404 y ficha vacía.
+- **Editor del vendedor** `components/FichaEditor.tsx` (inline en `mis-publicaciones`): 3 pestañas
+  + extras, **guardado parcial por bloque** (un `PATCH .../ficha` que envía solo el bloque
+  editado; los demás quedan intactos), nada obligatorio, selects con labels es-EC.
+- `lib/api.ts` (`obtenerPublicacionDetalle`, `actualizarFichaPublicacion`), `lib/ficha.ts`
+  (etiquetas de catálogos), `types/api.ts` (mirror de bloques/catálogos/`FichaSalida`/
+  `FichaActualizar`/`PublicacionDetalle` + `completitud_ficha`), `ListingCard` (chip
+  "Ficha N% completa").
+
+**Verificación:** `tsc --noEmit` limpio; `eslint` sin errores nuevos (los 4 preexistentes de
+`Header`/`admin/*`/`mis-publicaciones` siguen). Revisor: contrato fiel al backend, guardado
+parcial correcto, sin PII, copy no agresivo, sin deps nuevas → **APTO**. **Compuerta M1 cerrada.**
+
+**Pendientes / deuda menor**
+- Mapear el 422 de rango (p. ej. cilindraje > 10000) a copy es-EC en `FichaEditor`.
+- Editar la ficha de una publicación **pausada**: el prellenado usa el `GET` público (solo
+  `activa`); haría falta un GET de ficha con scope de dueño. No bloquea M1 (nacen `activa`).
+- Siguiente: **M2 — fotos de la publicación** (decisión previa de storage con Marcos).
+
+---
+
 ## 2026-07-18 — Market de autos (paso 2): ficha técnica de la publicación
 
 **Rama:** `main`. Decisión de rumbo: el pilar de consulta queda en su techo razonable
