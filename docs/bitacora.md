@@ -10,6 +10,58 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-18 — Market de autos (paso 2): ficha técnica de la publicación
+
+**Rama:** `main`. Decisión de rumbo: el pilar de consulta queda en su techo razonable
+(SRI/FGE passthrough, AMT/EPMTSD vía worker residencial, proveedor real pendiente solo de
+API key). Arranca el **market de autos** para uso particular y patios: primero, ver
+vehículos y su detalle con transparencia para el comprador y registro simple del vendedor.
+
+**Qué se hizo**
+- **`fichas_publicacion`** (migración `0017`): 1:1 con `publicaciones_internas` (UK +
+  CASCADE). **3 bloques** JSONB nullable — `motor_suspension`, `carroceria`, `interiores` —
+  + `extras` (lista JSONB, default `[]`; ej. láminas de seguridad, llantas recién cambiadas).
+  El shape lo valida Pydantic (`extra="forbid"`), no la BD → la ficha evoluciona sin migración.
+- **Schemas** (`marketplace/schemas.py`): `BloqueMotorSuspension` / `BloqueCarroceria` /
+  `BloqueInteriores` (todo opcional; catálogos `Literal` es-EC: combustible, transmisión,
+  tracción, estado de componentes, tipo de carrocería, pintura, material de asientos +
+  `observaciones` libre por bloque), `ExtraVehiculo` (nombre+detalle, máx. 20),
+  `FichaActualizar` (parcial por `model_fields_set`: enviar bloque = reemplaza, `null` =
+  borra, omitir = intacto), `FichaSalida` con **`completitud`** (% de campos llenos de los
+  3 bloques), `PublicacionDetalleSalida` (feed + ficha). El feed agrega `completitud_ficha`.
+- **Endpoints** (`routers/publicaciones.py`): `PATCH /marketplace/publicaciones/{id}/ficha`
+  (dueño, upsert, gratis — la transparencia no se cobra) y
+  `GET /marketplace/publicaciones/{id}` (público anónimo, solo `activa`, 404 indistinto).
+  La ruta dinámica va AL FINAL del router para no capturar `mias` /
+  `pendientes-verificacion` (nota en el código). `selectinload(ficha)` en feed/listados.
+- Registro en `src/registry.py`.
+
+**Verificación:** `import main` → 42 rutas OpenAPI (PATCH ficha y GET detalle presentes;
+rutas literales siguen resolviendo); `Base.metadata` → 16 tablas con `fichas_publicacion`;
+`alembic heads` → `0017`; pruebas de schema: payload típico OK, catálogo inválido → 422,
+campo con typo → 422 (`extra="forbid"`), completitud parcial calcula bien.
+
+**Revisión de calidad (compuerta M0, agente revisor-calidad):** APTO PARA COMMIT. Sin
+bloqueantes. Confirmado: contrato de errores (404 indistinto, ficha gratis sin 402, sin 500),
+orden de rutas dinámicas al final, `selectinload(ficha)` sin N+1, migración manual con
+`downgrade` + modelo en `registry.py`, privacidad (sin VIN/dueño en el detalle), es-EC no
+agresivo, sin deps nuevas. Verificación mínima verde (`import main`, `alembic heads` único
+`0017`, schemas rechazan typo/catálogo inválido). Head del código `0017`; **BD Neon aún en
+`0016`** (0017 sin aplicar).
+
+**Pendientes**
+- **`alembic upgrade head` contra Neon** (verificado: la BD está en `0016`, la migración `0017`
+  NO se ha aplicado). Es el paso que cierra la compuerta M0; lo corre Marcos.
+- Hallazgos menores del revisor (cosméticos, no bloquean): índice `ix_fichas_publicacion_publicacion_id`
+  redundante con la UK (limpiar en futura migración); `PATCH .../ficha` con cuerpo `{}` crea ficha
+  vacía → `completitud_ficha` pasa de `null` a `0` (definir en frontend si se pintan distinto).
+- Frontend (`consulta-placas-web`): página de detalle de publicación + formulario por
+  bloques con barra de completitud; feed muestra `completitud_ficha`.
+- Siguientes del market: fotos de la publicación, búsqueda/filtros del feed, cuentas de
+  patio (multi-vehículo), contacto comprador-vendedor.
+
+---
+
 ## 2026-06-01 — POC proveedor real (`consultas_ec`) + fix de precios en la home
 
 **Rama:** `main`. Integración HTTP real de **un** proveedor para medir costo/cobertura/latencia/

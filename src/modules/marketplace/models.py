@@ -170,6 +170,64 @@ class PublicacionInterna(Base):
     # derivar los detalles premium sin N+1.
     vehiculo: Mapped["Vehiculo | None"] = relationship("Vehiculo")  # noqa: F821
 
+    # Ficha técnica 1:1 (bloques motor/suspensión, carrocería, interiores + extras).
+    # Se borra junto con la publicación (delete-orphan).
+    ficha: Mapped["FichaPublicacion | None"] = relationship(
+        "FichaPublicacion",
+        back_populates="publicacion",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class FichaPublicacion(Base):
+    """Ficha técnica de una publicación interna: el detalle transparente del auto.
+
+    Tres bloques de datos + extras (decisión 2026-07-18, arranque del market de autos):
+    1. `motor_suspension` — mecánica: combustible, cilindraje, transmisión, tracción,
+       estado de motor y suspensión.
+    2. `carroceria` — exterior: tipo, puertas, color, pintura, choques reparados, óxido.
+    3. `interiores` — asientos, A/C, audio, tablero.
+    `extras` — lista libre de equipamiento adicional (láminas de seguridad, llantas
+    recién cambiadas, etc.).
+
+    Los bloques se guardan como JSONB **validados por los schemas Pydantic**
+    (`BloqueMotorSuspension`, `BloqueCarroceria`, `BloqueInteriores` en schemas.py,
+    con `extra="forbid"`): la BD no exige el shape, el contrato lo exige la API.
+    Esto permite evolucionar campos de la ficha sin migración. Bloque en NULL =
+    el vendedor aún no lo llena (la completitud se deriva en el schema de salida).
+    """
+
+    __tablename__ = "fichas_publicacion"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    publicacion_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("publicaciones_internas.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    motor_suspension: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    carroceria: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    interiores: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    extras: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    publicacion: Mapped["PublicacionInterna"] = relationship(
+        "PublicacionInterna", back_populates="ficha"
+    )
+
 
 class PublicacionReferenciada(Base):
     """Anuncio de venta de un portal externo, REFERENCIADO en nuestro feed.

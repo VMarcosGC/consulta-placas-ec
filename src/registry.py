@@ -33,6 +33,7 @@ from src.modules.consulta.models.desbloqueos import (  # noqa: F401
 from src.modules.marketplace.models import (  # noqa: F401
     EnlaceCompartido,
     EstadoModeracion,
+    FichaPublicacion,
     PublicacionInterna,
     PublicacionReferenciada,
 )

@@ -8,6 +8,7 @@ historial privado en la vista compartida (`VehiculoCompartidoSalida`).
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -19,6 +20,7 @@ from src.modules.marketplace.models import (
     EstadoModeracion,
     EstadoPublicacion,
     EstadoVerificacion,
+    FichaPublicacion,
     PlanPublicacion,
     PublicacionInterna,
 )
@@ -221,6 +223,10 @@ class PublicacionInternaSalida(BaseModel):
     anio: int | None = None
     # Argumento premium: solo presente si plan=premium y hay vehículo vinculado.
     mantenimientos: ResumenMantenimientos | None = None
+    # % de completitud de la ficha técnica (None = el vendedor aún no la crea).
+    # Señal de transparencia en el feed; el detalle completo vive en
+    # GET /marketplace/publicaciones/{id}.
+    completitud_ficha: int | None = None
     creado_en: datetime
 
     @classmethod
@@ -229,6 +235,7 @@ class PublicacionInternaSalida(BaseModel):
         vehículo vinculado (que el router debe cargar con selectinload)."""
         veh = p.vehiculo
         es_premium = p.plan == PlanPublicacion.PREMIUM.value
+        ficha = p.ficha  # el router la carga con selectinload donde hay listados
 
         mantenimientos: ResumenMantenimientos | None = None
         if es_premium and veh is not None and veh.mantenimientos:
@@ -255,6 +262,13 @@ class PublicacionInternaSalida(BaseModel):
             modelo=getattr(veh, "modelo", None),
             anio=getattr(veh, "anio", None),
             mantenimientos=mantenimientos,
+            completitud_ficha=(
+                calcular_completitud_ficha(
+                    ficha.motor_suspension, ficha.carroceria, ficha.interiores
+                )
+                if ficha is not None
+                else None
+            ),
             creado_en=p.creado_en,
         )
 
@@ -388,6 +402,179 @@ class VerificacionPublicacion(BaseModel):
         if v not in (EstadoVerificacion.VERIFICADO, EstadoVerificacion.RECHAZADO):
             raise ValueError("La decisión debe ser 'verificado' o 'rechazado'.")
         return v
+
+
+# ════════════════ Ficha técnica de la publicación (market de autos) ════════════════
+#
+# Tres bloques + extras (2026-07-18). Filosofía: sencillo de registrar (todos los
+# campos opcionales, catálogos cerrados donde hay valores típicos, `observaciones`
+# libre por bloque) y sencillo de consultar (un solo GET público devuelve todo +
+# % de completitud). `extra="forbid"` en los bloques: un campo con typo → 422, no
+# se guarda basura silenciosa en el JSONB.
+
+# Catálogos (Literal → si llega un valor inválido, el 422 lista las opciones).
+Combustible = Literal["gasolina", "diesel", "hibrido", "electrico", "glp"]
+Transmision = Literal["manual", "automatica", "cvt", "semiautomatica"]
+Traccion = Literal["4x2", "4x4", "awd"]
+EstadoComponente = Literal["excelente", "bueno", "regular", "requiere_atencion"]
+TipoCarroceria = Literal[
+    "sedan", "suv", "hatchback", "camioneta", "coupe", "furgoneta", "bus", "camion",
+    "moto", "otro",
+]
+EstadoPintura = Literal["original", "retoques", "repintado_parcial", "repintado_total"]
+MaterialAsientos = Literal["tela", "cuero", "cuerina", "mixto"]
+
+
+class BloqueMotorSuspension(BaseModel):
+    """Bloque 1 — mecánica. Todo opcional: el vendedor llena lo que sabe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    combustible: Combustible | None = None
+    cilindraje_cc: int | None = Field(default=None, ge=49, le=10000)
+    transmision: Transmision | None = None
+    traccion: Traccion | None = None
+    estado_motor: EstadoComponente | None = None
+    estado_suspension: EstadoComponente | None = None
+    fugas_visibles: bool | None = None
+    cambios_recientes: str | None = Field(
+        default=None, max_length=500,
+        description="Ej.: 'amortiguadores delanteros nuevos (06/2026)'",
+    )
+    observaciones: str | None = Field(default=None, max_length=1000)
+
+
+class BloqueCarroceria(BaseModel):
+    """Bloque 2 — exterior."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: TipoCarroceria | None = None
+    numero_puertas: int | None = Field(default=None, ge=0, le=6)
+    color: str | None = Field(default=None, max_length=40)
+    estado_pintura: EstadoPintura | None = None
+    choques_reparados: bool | None = None
+    oxido_visible: bool | None = None
+    estado_general: EstadoComponente | None = None
+    observaciones: str | None = Field(default=None, max_length=1000)
+
+
+class BloqueInteriores(BaseModel):
+    """Bloque 3 — interiores."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    material_asientos: MaterialAsientos | None = None
+    estado_asientos: EstadoComponente | None = None
+    aire_acondicionado: bool | None = Field(
+        default=None, description="True = tiene y funciona"
+    )
+    sistema_audio: str | None = Field(default=None, max_length=120)
+    estado_tablero: EstadoComponente | None = None
+    observaciones: str | None = Field(default=None, max_length=1000)
+
+
+class ExtraVehiculo(BaseModel):
+    """Un extra del auto: 'láminas de seguridad', 'llantas recién cambiadas', etc."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str = Field(min_length=2, max_length=80)
+    detalle: str | None = Field(
+        default=None, max_length=300,
+        description="Ej.: 'juego completo, cambiadas a los 62.000 km (05/2026)'",
+    )
+
+
+# Pares (nombre de bloque, schema) — única lista a tocar si se agrega un bloque.
+_BLOQUES_FICHA: list[tuple[str, type[BaseModel]]] = [
+    ("motor_suspension", BloqueMotorSuspension),
+    ("carroceria", BloqueCarroceria),
+    ("interiores", BloqueInteriores),
+]
+
+
+def calcular_completitud_ficha(
+    motor_suspension: dict | None,
+    carroceria: dict | None,
+    interiores: dict | None,
+) -> int:
+    """% de campos llenos sobre el total de los 3 bloques (extras no cuentan).
+
+    Guía al vendedor ('te falta llenar interiores') y le da al comprador una señal
+    de qué tan transparente es el anuncio.
+    """
+    datos_por_bloque = {
+        "motor_suspension": motor_suspension,
+        "carroceria": carroceria,
+        "interiores": interiores,
+    }
+    total = 0
+    llenos = 0
+    for nombre, schema in _BLOQUES_FICHA:
+        campos = list(schema.model_fields)
+        total += len(campos)
+        datos = datos_por_bloque[nombre] or {}
+        llenos += sum(1 for c in campos if datos.get(c) is not None)
+    return round(100 * llenos / total) if total else 0
+
+
+class FichaActualizar(BaseModel):
+    """Edición parcial de la ficha: solo se tocan los bloques ENVIADOS.
+
+    Semántica por bloque: enviarlo lo REEMPLAZA completo; enviarlo en `null` lo
+    borra; no enviarlo lo deja como está (el router usa `model_fields_set`).
+    `extras` igual: la lista enviada reemplaza a la anterior.
+    """
+
+    motor_suspension: BloqueMotorSuspension | None = None
+    carroceria: BloqueCarroceria | None = None
+    interiores: BloqueInteriores | None = None
+    extras: list[ExtraVehiculo] | None = Field(default=None, max_length=20)
+
+
+class FichaSalida(BaseModel):
+    """Vista de la ficha (misma para dueño y comprador: aquí no hay PII)."""
+
+    motor_suspension: BloqueMotorSuspension | None = None
+    carroceria: BloqueCarroceria | None = None
+    interiores: BloqueInteriores | None = None
+    extras: list[ExtraVehiculo] = Field(default_factory=list)
+    completitud: int = Field(description="% de campos llenos de los 3 bloques (0-100)")
+    actualizado_en: datetime | None = None
+
+    @classmethod
+    def desde_modelo(cls, f: FichaPublicacion | None) -> "FichaSalida | None":
+        if f is None:
+            return None
+        return cls(
+            motor_suspension=(
+                BloqueMotorSuspension.model_validate(f.motor_suspension)
+                if f.motor_suspension else None
+            ),
+            carroceria=(
+                BloqueCarroceria.model_validate(f.carroceria) if f.carroceria else None
+            ),
+            interiores=(
+                BloqueInteriores.model_validate(f.interiores) if f.interiores else None
+            ),
+            extras=[ExtraVehiculo.model_validate(e) for e in (f.extras or [])],
+            completitud=calcular_completitud_ficha(
+                f.motor_suspension, f.carroceria, f.interiores
+            ),
+            actualizado_en=f.actualizado_en,
+        )
+
+
+class PublicacionDetalleSalida(PublicacionInternaSalida):
+    """Detalle público de una publicación: todo lo del feed + la ficha técnica."""
+
+    ficha: FichaSalida | None = None
+
+    @classmethod
+    def desde_modelo(cls, p: PublicacionInterna) -> "PublicacionDetalleSalida":
+        base = PublicacionInternaSalida.desde_modelo(p).model_dump()
+        return cls(**base, ficha=FichaSalida.desde_modelo(p.ficha))
 
 
 class FeedMarketplaceSalida(BaseModel):

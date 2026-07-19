@@ -27,12 +27,16 @@ from src.modules.marketplace.models import (
     EstadoModeracion,
     EstadoPublicacion,
     EstadoVerificacion,
+    FichaPublicacion,
     PlanPublicacion,
     PublicacionInterna,
     PublicacionReferenciada,
 )
 from src.modules.marketplace.schemas import (
     FeedMarketplaceSalida,
+    FichaActualizar,
+    FichaSalida,
+    PublicacionDetalleSalida,
     PublicacionInternaActualizar,
     PublicacionInternaCrear,
     PublicacionInternaSalida,
@@ -101,7 +105,8 @@ def _mi_publicacion(sesion: Session, publicacion_id: int, usuario: Usuario) -> P
             )
         )
         .options(
-            selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos)
+            selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
+            selectinload(PublicacionInterna.ficha),
         )
     ).scalar_one_or_none()
     if pub is None:
@@ -169,7 +174,8 @@ def listar_mis_publicaciones(
             select(PublicacionInterna)
             .where(PublicacionInterna.usuario_id == usuario.id)
             .options(
-                selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos)
+                selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
+                selectinload(PublicacionInterna.ficha),
             )
             .order_by(PublicacionInterna.creado_en.desc())
         )
@@ -288,7 +294,8 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
         select(PublicacionInterna)
         .where(PublicacionInterna.estado == EstadoPublicacion.ACTIVA.value)
         .options(
-            selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos)
+            selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
+            selectinload(PublicacionInterna.ficha),
         )
         .order_by(PublicacionInterna.creado_en.desc())
     )
@@ -338,7 +345,8 @@ def _cargar_publicacion(sesion: Session, publicacion_id: int) -> PublicacionInte
         select(PublicacionInterna)
         .where(PublicacionInterna.id == publicacion_id)
         .options(
-            selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos)
+            selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
+            selectinload(PublicacionInterna.ficha),
         )
     ).scalar_one_or_none()
 
@@ -363,7 +371,8 @@ def listar_pendientes_verificacion(
                 )
             )
             .options(
-                selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos)
+                selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
+                selectinload(PublicacionInterna.ficha),
             )
             .order_by(PublicacionInterna.creado_en.asc())
         )
@@ -410,3 +419,78 @@ def verificar_publicacion(
     sesion.commit()
 
     return PublicacionInternaSalida.desde_modelo(_cargar_publicacion(sesion, publicacion_id))
+
+
+# ──────────────── Ficha técnica: 3 bloques + extras (market de autos) ────────────────
+
+
+@router.patch("/publicaciones/{publicacion_id}/ficha", response_model=FichaSalida)
+def actualizar_ficha(
+    publicacion_id: int,
+    datos: FichaActualizar,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """El vendedor registra/edita la ficha técnica de su publicación (upsert).
+
+    - Solo el dueño (404 si no es suya). Gratis: la transparencia no se cobra.
+    - Solo se tocan los bloques ENVIADOS: cada uno reemplaza completo al anterior,
+      `null` lo borra, omitirlo lo deja intacto. `extras` reemplaza la lista.
+    - Se puede editar en cualquier estado (activa/pausada/vendida): pausar para
+      completar la ficha es un flujo válido.
+    """
+    pub = _mi_publicacion(sesion, publicacion_id, usuario)
+
+    ficha = pub.ficha
+    if ficha is None:
+        ficha = FichaPublicacion(publicacion_id=pub.id, extras=[])
+        sesion.add(ficha)
+
+    enviados = datos.model_fields_set
+    for bloque in ("motor_suspension", "carroceria", "interiores"):
+        if bloque in enviados:
+            valor = getattr(datos, bloque)
+            # exclude_none: en el JSONB solo persisten los campos llenos; un campo
+            # ausente significa "no informado" (así se calcula la completitud).
+            setattr(ficha, bloque, valor.model_dump(exclude_none=True) if valor else None)
+    if "extras" in enviados:
+        ficha.extras = [e.model_dump(exclude_none=True) for e in (datos.extras or [])]
+
+    sesion.commit()
+    sesion.refresh(ficha)
+    return FichaSalida.desde_modelo(ficha)
+
+
+# NOTA de orden: esta ruta con path param dinámico va AL FINAL del router. Si se
+# declarara antes que las literales (`/publicaciones/mias`,
+# `/publicaciones/pendientes-verificacion`), "mias" intentaría parsearse como int
+# y la ruta literal quedaría inalcanzable (422). No mover hacia arriba.
+@router.get("/publicaciones/{publicacion_id}", response_model=PublicacionDetalleSalida)
+def detalle_publicacion(
+    publicacion_id: int,
+    sesion: Session = Depends(obtener_sesion),
+):
+    """Detalle público de una publicación activa: datos del feed + ficha técnica.
+
+    Anónimo (el comprador no necesita cuenta para revisar el auto). Solo `activa`;
+    pausada/vendida/inexistente → 404 indistinto. Sin PII: la ficha no lleva datos
+    del dueño y las características derivadas nunca incluyen VIN (§10.6).
+    """
+    pub = sesion.execute(
+        select(PublicacionInterna)
+        .where(
+            and_(
+                PublicacionInterna.id == publicacion_id,
+                PublicacionInterna.estado == EstadoPublicacion.ACTIVA.value,
+            )
+        )
+        .options(
+            selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
+            selectinload(PublicacionInterna.ficha),
+        )
+    ).scalar_one_or_none()
+    if pub is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Publicación no encontrada"
+        )
+    return PublicacionDetalleSalida.desde_modelo(pub)
