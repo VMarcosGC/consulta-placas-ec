@@ -1,0 +1,59 @@
+flowchart TB
+    subgraph MOTIVACION["🎯 MOTIVACIÓN"]
+        direction LR
+        obj1(["Transparencia en la compra-venta<br/>de vehículos en Ecuador"])
+        obj2(["Monetización justa:<br/>gratis lo público, tokens por valor real"])
+        obj3(["Costos escalonados por demanda<br/>(plan_costos.md: F0 $8 → F3 $250)"])
+    end
+
+    subgraph NEGOCIO["🏢 CAPA DE NEGOCIO"]
+        direction LR
+        subgraph actores["Actores"]
+            comprador(["👤 Comprador<br/>(anónimo o con cuenta)"])
+            vendedor(["👤 Vendedor particular"])
+            patio(["🏬 Patio de autos<br/>(M4, futuro)"])
+            admin(["🛡️ Admin / moderación"])
+        end
+        subgraph servicios["Servicios de negocio"]
+            svcConsulta["Consulta vehicular<br/>por placa (gratis + desbloqueos)"]
+            svcGarage["Garage privado<br/>(historial del dueño)"]
+            svcMarket["Market de autos<br/>ficha técnica transparente"]
+            svcTokens["Billetera de tokens<br/>1 token ≈ USD 0.04"]
+            svcVerif["Verificación<br/>'Verificado por la plataforma'"]
+        end
+    end
+
+    subgraph APLICACION["💻 CAPA DE APLICACIÓN"]
+        direction LR
+        front["Frontend Next.js 16<br/>'Revisa tu Carro EC'<br/>(repo consulta-placas-web)"]
+        back["Backend FastAPI<br/>monolito modular DDD<br/>(auth · tokens · consulta · vehiculos · marketplace)"]
+        worker["Worker residencial<br/>(PC Windows + Task Scheduler)"]
+    end
+
+    subgraph TECNOLOGIA["⚙️ CAPA TECNOLÓGICA"]
+        direction LR
+        vercel["Vercel<br/>(Hobby → Pro al monetizar)"]
+        render["Render Docker<br/>(Starter $7)"]
+        neon["Neon PostgreSQL 16<br/>(free → Launch)"]
+        cloudinary["Cloudinary<br/>fotos (M2)"]
+        externas["Fuentes oficiales EC<br/>ANT · SRI · AMT · FGE"]
+    end
+
+    comprador --> svcConsulta & svcMarket
+    vendedor --> svcMarket & svcGarage
+    patio -.-> svcMarket
+    admin --> svcVerif
+    svcConsulta & svcMarket & svcGarage --> svcTokens
+    svcMarket --> svcVerif
+
+    servicios --> front
+    front --> back
+    back --> worker
+
+    front --> vercel
+    back --> render
+    back --> neon
+    back -.M2.-> cloudinary
+    back & worker --> externas
+
+    MOTIVACION ~~~ NEGOCIO

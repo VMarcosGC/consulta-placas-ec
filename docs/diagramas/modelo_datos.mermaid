@@ -1,0 +1,92 @@
+erDiagram
+    USUARIOS ||--o{ VEHICULOS : "posee (garage)"
+    USUARIOS ||--o{ TRANSACCIONES_TOKENS : "audita saldo"
+    USUARIOS ||--o{ PUBLICACIONES_INTERNAS : "publica"
+    USUARIOS ||--o{ PUBLICACIONES_REFERENCIADAS : "aporta link"
+    USUARIOS ||--o{ VEHICULOS_FAVORITOS : "guarda"
+    USUARIOS ||--o{ DESBLOQUEOS_CONSULTA : "compra"
+
+    VEHICULOS ||--o{ KILOMETRAJE_LECTURAS : "lecturas monotonicas"
+    VEHICULOS ||--o{ MANTENIMIENTOS : "historial"
+    VEHICULOS ||--o{ DUENOS_HISTORICO : "tramos de propiedad"
+    VEHICULOS ||--o{ ENLACES_COMPARTIDOS : "token compra-venta &le;7d"
+    VEHICULOS |o--o{ PUBLICACIONES_INTERNAS : "vinculo opcional (SET NULL)"
+
+    PUBLICACIONES_INTERNAS ||--o| FICHAS_PUBLICACION : "ficha tecnica 1:1 (M0)"
+    PUBLICACIONES_INTERNAS ||--o{ FOTOS_PUBLICACION : "max 12 (M2)"
+
+    PRODUCTOS_CONSULTA ||--o{ DESBLOQUEOS_CONSULTA : "catalogo de precios"
+    PRODUCTOS_CONSULTA ||--o{ COSTOS_PROVEEDOR_CONSULTA : "margen"
+
+    USUARIOS {
+        bigint id PK
+        string email UK
+        string password_hash
+        int saldo_tokens "CHECK >= 0, inicial 5"
+    }
+    VEHICULOS {
+        bigint id PK
+        string placa "UK por usuario"
+        string vin "ofuscable, ISO 3779"
+        string numero_motor "sensible"
+        string numero_chasis "sensible"
+        timestamptz eliminado_en "soft delete"
+    }
+    PUBLICACIONES_INTERNAS {
+        bigint id PK
+        string placa
+        numeric precio_usd
+        string plan "light | premium"
+        string estado "activa | pausada | vendida"
+        string estado_verificacion "no_verificado..verificado"
+        bool destacado
+    }
+    FICHAS_PUBLICACION {
+        bigint id PK
+        bigint publicacion_id FK "UK + CASCADE"
+        jsonb motor_suspension "validado Pydantic forbid"
+        jsonb carroceria
+        jsonb interiores
+        jsonb extras "lista, default []"
+    }
+    FOTOS_PUBLICACION {
+        bigint id PK
+        bigint publicacion_id FK "CASCADE"
+        string url "hasta 2048"
+        string bloque "motor_suspension | carroceria | interiores | general"
+        int orden
+    }
+    PUBLICACIONES_REFERENCIADAS {
+        bigint id PK
+        string url_externa UK "dedup, enlace vivo"
+        string estado_moderacion "pendiente | aprobada | rechazada"
+    }
+    ENLACES_COMPARTIDOS {
+        bigint id PK
+        string token UK
+        jsonb scope "opt-in: km, mantenim., duenos"
+        timestamptz fecha_expiracion "max 7 dias"
+    }
+    TRANSACCIONES_TOKENS {
+        bigint id PK
+        int monto "inmutable, motivo auditable"
+    }
+    PRODUCTOS_CONSULTA {
+        string codigo PK "ej: reporte_compra_segura"
+        int precio_tokens "1 tk = USD 0.04"
+        bool activo
+    }
+    DESBLOQUEOS_CONSULTA {
+        bigint id PK
+        string placa "UK usuario+placa+producto"
+    }
+    CONSULTAS {
+        bigint id PK
+        string placa "indice compuesto + fuente"
+        jsonb respuesta "cache TTL 12h / 90d"
+    }
+    MANTENIMIENTOS {
+        bigint id PK
+        date fecha "monotonica"
+        int kilometraje_relacionado "monotonico"
+    }

@@ -1,0 +1,50 @@
+flowchart LR
+    navegador["🌐 Navegador del usuario<br/>(celular gama baja incluido)"]
+
+    subgraph vercel["Vercel"]
+        front["Frontend Next.js 16<br/>consulta-placas-web"]
+    end
+
+    subgraph render["Render (Docker, Starter)"]
+        api["Backend FastAPI<br/>consulta_placas_ec<br/>JWT HS256 · CORS estricto"]
+    end
+
+    subgraph neonDB["Neon"]
+        bd[("PostgreSQL 16<br/>17 tablas · Alembic 0018")]
+    end
+
+    subgraph residencial["PC de Marcos (IP residencial EC)"]
+        worker["worker.py<br/>Task Scheduler: ConsultaPlacasWorker"]
+    end
+
+    subgraph fuentes["Fuentes oficiales Ecuador"]
+        ant["ANT<br/>matriculación + citaciones"]
+        amt["AMT / EPMTSD<br/>infracciones (bloquean IP datacenter)"]
+        sri["SRI<br/>reCAPTCHA Enterprise v3"]
+        fge["FGE / SIAF<br/>hCaptcha"]
+    end
+
+    subgraph saas["SaaS de terceros"]
+        cloud["Cloudinary<br/>fotos M2"]
+        prov["Proveedor vehicular<br/>consultas_ec (pendiente API key)"]
+        vision["Google Cloud Vision<br/>OCR placas (Fase 5)"]
+        uptime["UptimeRobot<br/>ping /health c/10 min"]
+    end
+
+    navegador -->|"HTTPS"| front
+    front -->|"REST JSON + Bearer JWT<br/>contrato: 200 por fuente ·<br/>402/404/409/422"| api
+    api -->|"SQL · psycopg 3<br/>postgresql+psycopg://"| bd
+    api -->|"Playwright Chromium<br/>(funciona desde datacenter)"| ant
+    api -.->|"passthrough: consulta_externa<br/>+ url_consulta (sin scraping)"| sri
+    api -.->|"passthrough / desactivada en UI"| fge
+    api -->|"encola en cola_scraping<br/>(tabla en BD, polling)"| bd
+    worker -->|"lee cola + escribe resultados<br/>(SQL directo a Neon)"| bd
+    worker -->|"Playwright desde IP residencial"| amt
+    worker -->|"Playwright desde IP residencial"| fge
+    navegador -->|"subida directa firmada<br/>(el backend NUNCA recibe el archivo)"| cloud
+    api -->|"firma de subida<br/>(CLOUDINARY_* env vars)"| cloud
+    api -->|"httpx REST · solo al desbloquear<br/>+ caché 90d (fuente PROVEEDOR)"| prov
+    api -.->|"REST + API key (Fase 5)"| vision
+    uptime -->|"GET /health"| api
+
+    linkStyle default stroke-width:1.5px

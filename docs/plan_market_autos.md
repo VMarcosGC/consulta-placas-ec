@@ -80,10 +80,14 @@ Deuda menor anotada: mapear el 422 de rango a copy es-EC; editar ficha de public
 requeriría un GET de ficha con scope de dueño (hoy el prellenado usa el GET público que solo
 sirve `activa`).
 
-### M2 — Fotos de la publicación
+### M2 — Fotos de la publicación ← **etapa vigente**
 **Repos:** ambos · **Agentes:** dev-backend + dev-frontend
-- Decisión previa (Marcos): proveedor de storage (propuesta: Cloudinary free tier, sube
-  el navegador con upload preset firmado; el backend solo guarda URLs).
+- **Decisión tomada (2026-07-19, Marcos): Cloudinary free tier** — sube el navegador con
+  upload preset firmado; el backend solo guarda URLs. Configurar **alerta al 80 % de los
+  25 créditos/mes** desde el día 1 (Cloudinary suspende, no cobra overage). Presupuesto y
+  triggers de upgrade en [docs/producto/plan_costos.md](producto/plan_costos.md).
+- Decisiones de infra asociadas (plan de costos F0/F1): Render Starter $7 ya; Vercel Pro
+  $20 al vender el primer paquete de tokens.
 - Backend: tabla `fotos_publicacion` (publicacion_id FK, url, bloque opcional
   `motor_suspension|carroceria|interiores|general`, orden, límite p. ej. 12 por
   publicación). Migración `0018`. Endpoints CRUD del dueño + salida en el detalle.

@@ -1,0 +1,48 @@
+flowchart TB
+    subgraph paginas["Frontend — páginas del market"]
+        direction LR
+        pFeed["/marketplace<br/>feed 3 niveles + chip<br/>'Ficha N% completa'"]
+        pDetalle["/marketplace/[id]<br/>detalle + ficha por bloques<br/>+ galería (M2)"]
+        pPublicar["/marketplace/publicar<br/>+ mis-publicaciones<br/>formulario 3 pestañas + extras"]
+        pAdmin["/admin<br/>moderación + verificaciones"]
+    end
+
+    subgraph monolito["Backend — monolito modular DDD (src/modules)"]
+        direction LR
+        subgraph modMarket["marketplace (Pilar 4)"]
+            rFeed["GET /marketplace/feed<br/>premium → light → referenciadas"]
+            rDetalle["GET /publicaciones/{id}<br/>público, solo activa"]
+            rFicha["PATCH /publicaciones/{id}/ficha<br/>upsert parcial, gratis (M0)"]
+            rFotos["Fotos M2: firma Cloudinary +<br/>registrar/reordenar/borrar (máx 12)"]
+            rVerif["solicitar-verificacion (100 tk)<br/>+ decisión admin"]
+        end
+        subgraph modApoyo["módulos de apoyo"]
+            mAuth["auth<br/>JWT · usuario_actual"]
+            mTokens["tokens<br/>debitar_tokens → 402"]
+            mVehiculos["vehiculos<br/>garage: km · mantenimientos"]
+            mConsulta["consulta<br/>perfil consolidado + desbloqueos"]
+        end
+    end
+
+    subgraph datos["Datos y terceros"]
+        neon[("Neon PG16<br/>publicaciones · fichas · fotos")]
+        cloudi["Cloudinary"]
+    end
+
+    subgraph etapas["Roadmap (plan_market_autos.md)"]
+        direction LR
+        M0["M0 ficha backend ✅"] --> M1["M1 ficha frontend ✅"] --> M2["M2 fotos 🔨 vigente"] --> M3["M3 filtros"] --> M4["M4 patios"] --> M5["M5 contacto"]
+    end
+
+    pFeed --> rFeed
+    pDetalle --> rDetalle
+    pPublicar --> rFicha & rFotos
+    pAdmin --> rVerif
+    rVerif --> mTokens
+    rFicha & rFotos --> mAuth
+    modMarket --> neon
+    rFotos --> cloudi
+    mVehiculos -.->|"detalles premium<br/>(mantenimientos)"| rFeed
+    mConsulta -.->|"credibilidad: perfil<br/>oficial por placa"| pDetalle
+
+    style M2 fill:#fff3cd,stroke:#b8860b
