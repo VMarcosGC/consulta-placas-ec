@@ -227,6 +227,9 @@ class PublicacionInternaSalida(BaseModel):
     # Señal de transparencia en el feed; el detalle completo vive en
     # GET /marketplace/publicaciones/{id}.
     completitud_ficha: int | None = None
+    # URL de la primera foto por `orden` (portada del feed); None si no hay fotos.
+    # El router carga `fotos` con selectinload para evitar N+1.
+    foto_portada: str | None = None
     creado_en: datetime
 
     @classmethod
@@ -269,6 +272,9 @@ class PublicacionInternaSalida(BaseModel):
                 if ficha is not None
                 else None
             ),
+            # `p.fotos` viene ordenado por `orden` asc (order_by del relationship):
+            # la primera es la portada. El router lo carga con selectinload (sin N+1).
+            foto_portada=(p.fotos[0].url if p.fotos else None),
             creado_en=p.creado_en,
         )
 
@@ -566,15 +572,74 @@ class FichaSalida(BaseModel):
         )
 
 
+# ════════════════ Fotos de la publicación (M2 — market de autos) ════════════════
+#
+# El binario no pasa por el backend: el navegador sube directo a Cloudinary con una
+# firma (services/cloudinary.py) y aquí solo se registra/valida la URL de entrega.
+
+# Bloque con el que se agrupa la foto en la galería. `general` = sin bloque específico.
+BloqueFoto = Literal["motor_suspension", "carroceria", "interiores", "general"]
+
+
+class FirmaSubidaSalida(BaseModel):
+    """Datos que el navegador necesita para subir directo a Cloudinary (firmado)."""
+
+    cloud_name: str
+    api_key: str
+    timestamp: int
+    signature: str
+    folder: str
+
+
+class FotoRegistrar(BaseModel):
+    """Registro de una foto YA subida a Cloudinary: solo se persiste su URL.
+
+    La URL se valida en el router contra NUESTRO cloud (https + res.cloudinary.com +
+    cloud_name); aquí solo se acota longitud/forma. `orden` opcional: por defecto la
+    foto va al final de la galería.
+    """
+
+    url: str = Field(min_length=10, max_length=2048)
+    bloque: BloqueFoto | None = None
+    orden: int | None = Field(default=None, ge=0)
+
+
+class FotoReordenar(BaseModel):
+    """Nuevo orden de la galería: la lista de `foto_id` en la secuencia deseada.
+
+    Debe contener EXACTAMENTE el conjunto de fotos de la publicación (ni de más ni de
+    menos); el router valida la coincidencia y responde 422 si no cuadra.
+    """
+
+    orden: list[int] = Field(min_length=1, description="foto_id en el nuevo orden")
+
+
+class FotoSalida(BaseModel):
+    """Vista de una foto de la publicación (sin PII: aquí no hay datos del dueño)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    url: str
+    bloque: str | None
+    orden: int
+
+
 class PublicacionDetalleSalida(PublicacionInternaSalida):
-    """Detalle público de una publicación: todo lo del feed + la ficha técnica."""
+    """Detalle público de una publicación: todo lo del feed + ficha técnica + fotos."""
 
     ficha: FichaSalida | None = None
+    fotos: list[FotoSalida] = Field(default_factory=list)
 
     @classmethod
     def desde_modelo(cls, p: PublicacionInterna) -> "PublicacionDetalleSalida":
         base = PublicacionInternaSalida.desde_modelo(p).model_dump()
-        return cls(**base, ficha=FichaSalida.desde_modelo(p.ficha))
+        # `p.fotos` viene ordenado por `orden` asc (order_by del relationship).
+        return cls(
+            **base,
+            ficha=FichaSalida.desde_modelo(p.ficha),
+            fotos=[FotoSalida.model_validate(f) for f in p.fotos],
+        )
 
 
 class FeedMarketplaceSalida(BaseModel):

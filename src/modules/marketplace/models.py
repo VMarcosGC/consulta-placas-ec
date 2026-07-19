@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import (
-    String, DateTime, BigInteger, Boolean, Numeric, ForeignKey, func, text,
+    String, DateTime, BigInteger, Integer, Boolean, Numeric, ForeignKey, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -179,6 +179,15 @@ class PublicacionInterna(Base):
         cascade="all, delete-orphan",
     )
 
+    # Fotos de la publicación (M2). Ordenadas por `orden` ascendente: la primera es
+    # la portada del feed. Se borran junto con la publicación (delete-orphan).
+    fotos: Mapped[list["FotoPublicacion"]] = relationship(
+        "FotoPublicacion",
+        back_populates="publicacion",
+        cascade="all, delete-orphan",
+        order_by="FotoPublicacion.orden.asc()",
+    )
+
 
 class FichaPublicacion(Base):
     """Ficha técnica de una publicación interna: el detalle transparente del auto.
@@ -226,6 +235,46 @@ class FichaPublicacion(Base):
 
     publicacion: Mapped["PublicacionInterna"] = relationship(
         "PublicacionInterna", back_populates="ficha"
+    )
+
+
+class FotoPublicacion(Base):
+    """Foto de una publicación interna (M2 — fotos del market de autos).
+
+    El binario NO vive aquí: se sube directo desde el navegador a Cloudinary con una
+    firma que genera el backend; esta tabla solo guarda la `url` de entrega resultante
+    (decisión 2026-07-19). La `url` se valida contra NUESTRO cloud antes de persistir
+    (ver services/cloudinary.py y el router).
+
+    `bloque` es opcional y agrupa la foto con un bloque de la ficha
+    (`motor_suspension|carroceria|interiores|general`); su catálogo lo valida Pydantic,
+    no la BD (mismo criterio que la ficha). `orden` fija la posición en la galería: la
+    primera (orden más bajo) es la portada del feed.
+    """
+
+    __tablename__ = "fotos_publicacion"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    publicacion_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("publicaciones_internas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # 2048: las URLs de CDN traen transformaciones y versiones firmadas y superan los
+    # 500 con facilidad (mismo criterio que PublicacionReferenciada.imagen_url).
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    # Catálogo validado en Pydantic: motor_suspension|carroceria|interiores|general.
+    bloque: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    orden: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), default=0
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    publicacion: Mapped["PublicacionInterna"] = relationship(
+        "PublicacionInterna", back_populates="fotos"
     )
 
 

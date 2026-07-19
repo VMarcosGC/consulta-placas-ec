@@ -10,6 +10,45 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-19 — Market M2 (backend): fotos de la publicación (Cloudinary firmado)
+
+**Rama:** `main`. Ejecutado por **dev-backend**, revisado por **revisor-calidad** (APTO).
+Decisión de infra (Marcos, plan_costos.md): **Cloudinary free tier**, el navegador sube directo
+con firma del backend; la BD solo guarda URLs. **Migración 0018 aún NO aplicada en Neon** (la
+corre Marcos).
+
+**Qué se hizo**
+- **`fotos_publicacion`** (migración `0018`): `publicacion_id` FK→`publicaciones_internas`
+  (CASCADE, index), `url` String(**2048**), `bloque` String(20) nullable
+  (`motor_suspension|carroceria|interiores|general`, validado en Pydantic), `orden` Integer,
+  `creado_en`. Modelo `FotoPublicacion` + relación `PublicacionInterna.fotos`
+  (`delete-orphan`, `order_by orden`). Registrado en `registry.py`.
+- **Firma Cloudinary** (`marketplace/services/cloudinary.py`): SHA-1 **manual** (sin SDK →
+  cero deps nuevas); credenciales solo por env (`CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET/
+  UPLOAD_FOLDER`). El `api_secret` **nunca** sale al cliente. Sin config → **503** (patrón vision.py).
+- **Endpoints del dueño** (orden de rutas: literales antes que dinámicas): `POST .../fotos/firma`
+  (503 si no hay config), `POST .../fotos` (valida URL de nuestro cloud → 400; **límite 12 → 409**;
+  `orden` al final), `PATCH .../fotos/orden` (reorden; **422** si la lista no calza), `DELETE
+  .../fotos/{foto_id}` (204; borra registro, no el binario). 404 indistinto de propiedad.
+- **Salida**: `PublicacionDetalleSalida.fotos` (ordenadas) y `PublicacionInternaSalida.foto_portada`
+  (primera por orden) en el feed. `selectinload(fotos)` en feed/mias/detalle/helpers → sin N+1.
+- `.env.example` con las 4 vars (aviso de no commitear valores; 503 sin credenciales).
+
+**Verificación:** `import main` → 61 rutas (las 4 `/fotos*` presentes; literales siguen
+resolviendo); `Base.metadata` → 17 tablas con `fotos_publicacion`; `alembic heads` → único `0018`;
+`alembic upgrade 0017:0018 --sql` (offline) genera tabla+índice y `downgrade` simétrico; firma
+determinista y api_secret no expuesto; validación de URL rechaza http/host ajeno/spoofing de
+subdominio. **Sin SDK cloudinary en requirements.**
+
+**Pendientes / deuda menor (del revisor)**
+- **`alembic upgrade head` contra Neon** (0018) — lo corre Marcos; cierra la parte backend de M2.
+- `registrar_foto` con `orden` explícito no deduplica contra órdenes existentes (empate resoluble;
+  `reordenar` lo normaliza). `FotoReordenar.orden` es lista de `foto_id` (nombre podría confundir).
+- **DELETE no destruye el binario en Cloudinary** (barrido posterior, decisión acordada).
+- **Frontend M2** (uploader por bloque + galería en el detalle): segunda sesión con dev-frontend.
+
+---
+
 ## 2026-07-18 — Market M1: ficha técnica en el frontend (detalle + editor)
 
 **Repo:** `consulta-placas-web` (commit `1c0bd95`). **Backend M0** cerrado antes: migración

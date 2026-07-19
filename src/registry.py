@@ -34,6 +34,7 @@ from src.modules.marketplace.models import (  # noqa: F401
     EnlaceCompartido,
     EstadoModeracion,
     FichaPublicacion,
+    FotoPublicacion,
     PublicacionInterna,
     PublicacionReferenciada,
 )

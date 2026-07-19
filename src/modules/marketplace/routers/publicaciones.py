@@ -28,6 +28,7 @@ from src.modules.marketplace.models import (
     EstadoPublicacion,
     EstadoVerificacion,
     FichaPublicacion,
+    FotoPublicacion,
     PlanPublicacion,
     PublicacionInterna,
     PublicacionReferenciada,
@@ -36,6 +37,10 @@ from src.modules.marketplace.schemas import (
     FeedMarketplaceSalida,
     FichaActualizar,
     FichaSalida,
+    FirmaSubidaSalida,
+    FotoRegistrar,
+    FotoReordenar,
+    FotoSalida,
     PublicacionDetalleSalida,
     PublicacionInternaActualizar,
     PublicacionInternaCrear,
@@ -43,6 +48,7 @@ from src.modules.marketplace.schemas import (
     PublicacionReferenciadaSalida,
     VerificacionPublicacion,
 )
+from src.modules.marketplace.services import cloudinary
 
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
@@ -56,6 +62,9 @@ TOKENS_VERIFICACION_MARKETPLACE = int(os.getenv("TOKENS_VERIFICACION_MARKETPLACE
 
 # Cuántos anuncios referenciados se traen al feed (para no inflar la respuesta).
 LIMITE_REFERENCIADAS_FEED = 30
+
+# Máximo de fotos por publicación (M2). Superarlo → 409.
+MAX_FOTOS_POR_PUBLICACION = 12
 
 
 def _cobrar_premium(sesion: Session, usuario: Usuario, placa: str) -> None:
@@ -107,6 +116,7 @@ def _mi_publicacion(sesion: Session, publicacion_id: int, usuario: Usuario) -> P
         .options(
             selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
             selectinload(PublicacionInterna.ficha),
+            selectinload(PublicacionInterna.fotos),
         )
     ).scalar_one_or_none()
     if pub is None:
@@ -176,6 +186,7 @@ def listar_mis_publicaciones(
             .options(
                 selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
                 selectinload(PublicacionInterna.ficha),
+                selectinload(PublicacionInterna.fotos),
             )
             .order_by(PublicacionInterna.creado_en.desc())
         )
@@ -296,6 +307,7 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
         .options(
             selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
             selectinload(PublicacionInterna.ficha),
+            selectinload(PublicacionInterna.fotos),
         )
         .order_by(PublicacionInterna.creado_en.desc())
     )
@@ -347,6 +359,7 @@ def _cargar_publicacion(sesion: Session, publicacion_id: int) -> PublicacionInte
         .options(
             selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
             selectinload(PublicacionInterna.ficha),
+            selectinload(PublicacionInterna.fotos),
         )
     ).scalar_one_or_none()
 
@@ -373,6 +386,7 @@ def listar_pendientes_verificacion(
             .options(
                 selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
                 selectinload(PublicacionInterna.ficha),
+                selectinload(PublicacionInterna.fotos),
             )
             .order_by(PublicacionInterna.creado_en.asc())
         )
@@ -461,6 +475,159 @@ def actualizar_ficha(
     return FichaSalida.desde_modelo(ficha)
 
 
+# ──────────────── Fotos de la publicación (M2 — market de autos) ────────────────
+#
+# El binario NO pasa por el backend: el navegador pide una firma, sube directo a
+# Cloudinary y luego registra aquí la URL resultante. Todo el CRUD es del dueño
+# (404 indistinto si no es suya) y gratis (la transparencia no se cobra).
+#
+# Orden de rutas dentro de `/publicaciones/{publicacion_id}/fotos`: las literales
+# (`firma`, `orden`) van declaradas antes que la dinámica `{foto_id}`.
+
+
+def _requiere_cloudinary() -> None:
+    """503 si Cloudinary no está configurado (config faltante, no error de negocio)."""
+    if not cloudinary.esta_configurado():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="La subida de fotos no está disponible: falta configurar Cloudinary.",
+        )
+
+
+@router.post(
+    "/publicaciones/{publicacion_id}/fotos/firma",
+    response_model=FirmaSubidaSalida,
+)
+def firmar_subida_foto(
+    publicacion_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Firma una subida directa a Cloudinary para las fotos de esta publicación.
+
+    - Solo el dueño (404 si no es suya).
+    - 503 si Cloudinary no está configurado.
+    - El `folder` queda atado a la publicación (`<base>/<id>`) y va firmado, para que
+      el navegador no pueda subir a rutas arbitrarias.
+    """
+    _requiere_cloudinary()
+    _mi_publicacion(sesion, publicacion_id, usuario)  # valida propiedad (404 si no)
+    folder = cloudinary.carpeta_publicacion(publicacion_id)
+    return FirmaSubidaSalida(**cloudinary.firmar_subida(folder))
+
+
+@router.post(
+    "/publicaciones/{publicacion_id}/fotos",
+    response_model=FotoSalida,
+    status_code=status.HTTP_201_CREATED,
+)
+def registrar_foto(
+    publicacion_id: int,
+    datos: FotoRegistrar,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Registra una foto ya subida a Cloudinary (persiste solo la URL).
+
+    - Solo el dueño (404 si no es suya).
+    - 503 si Cloudinary no está configurado (no hay contra qué validar la URL).
+    - 400 si la URL no es https ni de NUESTRO cloud de Cloudinary.
+    - 409 si la publicación ya tiene el máximo de fotos (`MAX_FOTOS_POR_PUBLICACION`).
+    - `orden` por defecto = al final de la galería.
+    """
+    _requiere_cloudinary()
+    pub = _mi_publicacion(sesion, publicacion_id, usuario)
+
+    if not cloudinary.url_es_de_nuestro_cloud(datos.url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La URL debe ser un enlace https de nuestro cloud de Cloudinary.",
+        )
+
+    if len(pub.fotos) >= MAX_FOTOS_POR_PUBLICACION:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Máximo {MAX_FOTOS_POR_PUBLICACION} fotos por publicación.",
+        )
+
+    # `pub.fotos` viene ordenado por `orden` asc: el último marca el final.
+    orden = datos.orden if datos.orden is not None else (
+        pub.fotos[-1].orden + 1 if pub.fotos else 0
+    )
+    foto = FotoPublicacion(
+        publicacion_id=pub.id,
+        url=datos.url,
+        bloque=datos.bloque,
+        orden=orden,
+    )
+    sesion.add(foto)
+    sesion.commit()
+    sesion.refresh(foto)
+    return FotoSalida.model_validate(foto)
+
+
+@router.patch(
+    "/publicaciones/{publicacion_id}/fotos/orden",
+    response_model=list[FotoSalida],
+)
+def reordenar_fotos(
+    publicacion_id: int,
+    datos: FotoReordenar,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Reordena la galería según la lista de `foto_id` recibida.
+
+    - Solo el dueño (404 si no es suya).
+    - 422 si la lista no coincide EXACTAMENTE con el conjunto de fotos de la
+      publicación (falta alguna, sobra alguna o hay repetidas).
+    - Reasigna `orden` = posición en la lista (0-based) y devuelve la galería ordenada.
+    """
+    pub = _mi_publicacion(sesion, publicacion_id, usuario)
+
+    ids_actuales = {f.id for f in pub.fotos}
+    ids_pedidos = datos.orden
+    if len(ids_pedidos) != len(set(ids_pedidos)) or set(ids_pedidos) != ids_actuales:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="La lista de orden debe contener exactamente las fotos de la publicación.",
+        )
+
+    posicion = {foto_id: i for i, foto_id in enumerate(ids_pedidos)}
+    for foto in pub.fotos:
+        foto.orden = posicion[foto.id]
+    sesion.commit()
+
+    pub = _mi_publicacion(sesion, publicacion_id, usuario)  # recarga ordenada
+    return [FotoSalida.model_validate(f) for f in pub.fotos]
+
+
+@router.delete(
+    "/publicaciones/{publicacion_id}/fotos/{foto_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def eliminar_foto(
+    publicacion_id: int,
+    foto_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Elimina una foto de la publicación (404 indistinto si no es tuya/no existe).
+
+    Nota: no borra el binario en Cloudinary (queda a limpieza aparte); aquí solo se
+    quita el registro de la URL.
+    """
+    pub = _mi_publicacion(sesion, publicacion_id, usuario)  # 404 si la pub no es suya
+    foto = next((f for f in pub.fotos if f.id == foto_id), None)
+    if foto is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Foto no encontrada"
+        )
+    sesion.delete(foto)
+    sesion.commit()
+    return None
+
+
 # NOTA de orden: esta ruta con path param dinámico va AL FINAL del router. Si se
 # declarara antes que las literales (`/publicaciones/mias`,
 # `/publicaciones/pendientes-verificacion`), "mias" intentaría parsearse como int
@@ -487,6 +654,7 @@ def detalle_publicacion(
         .options(
             selectinload(PublicacionInterna.vehiculo).selectinload(Vehiculo.mantenimientos),
             selectinload(PublicacionInterna.ficha),
+            selectinload(PublicacionInterna.fotos),
         )
     ).scalar_one_or_none()
     if pub is None:
