@@ -6,6 +6,7 @@ ANT/SRI vía Playwright con caché; AMT/FGE vía worker híbrido (encolado + en_
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
@@ -28,6 +29,7 @@ from src.modules.consulta.services.ecuadorlegalonline import consultar_ecuadorle
 from src.modules.consulta.services.cache import (
     obtener_consulta_reciente,
     guardar_consulta,
+    ESTADOS_CACHEABLES,
     TTL_TRANSACCIONAL_MINUTOS,
 )
 from src.modules.consulta.services.cola import encolar_scraping, fuente_en_error_reciente
@@ -135,6 +137,14 @@ async def consultar_con_cache(
         logger.warning("Cache write falló para %s/%s: %r", fuente, identificador, e)
         sesion.rollback()
 
+    # Recién consultado: se sella con la hora actual para que el consumidor pueda mostrar
+    # "consultado el …" igual que en la rama cacheada (que lo trae de `creado_en`).
+    # Va sobre una copia: `respuesta` es la que acaba de persistirse.
+    #
+    # Solo se sella lo que efectivamente trajo datos (mismos estados que la caché acepta):
+    # sellar un error o un `bloqueado_captcha` afirmaría una consulta exitosa que no ocurrió.
+    if respuesta.get("estado") in ESTADOS_CACHEABLES:
+        return {**respuesta, "consultado_en": datetime.now(timezone.utc).isoformat()}
     return respuesta
 
 

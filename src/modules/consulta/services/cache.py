@@ -73,7 +73,12 @@ def obtener_consulta_reciente(
     )
 
     fila = sesion.execute(stmt).scalar_one_or_none()
-    return fila.respuesta if fila else None
+    if fila is None:
+        return None
+    # `consultado_en` viaja junto a la respuesta para que el consumidor pueda decir
+    # "consultado el …" (M2.6: sección "Datos oficiales" del anuncio). Se agrega sobre una
+    # COPIA: mutar `fila.respuesta` marcaría el objeto ORM como sucio y lo haría persistir.
+    return {**fila.respuesta, "consultado_en": fila.creado_en.isoformat()}
 
 
 def guardar_consulta(

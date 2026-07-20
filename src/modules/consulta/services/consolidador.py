@@ -62,6 +62,8 @@ def _item_estado(clave: str, crudo: dict | None) -> EstadoFuenteItem:
         )
     # Detalle útil: URL del portal (consulta_externa) o mensaje de error.
     detalle = crudo.get("url_consulta") or crudo.get("error")
+    # `consultado_en` lo inyecta la capa de caché (o el propio `consultar_con_cache` cuando
+    # el dato es recién scrapeado). Las fuentes en_proceso/error no lo traen → None.
     return EstadoFuenteItem(
         clave=clave,
         nombre=fuente.nombre,
@@ -69,6 +71,7 @@ def _item_estado(clave: str, crudo: dict | None) -> EstadoFuenteItem:
         origen=fuente.origen,
         estado=EstadoFuente.desde_estado_servicio(crudo.get("estado")),
         detalle=detalle,
+        consultado_en=crudo.get("consultado_en"),
     )
 
 

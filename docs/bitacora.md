@@ -10,6 +10,71 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-19 — Market M2.6: market-first + datos oficiales automáticos en el anuncio
+
+**Repos:** ambos (frontend el grueso; backend un cambio mínimo aditivo, **sin migración**).
+Decisión de producto de Marcos (plan_market_autos.md §M2.6). Implementado por el
+**controller**, revisado por **revisor-calidad** (**APTO**, sin bloqueantes).
+**Commit sin push** — Marcos prueba primero.
+
+**Qué se hizo**
+
+1. **Reposicionamiento market-first.** El producto ES el market de autos; la consulta por
+   placa pasa a herramienta de apoyo mientras las fuentes estatales sigan bloqueadas.
+   - Home: hero **"Compra y vende autos con transparencia"** con CTA primario "Ver autos en
+     venta" y secundario "Publica tu auto" (antes el hero era el buscador de placa). Nueva
+     sección de destacados del feed (`DestacadosMarket.tsx`, premium primero, degrada a CTA
+     si el feed está vacío). La consulta baja a una sección **"Herramientas"**.
+   - Navegación: **Marketplace · Publicar · Consulta de placa · Precios** ("Consultar" se
+     renombró). Pie, títulos, metadescripciones y copy de `/marketplace` girados a market.
+   - **Ninguna ruta de consulta se eliminó** (verificado por el revisor): `/consultar` y
+     `/consultar/{placa}` siguen intactas, solo pierden protagonismo.
+2. **Enriquecimiento oficial automático (fire & forget).** Al crear la publicación en el
+   paso 1 del wizard, el **cliente** dispara `GET /consultar/{placa}` sin `await`, sin
+   spinner y tragando errores: el pipeline deja los datos cacheados en `consultas` y el
+   vendedor no espera ni se entera si una fuente está caída. Usa `pub.placa` (la que
+   normalizó el backend) para que la caché quede bajo la misma clave que lee el anuncio.
+   **§10.2 intacta**: el CRUD del backend nunca invoca scraping — el revisor lo verificó con
+   grep sobre `src/modules/marketplace/` y `src/modules/vehiculos/` (0 resultados).
+3. **Sección "Datos oficiales" en `/marketplace/{id}`.** Consume el perfil consolidado de la
+   placa, filtra por `fuenteInactiva` (SRI/FGE fuera) y muestra matrícula (ANT) e
+   infracciones con **"Consultado el {fecha}"** en es-EC. Si no hay nada cacheado, degrada a
+   **"Datos oficiales en proceso"** sin romper la página. **No filtra lo que se cobra**: con
+   `multas_bloqueado` (el caso anónimo) solo se muestra el veredicto gratis, nunca los
+   montos; el enlace lleva a `/consultar` para el detalle pagado.
+4. **Backend (mínimo, aditivo, sin migración).** Campo `consultado_en: str | None` en
+   `EstadoFuenteItem`. Lo inyecta la caché al leer (desde `creado_en`, **sobre una copia**
+   para no ensuciar el objeto ORM) y `consultar_con_cache` para el dato recién scrapeado.
+   Solo se sella lo que trajo datos (`ESTADOS_CACHEABLES`): sellar un error afirmaría una
+   consulta exitosa que no ocurrió.
+
+**Verificación**
+- Backend: `import main` → **61 rutas (sin cambio)**; `alembic heads` → único `0018`;
+  prueba directa de `consolidar_placa` → ANT cacheada propaga `consultado_en`, AMT
+  `en_proceso` lo deja en `None`.
+- Frontend: `tsc --noEmit` limpio; `npm run lint` → **4 errores, los 4 preexistentes**;
+  `npm run build` OK.
+- **Hallazgo mayor del revisor, corregido en la sesión:** la tarjeta de multas afirmaba
+  **"Al día"** cuando AMT seguía `en_proceso` — el veredicto estaba incompleto y en un
+  anuncio de venta ese falso negativo favorece al vendedor. Ahora, con el municipio en
+  camino, muestra un estado neutro **"Consultando…"** y **no estampa fecha** (sellar con la
+  hora de la ANT daba una sensación de completitud inexistente). Reproducido y verificado
+  con `consolidar_placa` (ANT completada + AMT en_proceso → `tiene_pendientes: False`).
+- Menores corregidos: docstring/sellado de `consultado_en` por estado cacheable, copy
+  "(ANT y AMT)" → incluye municipios (podía listar EPMTSD), condición de "en proceso" ya no
+  se queda pegada, y el fire & forget usa `pub.placa`.
+
+**Pendientes**
+- **Correr el guión de prueba v3** ([guion_prueba_market.md](guion_prueba_market.md) §3-ter,
+  secciones F–H). Con eso se cierra M2.6.
+- **Push pendiente** de ambos repos (Marcos prueba antes).
+- **Deuda que entra a M3** (hallazgo mayor diferido): el detalle público llama al perfil, que
+  en *cache miss* **dispara scraping**. Como el anuncio es público e indexable, varias
+  visitas sobre una placa fría podrían generar scrapes concurrentes contra la misma fuente
+  (choca con `scraping-respetuoso`). Propuesta: `solo_cache=true` en el endpoint de perfil.
+
+---
+
 ## 2026-07-19 — Market M2.5: stand-by de fuentes + wizard de publicación + referencias
 
 **Repos:** el grueso en `consulta-placas-web` (frontend); en este repo **solo documentación**.

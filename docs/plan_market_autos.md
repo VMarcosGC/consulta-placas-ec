@@ -147,6 +147,30 @@ Todo el cambio es de frontend (`consulta-placas-web`); el backend no se tocó.
 (fallo de fuente = silencioso para el vendedor); detalle muestra datos oficiales cuando
 existen en caché; consulta por placa sigue accesible como sección secundaria.
 
+**Estado (2026-07-19): código implementado, compuerta ABIERTA a la espera de la prueba manual.**
+- Home market-first (hero "Compra y vende autos con transparencia", CTAs "Ver autos en
+  venta"/"Publica tu auto", destacados del feed, consulta bajada a "Herramientas"),
+  navegación reordenada y metadatos/copy girados a market. **Ninguna ruta de consulta se
+  eliminó.**
+- Fire & forget de `GET /consultar/{placa}` desde el cliente al crear la publicación
+  (§10.2 intacta: el CRUD del backend nunca invoca scraping — verificado por el revisor).
+- Sección "Datos oficiales" en `/marketplace/{id}`, filtrada por `fuenteInactiva`, con
+  "Consultado el …" y degradación a "Datos oficiales en proceso".
+- **Backend mínimo**: campo aditivo `consultado_en` en `EstadoFuenteItem` (caché +
+  `consultar_con_cache` + consolidador). **Sin migración** (`alembic heads` = `0018`).
+- Verificado: `import main` → 61 rutas (sin cambio), `tsc --noEmit` limpio, lint 4
+  preexistentes, `build` OK. Revisión `revisor-calidad`: **APTO**, sin bloqueantes; los 2
+  hallazgos mayores se resolvieron (uno) y se difirieron (el otro, ver abajo).
+- **Falta para cerrar:** guión de prueba v3
+  ([guion_prueba_market.md](guion_prueba_market.md) §3-ter, secciones F–H).
+
+**Deuda que entra a M3 (detectada por el revisor en M2.6):** el detalle público llama
+`GET /consultar/{placa}/perfil`, que en *cache miss* **dispara scraping** (Playwright ANT +
+encolado AMT). Como el anuncio es público e indexable, varias visitas sobre una placa fría
+podrían generar scrapes concurrentes contra la misma fuente (choca con el skill
+`scraping-respetuoso`). Mitigación propuesta: parámetro `solo_cache=true` en el endpoint de
+perfil para este consumo, o no disparar en el primer render sin interacción del usuario.
+
 ### M3 — Búsqueda y filtros del feed
 **Repos:** ambos
 - Backend: `GET /marketplace/feed` con query params: `tipo`, `combustible`,

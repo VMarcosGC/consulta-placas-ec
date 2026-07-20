@@ -145,6 +145,60 @@ Como **vendedor** con sesión iniciada:
 **Hallazgos del guión v2:**
 - (anotar aquí)
 
+---
+
+## 3-ter. Guión v3 — etapa M2.6 (market-first + datos oficiales automáticos)
+
+**Requiere backend levantado** (`python run.py`): a diferencia de M2.5, esta etapa sí toca
+el backend (un campo nuevo, `consultado_en`, sin migración). Sirve la BD que ya tienes.
+
+### F. Reposicionamiento market-first
+
+- [ ] Home `/`: el hero dice **"Compra y vende autos con transparencia"**, con CTA primario
+      **"Ver autos en venta"** y secundario **"Publica tu auto"**. Ya NO hay buscador de
+      placa en el hero.
+- [ ] Debajo del hero: sección **"Autos en venta"** con hasta 6 tarjetas (premium primero).
+      Con el feed vacío muestra el estado "Todavía no hay autos publicados" + CTA a publicar
+      (no un error).
+- [ ] Más abajo hay una sección **"Herramientas → Consulta el historial de una placa"** con
+      el buscador. Funciona: ingresar una placa lleva a `/consultar/{placa}`.
+- [ ] Menú superior en este orden: **Marketplace · Publicar · Consulta de placa · Precios**.
+      "Marketplace" se ve resaltado.
+- [ ] Pie: "Producto" lista Autos en venta / Publicar mi auto / Consulta de placa / Precios /
+      Mi garage.
+- [ ] Título del navegador en `/`: **"Revisa tu Carro EC — Compra y vende autos con
+      transparencia"**.
+- [ ] **Ninguna ruta de consulta se perdió**: `/consultar` y `/consultar/{placa}` siguen
+      funcionando igual que antes (con el stand-by de M2.5 aplicado).
+
+### G. Disparo automático de datos oficiales (fire & forget)
+
+- [ ] Publicar un auto nuevo con una **placa real** en el paso 1 del wizard.
+- [ ] **El paso 1 no se traba**: pasa al paso 2 de inmediato, sin spinner extra ni demora
+      perceptible (el disparo NO se espera).
+- [ ] En la terminal del backend se ve la consulta a `/consultar/{placa}` disparada sola,
+      unos instantes después de crear la publicación.
+- [ ] **Prueba de resiliencia**: apagar el worker (o usar una placa que falle) y publicar
+      igual → la publicación se crea sin errores visibles para el vendedor y el wizard
+      avanza normal. El fallo de la fuente es silencioso, como debe ser.
+
+### H. Sección "Datos oficiales" en el anuncio
+
+- [ ] Abrir `/marketplace/{id}` del auto recién publicado (sirve en incógnito, es público).
+- [ ] Aparece la sección **"Datos oficiales"** con el aviso "Esto no lo declara el vendedor".
+- [ ] Si el pipeline aún no cacheó nada: muestra **"Datos oficiales en proceso"** con el
+      enlace "Consultar la placa por mi cuenta" — **la página no se rompe**.
+- [ ] Ya con datos en caché: tarjeta **"Matrícula (ANT)"** con Vigente/Vencida y las fechas,
+      y tarjeta **"Multas e infracciones"** con el veredicto.
+- [ ] Cada tarjeta muestra **"Consultado el {fecha}"** en es-EC (ej. "19 de julio de 2026").
+- [ ] **Privacidad/monetización**: sin sesión, las multas muestran solo el veredicto
+      ("Con pendientes" / "Al día"), **nunca los montos** (eso es microdesbloqueo de pago).
+      El enlace "Ver el detalle completo de la placa" lleva a `/consultar/{placa}`.
+- [ ] **Stand-by respetado**: no aparece ninguna tarjeta ni sello de SRI ni de FGE.
+
+**Hallazgos del guión v3:**
+- (anotar aquí)
+
 ## 4. De la versión test a productivo F1 (cuando el guión pase limpio)
 
 1. **Cerrar compuerta M2** en `plan_market_autos.md` + entrada en bitácora con los hallazgos.

@@ -66,6 +66,14 @@ class EstadoFuenteItem(BaseModel):
     detalle: str | None = Field(
         None, description="Mensaje de error o URL externa, según el estado"
     )
+    consultado_en: str | None = Field(
+        None,
+        description=(
+            "ISO-8601 de cuándo se obtuvo el dato de esta fuente (de la caché o de la "
+            "consulta recién hecha). None si la fuente no entregó datos (en_proceso, "
+            "no_integrada, error). Lo usa la sección 'Datos oficiales' del anuncio."
+        ),
+    )
 
 
 class DatosBasicos(BaseModel):
