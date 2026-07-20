@@ -1,0 +1,6 @@
+# Normalización de finales de línea (evita el ruido CRLF/LF que infla git status
+# cuando conviven Windows + OneDrive + agentes que escriben LF).
+* text=auto
+*.png binary
+*.jpg binary
+*.ico binary
