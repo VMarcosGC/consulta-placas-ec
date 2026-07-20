@@ -10,6 +10,69 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-19 — Market M2.7: pulido UX (consulta compacta, tarjetas, entradas)
+
+**Repo:** `consulta-placas-web` (**el backend no se tocó** — verificado por el revisor: sin
+cambios en `src/` ni `alembic/`). Responde a los 3 hallazgos de la prueba de Marcos sobre
+M2.5/M2.6. Implementado por el **controller**, revisado por **revisor-calidad** (**APTO**,
+sin bloqueantes). **Commit sin push** — Marcos prueba primero.
+
+**Qué se hizo**
+
+1. **Consulta de placa compacta** (hallazgo 1: "muy extensa").
+   - Nuevo `ResumenPlaca.tsx`: tarjeta "de un vistazo" con **máximo 6 datos** en tipografía
+     grande (marca/modelo, año/color, matrícula, multas, total, fecha de consulta) y el
+     veredicto. Exporta `derivarResumen`/`fechaLegible`, que reusa el anuncio (sin duplicar).
+   - Nuevo `Acordeon.tsx` sobre **`<details>/<summary>` nativo**: sin estado, sin JS,
+     accesible por teclado y sin sumar efectos de React (ni errores de lint).
+   - `PerfilVehiculo.tsx` **reescrito**: todo el detalle (desglose por fuente, matriculación,
+     identificación/titular, portales oficiales, tablero de fuentes) pasó a acordeones
+     **cerrados por default**. La sección de desbloqueos con tokens queda **visible**: es
+     acción, no detalle. El revisor confirmó que no hubo regresiones (polling, re-consulta
+     con sesión, reintento de AMT, gating por `fuenteInactiva`, enlaces oficiales).
+2. **Objetos del marketplace** (hallazgo 2: "presentación").
+   - `ListingCard.tsx` reescrito, mobile-first: portada con **ratio fijo 4:3** (+ placeholder
+     🚗 del mismo tamaño, para que la grilla no baile), **precio grande primero**, título en
+     una línea truncada, **una sola fila de chips**, y **toda la tarjeta clickeable**. Se
+     eliminaron la descripción y el bloque de mantenimientos que la estiraban, y la prop
+     `onEliminar` (código muerto: ningún caller la pasaba).
+   - Detalle reescrito con jerarquía **foto → precio/título/CTA → ficha → oficial → extras**.
+     Galería con **swipe** en móvil (scroll-snap nativo, sin librerías) y miniaturas en
+     escritorio. Ficha en tarjetas por bloque con íconos (⚙️ 🚙 🪑 ✨).
+   - Nuevo `DatosOficialesMini.tsx`: la sección oficial en el anuncio baja a **3-4 líneas**
+     con "Ver detalle completo →" hacia `/consultar/{placa}`.
+3. **Puntos de entrada que faltaban** (hallazgo 3: "no se descubren").
+   - `/marketplace`: bloque visible **"🔗 ¿Viste un auto en Facebook u OLX?"** con
+     "Referenciar anuncio externo" (el flujo ya existía, pero estaba escondido entre botones
+     iguales) + "Mis referencias". Enlace equivalente en la home.
+   - `mis-publicaciones`: las acciones pasaron de enlaces de texto a **botones visibles
+     📷 Fotos y 📋 Ficha técnica**, con estado activo. El vendedor llega a subir fotos **sin
+     rehacer el wizard**.
+
+**Verificación**
+- `tsc --noEmit` limpio; `npm run lint` → **4 errores, los 4 preexistentes**; `build` OK.
+- **Hallazgo mayor del revisor, corregido en la sesión:** con AMT en **`error_fuente`** el
+  resumen decía **"Al día"** en verde y el botón de reintentar quedaba enterrado en un
+  acordeón cerrado. Es la misma familia del bug que M2.6 arregló para `en_proceso`, ahora
+  expuesta para la fuente caída. Ahora `derivarResumen` expone `municipalesCaidas`, el
+  veredicto muestra **"Sin dato municipal"**, el chip del acordeón dice lo mismo y ese
+  acordeón **se abre solo** cuando hay que reintentar.
+- Menores corregidos: guarda explícita de `detalleBloqueado` antes de pintar cualquier monto
+  (antes la privacidad dependía de que el consolidador vaciara `multas_detalle`), y
+  `tabIndex`/`aria-label` en el carrusel móvil.
+
+**Pendientes**
+- **Correr el guión v4** ([guion_prueba_market.md](guion_prueba_market.md) §3-quater,
+  secciones I–L) — **en celular**, que es donde se nota el rediseño.
+- **Push pendiente** de ambos repos.
+- **Deuda de M2.6 que M2.7 NO resolvió** (el revisor insistió en registrarla):
+  `DatosOficialesMini` llama al perfil en el primer render de una página pública e indexable,
+  y ese endpoint dispara scraping en cache miss. Las dos mitigaciones ya acordadas
+  (`solo_cache=true` o disparo bajo interacción) siguen sin aplicarse. Resolver en M3, antes
+  de que el market reciba tráfico real.
+
+---
+
 ## 2026-07-19 — Market M2.6: market-first + datos oficiales automáticos en el anuncio
 
 **Repos:** ambos (frontend el grueso; backend un cambio mínimo aditivo, **sin migración**).

@@ -171,6 +171,41 @@ podrían generar scrapes concurrentes contra la misma fuente (choca con el skill
 `scraping-respetuoso`). Mitigación propuesta: parámetro `solo_cache=true` en el endpoint de
 perfil para este consumo, o no disparar en el primer render sin interacción del usuario.
 
+### M2.7 — Pulido UX del market (feedback de prueba, 2026-07-19)
+Hallazgos de Marcos sobre M2.5/M2.6 en local:
+1. **Consulta de placa muy extensa** → vista compacta: resumen de un vistazo + secciones
+   plegadas. Aplica también a "Datos oficiales" dentro del anuncio.
+2. **Presentación de los objetos del marketplace** → rediseño de tarjetas y detalle
+   (foto protagonista, precio prominente, jerarquía clara, mobile-first).
+3. **Faltan puntos de entrada visibles**: subir fotos (fuera del wizard) y "referenciar
+   un anuncio externo" (el flujo existe pero no se descubre).
+**Compuerta M2.7:** los 3 hallazgos resueltos y re-probados con el guión v2/v3.
+
+**Estado (2026-07-19): código implementado, compuerta ABIERTA a la espera de la prueba manual.**
+Solo frontend — **el backend no se tocó** (verificado por el revisor: sin cambios en `src/`
+ni `alembic/`).
+- **Consulta compacta**: `ResumenPlaca` (máx. 6 datos, tipografía grande) + todo el detalle
+  en `Acordeon` (`<details>` nativo) **cerrado por default**. `PerfilVehiculo` reescrito sin
+  perder polling, reintento de AMT, gating de fuentes ni la sección de desbloqueos.
+- **Objetos del market**: tarjeta con portada de ratio fijo 4:3 + placeholder, precio grande,
+  título de una línea, una fila de chips y toda la tarjeta clickeable. Detalle con jerarquía
+  foto → precio → ficha → oficial → extras, galería con swipe en móvil, ficha por bloques
+  con íconos. Se eliminó `onEliminar` (código muerto).
+- **Entradas**: bloque "¿Viste un auto en Facebook u OLX?" en `/marketplace` + enlace en la
+  home; botones visibles **📷 Fotos** y **📋 Ficha técnica** en mis-publicaciones (llegar a
+  fotos sin rehacer el wizard).
+- Verificado: `tsc --noEmit` limpio, lint 4 preexistentes, `build` OK. Revisión
+  `revisor-calidad`: **APTO**, sin bloqueantes; el hallazgo mayor del veredicto con la fuente
+  municipal caída se corrigió en la sesión.
+- **Falta para cerrar:** guión de prueba v4
+  ([guion_prueba_market.md](guion_prueba_market.md) §3-quater, secciones I–L), **en celular**.
+
+**Deuda de M2.6 que M2.7 NO resolvió (sigue abierta para M3):** `DatosOficialesMini` llama a
+`GET /consultar/{placa}/perfil` en el primer render de una página pública e indexable, y ese
+endpoint **dispara scraping en cache miss**. El rediseño reescribió el componente sin aplicar
+ninguna de las dos mitigaciones ya acordadas (`solo_cache=true`, o disparar solo con
+interacción del usuario). Resolverlo antes de que el market reciba tráfico real.
+
 ### M3 — Búsqueda y filtros del feed
 **Repos:** ambos
 - Backend: `GET /marketplace/feed` con query params: `tipo`, `combustible`,

@@ -199,6 +199,75 @@ el backend (un campo nuevo, `consultado_en`, sin migración). Sirve la BD que ya
 **Hallazgos del guión v3:**
 - (anotar aquí)
 
+---
+
+## 3-quater. Guión v4 — etapa M2.7 (pulido UX: compacto, tarjetas, entradas)
+
+Responde a los 3 hallazgos de tu prueba. **Todo es frontend.** Lo más importante de este
+guión es probarlo **en el celular** (o con el inspector en modo móvil): el rediseño es
+mobile-first y ahí es donde se nota.
+
+### I. Consulta de placa compacta
+
+- [ ] `/consultar/{placa}`: al cargar se ve **una sola tarjeta-resumen** arriba: placa,
+      marca/modelo, año/color, veredicto, y máximo 6 datos grandes (Matrícula / Multas /
+      Total a pagar) + "Consultado el {fecha}".
+- [ ] **No hay párrafos largos ni desgloses visibles al cargar.** Todo el detalle está en
+      secciones plegadas y **cerradas**: "Ver detalle de multas", "Ver datos de
+      matriculación", "Ver identificación y titular", "Consultar en portales oficiales",
+      "Ver fuentes consultadas".
+- [ ] Cada acordeón **abre y cierra** al tocarlo, y el chevron rota.
+- [ ] El encabezado del acordeón de multas trae una **pista** (ej. "3 pendientes" / "al día")
+      para no obligar a abrirlo.
+- [ ] La sección de **desbloqueos con tokens** sigue **visible** (no plegada): es acción, no
+      detalle.
+- [ ] Con AMT aún consultando, el resumen **no** afirma "Al día": muestra "Consultando…".
+- [ ] La página **cabe en una pantalla de celular** sin scroll interminable.
+
+### J. Objetos del marketplace (probar en móvil)
+
+- [ ] Feed `/marketplace`: las tarjetas tienen **foto de portada con altura uniforme**
+      (la grilla no baila). Sin foto → placeholder 🚗 "Sin fotos", **mismo tamaño**.
+- [ ] En la tarjeta: **precio grande primero**, título en **una sola línea** (se trunca si es
+      largo), placa discreta y **una sola fila de chips** (Premium / Verificado / Ficha).
+      Ya **no** aparece la descripción ni el bloque de mantenimientos estirando la tarjeta.
+- [ ] **Toda la tarjeta es clickeable** (no solo un botón "Ver detalle").
+- [ ] Detalle `/marketplace/{id}` en móvil: **la galería es lo primero** y se puede
+      **deslizar** de foto en foto (aparece "Desliza para ver las N fotos").
+- [ ] Debajo, **sin hacer scroll**: precio grande, título, placa y el botón
+      **"Verificar esta placa"**.
+- [ ] Orden de la página: **foto → precio → ficha técnica → datos oficiales → historial**.
+- [ ] La ficha se ve en **tarjetas por bloque con ícono** (⚙️ motor, 🚙 carrocería,
+      🪑 interiores, ✨ extras).
+- [ ] En escritorio la galería muestra foto grande + miniaturas clickeables (como antes).
+
+### K. "Datos oficiales" mini en el anuncio
+
+- [ ] En `/marketplace/{id}` la sección "Datos oficiales" es **corta: 3-4 líneas**
+      (Matrícula / Multas / Total si existe), no el bloque grande de antes.
+- [ ] Trae **"Ver detalle completo →"** que abre `/consultar/{placa}` (la consulta compacta).
+- [ ] Sin datos en caché muestra "Datos oficiales en proceso" **sin romper la página**.
+- [ ] **Sin sesión no se ven montos de multas** (eso es microdesbloqueo de pago): solo
+      "Con pendientes" / "Al día".
+
+### L. Puntos de entrada que faltaban
+
+- [ ] `/marketplace`: bajo el encabezado hay un bloque visible
+      **"🔗 ¿Viste un auto en Facebook u OLX?"** con el botón
+      **"Referenciar anuncio externo"** → lleva al formulario reducido existente.
+      Al lado, "Mis referencias".
+- [ ] Home `/`: en la sección "Autos en venta" también está
+      **"🔗 Referenciar anuncio externo"** junto a "Ver todos".
+- [ ] `/marketplace/mis-publicaciones`: cada tarjeta muestra **botones visibles**
+      **📷 Fotos** y **📋 Ficha técnica** (antes eran enlaces de texto).
+- [ ] **📷 Fotos abre el uploader de esa publicación en el mismo lugar** — el vendedor llega
+      a subir fotos **sin rehacer el wizard**. Subir una foto ahí funciona.
+- [ ] El botón activo se resalta y el texto cambia a "Cerrar fotos" / "Cerrar ficha".
+- [ ] El CTA "Completa tu ficha (N %)" sigue apareciendo mientras la ficha esté bajo 100 %.
+
+**Hallazgos del guión v4:**
+- (anotar aquí)
+
 ## 4. De la versión test a productivo F1 (cuando el guión pase limpio)
 
 1. **Cerrar compuerta M2** en `plan_market_autos.md` + entrada en bitácora con los hallazgos.
