@@ -12,6 +12,8 @@
 # 3. Render lee este archivo y crea el servicio web (Docker).
 # 4. Antes del primer deploy, configurar manualmente en el dashboard:
 #    DATABASE_URL (cadena de Neon, secreta), JWT_SECRET_KEY y CORS_ORIGINS.
+#    Para las fotos del marketplace (M2), también: CLOUDINARY_CLOUD_NAME,
+#    CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET (van como sync:false, no se commitean).
 #
 # La BD es externa (Neon, PostgreSQL 16+). No se provisiona Postgres en Render
 # (el plan free expira a 90 días). La DATABASE_URL es secreta → sync: false,
@@ -47,3 +49,14 @@ services:
         sync: false   # configurar con la URL del frontend Next.js cuando exista
       - key: ADMIN_EMAILS
         sync: false   # lista separada por comas; modera referencias del marketplace
+      # Cloudinary (M2 fotos): subida firmada desde el navegador; el backend solo firma.
+      # Los tres van en el dashboard (repo público → no se commitean, ni siquiera cloud/api_key).
+      # Sin ellos, POST /marketplace/publicaciones/{id}/fotos/firma responde 503.
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false   # SECRETO — nunca en el repo
+      - key: CLOUDINARY_UPLOAD_FOLDER
+        value: revisa-carro-ec/publicaciones
