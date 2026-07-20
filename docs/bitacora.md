@@ -10,6 +10,77 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-20 — Market MC1: portada del market para el comprador
+
+**Repos:** ambos (frontend el grueso; backend **una migración mínima**). Primera etapa del
+**carril C (comprador)** — hasta aquí todo el market era carril V (vendedor). Diseño en
+[producto/experiencia_comprador.md](producto/experiencia_comprador.md) §2. Revisado por
+**revisor-calidad** (**APTO**, sin bloqueantes). **Commit sin push.**
+
+**Qué se hizo — `/marketplace` deja de ser un feed plano y pasa a portada curada**
+Los 7 bloques del doc §2, móvil primero: buscador protagonista · **Tus favoritos** (arriba
+del todo, solo logueado) · Destacados premium en carrusel · **Verificados y transparentes**
+(`verificado` o ficha ≥ 80 %) · **Explora por marca** · Recién publicados · **Por
+presupuesto** (< $10k · $10-20k · > $20k) · Referencias externas al pie.
+**Regla dura respetada: un bloque sin contenido no se renderiza** — nada de encabezados
+sobre grillas vacías, incluidas las bandas de presupuesto sin stock.
+
+**♡ favorito con un toque en toda tarjeta.** Reutiliza el módulo `favoritos` existente,
+que estaba subutilizado desde la Fase 3. Va sobre la foto, es un `<button>` accesible
+(`aria-pressed`) con `preventDefault + stopPropagation` para no disparar el `Link` de la
+tarjeta. Optimista con rollback; 409 = éxito idempotente. **Anónimo:** invitación amable
+("Guarda este auto para verlo después"), nunca un 401 crudo ni una redirección de golpe.
+
+**Decisiones de diseño**
+- **Sin endpoints de agregados.** `GET /marketplace/feed` ya devuelve todas las activas sin
+  límite, así que las **marcas con stock** y los conteos se derivan en el cliente. Un
+  endpoint habría duplicado la fuente de verdad a cambio de nada. Las marcas **nunca** se
+  hardcodean (compuerta MC1): si no hay ningún Kia publicado, no existe el chip "Kia".
+- **El buscador filtra en cliente** sobre el feed ya cargado. Los filtros reales con query
+  params y paginación por cursor son **MC2**; adelantarlos aquí habría sido trabajo tirado.
+- **Favoritos sigue siendo por PLACA, no por `publicacion_id`** (§10.4). El cruce en "Tus
+  favoritos" no asume unicidad: si dos publicaciones comparten placa aparecen las dos, y una
+  placa favorita sin publicación simplemente no aparece.
+
+**Backend (mínimo, una migración): `0020_favorito_precio`**
+`precio_al_guardar` Numeric(12,2) **nullable** en `vehiculos_favoritos`. Es la única pieza
+que faltaba para el **badge de baja de precio**: sin persistir el precio al momento de
+guardar no hay contra qué comparar. Nullable a propósito y sin backfill — los favoritos
+previos y las placas sin publicación no tienen referencia, y un `0` fingido se leería como
+"bajó de precio", que es peor que no saber. El badge solo se muestra en **bajada**; una
+subida no se anuncia. La comparación la hace el frontend con el precio que ya trae del feed.
+
+**Correcciones aplicadas tras la revisión**
+1. **Bug de favoritos:** al recuperar de un 409, si la relectura de `/favoritos` fallaba, el
+   `?? []` **vaciaba el mapa entero** — se apagaban todos los ♡ y desaparecía "Tus
+   favoritos" aunque en BD siguieran guardados. Ahora ante fallo se conserva el estado.
+2. **Rendimiento móvil:** "Recién publicados" y "Verificados" se renderizaban **completos**.
+   Con el feed sin límite, un auto premium+verificado+favorito se pintaba 4 veces y con ~300
+   activas la portada montaba cientos de tarjetas con sus imágenes — en celulares de gama
+   baja, que son nuestro público. Limitados a 12, con aviso de cuántas hay en total.
+3. Badge de baja visible en **todos** los bloques, no solo en "Tus favoritos".
+4. `haySesion` unificado con `tieneSesion()`: antes confundía "sin sesión" con "backend
+   caído" y quedaba divergente del `alternar`.
+
+**Verificación:** `import main` OK · `alembic heads` → **`0020`, cabeza única** ·
+`tsc --noEmit` limpio · lint **4 errores preexistentes, 0 nuevos** · `build` OK.
+Privacidad confirmada por el revisor: los **borradores son estructuralmente inalcanzables**
+desde la portada (el feed filtra `estado == ACTIVA`), y no se agregó ni un campo al feed.
+
+**Pendientes**
+- ⚠️ **Marcos debe correr `alembic upgrade head`** (0020) antes de probar: sin ella el ♡
+  falla al guardar. Sigue pendiente también la **0019** de M2.8.
+- Correr el **guión v6** ([guion_prueba_market.md](guion_prueba_market.md) §3-sexies,
+  secciones R–U), **en celular**.
+- Deuda anotada para MC2: el corte a 12 se resuelve naturalmente con la paginación por
+  cursor; falta la barra sticky de búsqueda al scrollear (transversal del doc §2).
+- Deuda transversal (preexistente, no de MC1): los `Decimal` de dinero no tienen cota
+  superior (`le=`/`decimal_places`), así que un desbordamiento de `Numeric(12,2)` daría
+  `DataError` → 500. Afecta a todos los precios del proyecto, no solo a este campo.
+- Sigue abierta la deuda de M2.6: `DatosOficialesMini` dispara scraping en cache miss.
+
+---
+
 ## 2026-07-20 — Market M2.9: detalle local de las referencias externas
 
 **Repos:** ambos (frontend el grueso; backend **un endpoint nuevo**, sin migración).

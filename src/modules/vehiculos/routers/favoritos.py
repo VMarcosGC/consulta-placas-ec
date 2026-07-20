@@ -29,6 +29,7 @@ def agregar_favorito(
         usuario_id=usuario.id,
         placa=datos.placa,
         nota=datos.nota,
+        precio_al_guardar=datos.precio_al_guardar,
     )
     sesion.add(favorito)
     try:

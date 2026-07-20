@@ -367,6 +367,69 @@ mobile-first y ahí es donde se nota.
 **Hallazgos del guión v5:**
 - (anotar aquí)
 
+## 3-sexies. Guión v6 — MC1: portada del market para el comprador
+
+Primera etapa del **carril C (comprador)**. Diseño en
+[producto/experiencia_comprador.md](producto/experiencia_comprador.md) §2.
+⚠️ **Requiere `alembic upgrade head`** (migración **0020**): sin ella el ♡ falla al guardar.
+
+Probar **en celular** (o DevTools ~360 px) además de escritorio.
+
+### R. Portada: bloques curados y buscador
+
+- [ ] `/marketplace` **anónimo**: arriba, buscador grande **"¿Qué auto buscas?"**.
+- [ ] **No** aparece el bloque "Tus favoritos" (es solo para logueados).
+- [ ] Los bloques que se ven tienen todos contenido: **ningún encabezado con la grilla
+      vacía** debajo. Con la BD sin publicaciones, sale el estado vacío y **nada más**.
+- [ ] **Destacados**: se desliza en horizontal con enganche (scroll-snap) en móvil.
+- [ ] **✓ Verificados y transparentes**: solo autos verificados **o** con ficha ≥ 80 %.
+      Un auto con ficha al 40 % y sin sello **no** debe aparecer aquí.
+- [ ] **Explora por marca**: los chips salen del **stock real** (si no hay ningún Kia
+      publicado, no existe el chip "Kia") y traen su conteo. `CHEVROLET` y `chevrolet`
+      cuentan como **un solo** chip.
+- [ ] Clic en un chip de marca → filtra; clic en una banda de presupuesto → filtra; volver
+      a tocar la banda la **apaga**.
+- [ ] Escribir en el buscador (ej. `chevrolet`) → **desaparecen los bloques curados** y
+      sale una grilla plana con "N resultados" + **"Limpiar búsqueda"**, que los devuelve.
+- [ ] Con más de 12 activas: "Recién publicados" muestra **12** y avisa cuántas hay en
+      total (el resto se alcanza por el buscador).
+- [ ] **Referencias externas** al pie, con el copy exacto
+      **"Referencia externa · datos no verificados"**.
+- [ ] Siguen accesibles: **"+ Publicar mi auto"**, "Mis publicaciones", "Mis referencias" y
+      el bloque **"🔗 ¿Viste un auto en Facebook u OLX?"**.
+- [ ] En móvil la página **no scrollea en horizontal** (solo el carrusel de destacados).
+
+### S. ♡ Favorito con un toque
+
+- [ ] **Anónimo**: tocar el ♡ sobre la foto → **no navega al detalle** y **no** aparece un
+      error 401: sale la invitación amable *"Guarda este auto para verlo después"* con
+      **"Crear cuenta gratis"**. Se puede cerrar con la ✕.
+- [ ] **Logueado**: tocar el ♡ → se pinta al instante; **recargar** y sigue marcado.
+- [ ] Aparece el bloque **"♥ Tus favoritos"** arriba de todo.
+- [ ] Tocar el ♥ de nuevo lo quita al instante; si era el único, **el bloque desaparece**.
+- [ ] El ♡ **nunca abre el detalle** del auto (la tarjeta entera sí, tocando fuera del ♡).
+- [ ] Referencia externa **sin placa** → la tarjeta **no muestra ♡** (no hay favorito
+      posible: los favoritos son por placa). Con placa, sí lo muestra.
+- [ ] Con el backend apagado, tocar el ♡ **revierte** el corazón (no queda mintiendo).
+
+### T. Badge de baja de precio
+
+- [ ] Guarda un auto en favoritos (ej. a $12.000). Como dueño, **baja** su precio a $10.500.
+- [ ] Vuelve a `/marketplace` → en la tarjeta sale **"↓ Bajó $1.500"**.
+- [ ] **Sube** el precio en vez de bajarlo → **no aparece ningún badge** (una subida no se
+      anuncia).
+- [ ] Un favorito guardado **antes** de la migración 0020, o de una placa **sin
+      publicación**, no muestra badge y **no rompe** la portada (es silencioso).
+
+### U. Privacidad (no negociable)
+
+- [ ] Ningún **borrador** aparece en ningún bloque de la portada.
+- [ ] La portada anónima **no muestra** VIN completo ni el nombre del dueño.
+- [ ] Sin sesión, `GET /favoritos` no se llama (y el bloque de favoritos no existe).
+
+**Hallazgos del guión v6:**
+- (anotar aquí)
+
 ## 4. De la versión test a productivo F1 (cuando el guión pase limpio)
 
 1. **Cerrar compuerta M2** en `plan_market_autos.md` + entrada en bitácora con los hallazgos.

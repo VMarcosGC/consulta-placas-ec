@@ -1,6 +1,7 @@
 from datetime import datetime
+from decimal import Decimal
 from sqlalchemy import (
-    String, DateTime, BigInteger, ForeignKey, func, UniqueConstraint,
+    String, DateTime, BigInteger, Numeric, ForeignKey, func, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,6 +30,14 @@ class VehiculoFavorito(Base):
     )
     placa: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     nota: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Precio del anuncio en el momento de guardarlo (MC1, carril comprador). Sirve de
+    # referencia para avisar de una baja de precio: el frontend lo compara contra el
+    # precio actual que ya trae del feed y pinta el badge si bajó. Nullable porque los
+    # favoritos previos no lo tienen y porque una placa favorita puede no tener
+    # publicación (el favorito es por placa, no FK); sin referencia, no hay badge.
+    precio_al_guardar: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=12, scale=2), nullable=True
+    )
     creado_en: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

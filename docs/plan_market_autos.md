@@ -245,7 +245,54 @@ ni por URL pública; imposible activar bajo el umbral; light y premium con ficha
 - **Falta para cerrar:** guión v5 ([guion_prueba_market.md](guion_prueba_market.md)
   §3-quinquies, secciones M–P), tras aplicar la migración.
 
-### M3 — Búsqueda y filtros del feed
+---
+
+## 2-bis. Carril COMPRADOR (decisión 2026-07-20)
+
+El desarrollo del market se divide en dos carriles: **V (vendedor)** — M0→M2.9, publicación
+en sus 3 vías — y **C (comprador)** — navegación, descubrimiento y retención. Diseño
+completo en [docs/producto/experiencia_comprador.md](producto/experiencia_comprador.md).
+
+### MC1 — Portada del market para el comprador
+Rediseño de `/marketplace` según el doc §2: buscador protagonista + bloques curados
+(Destacados premium · Verificados/transparentes · Por marca · Recién publicados · Por
+presupuesto · Referencias al pie) + **♡ favorito en toda tarjeta** + "Tus favoritos" con
+badge de baja de precio para usuarios logueados. Bloques vacíos no se muestran.
+**Compuerta MC1:** portada operativa en móvil y desktop con datos reales; favoritos
+funcionando de punta a punta; ningún bloque hardcodeado (marcas derivadas del stock).
+
+**Estado (2026-07-20): código implementado, compuerta ABIERTA a la espera de la prueba manual.**
+⚠️ **Marcos debe correr `alembic upgrade head`** (migración **0020**, y la **0019** de M2.8
+que sigue pendiente) antes de probar: sin ella el ♡ falla al guardar.
+- Portada con los 7 bloques del doc §2; **bloque sin contenido no se renderiza**.
+- **♡ en toda tarjeta** reutilizando el módulo `favoritos` (por placa, §10.4, subutilizado
+  desde la Fase 3): `<button>` accesible dentro del `Link`, optimista con rollback, 409
+  idempotente, y anónimo → invitación amable (nunca 401 crudo).
+- **Sin endpoints de agregados**: el feed ya devuelve todas las activas, así que marcas y
+  conteos se derivan en el cliente. **Marcas nunca hardcodeadas** (exigencia de la compuerta).
+- El **buscador filtra en cliente**; los filtros con query params y cursor son MC2.
+- **Backend mínimo**: migración `0020` con `precio_al_guardar` nullable en
+  `vehiculos_favoritos` — única pieza que faltaba para el **badge de baja de precio** (solo
+  en bajada; sin precio guardado, silencioso).
+- Verificado: `import main` OK, `alembic heads` = `0020` (cabeza única), `tsc --noEmit`
+  limpio, lint 4 preexistentes (0 nuevos), `build` OK.
+- Revisión `revisor-calidad`: **APTO**, sin bloqueantes. Se corrigieron en la sesión un bug
+  de favoritos (una relectura fallida vaciaba el mapa entero) y el renderizado sin límite de
+  dos bloques (cientos de tarjetas en gama baja); ver bitácora.
+- **Falta para cerrar:** guión v6 ([guion_prueba_market.md](guion_prueba_market.md)
+  §3-sexies, secciones R–U), **en celular**.
+
+### MC2 — Búsqueda y filtros (absorbe la antigua M3)
+Backend: feed con query params (`tipo`, `combustible`, `transmision`, `precio_min/max`,
+`anio_min/max`, `q`) + **paginación por cursor** (la app futura la reutiliza tal cual).
+Frontend: barra de filtros con estado en la URL.
+**Compuerta MC2:** filtros combinables sin N+1; sin regresión del orden del feed.
+
+### MC3 — Feed vertical estilo reels (app, futuro)
+Swipe por anuncio (foto full-screen, precio, ficha resumida, ♡). Condicionado a: web
+validada + volumen de fotos de calidad. No construir antes.
+
+### M3 — Búsqueda y filtros del feed → **absorbida por MC2** (ver arriba)
 **Repos:** ambos
 - Backend: `GET /marketplace/feed` con query params: `tipo`, `combustible`,
   `transmision`, `precio_min/max`, `anio_min/max`, `q` (marca/modelo/título). Los
