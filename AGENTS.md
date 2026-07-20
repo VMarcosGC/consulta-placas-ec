@@ -258,6 +258,31 @@ Opciones para mitigar:
 
 Antes de proponer cambios en `src/modules/consulta/services/amt.py` o `src/modules/consulta/services/fiscalia.py` para "arreglar" un error en producción, verificar si está corriendo desde IP residencial (local) o datacenter (Render). El skill [scraping-respetuoso](.claude/skills/scraping-respetuoso/SKILL.md) tiene la matriz de síntomas.
 
+### Stand-by de fuentes en la web (M2.5, 2026-07-19)
+
+**Decisión de producto (Marcos):** la web solo muestra las fuentes que hoy entregan datos
+**sin captcha** — **ANT** y **AMT/EPMTSD** (vía worker residencial). **SRI y FGE salen de toda la
+UI**: no aparecen sus tarjetas de datos, ni las tarjetas *passthrough* / enlaces al portal
+oficial, ni sus chips en el tablero "Fuentes consultadas", ni se anuncian en el pie ni en la
+página de precios. Motivo: ambas exigen un captcha que no podemos resolver (§Limitación 1), y
+mostrarlas solo genera expectativa que el producto no cumple.
+
+**El backend NO se toca.** `consultar_sri` (passthrough `consulta_externa`) y `consultar_fiscalia`
+siguen implementados y **dormidos**: se siguen consultando y consolidando, pero el frontend los
+oculta. La decisión es de **presentación** y por eso es reversible sin tocar código de servicios.
+
+| Dónde | Cómo se controla |
+|---|---|
+| Frontend (`consulta-placas-web`) | Env var **`NEXT_PUBLIC_FUENTES_INACTIVAS`** (default `sri,fge`), leída en [`src/lib/fuentes.ts`](https://github.com/VMarcosGC/consulta-placas-web) mediante `fuenteInactiva(clave)`. |
+| Backend (este repo) | Nada. Los servicios quedan intactos. |
+
+**Reactivar una fuente** = cambiar la variable en Vercel y volver a desplegar el frontend
+(las `NEXT_PUBLIC_*` se inlinean en build). `""` reactiva todas; `"fge"` reactiva solo el SRI.
+No hace falta redeploy del backend ni migración.
+
+> Nota: hasta M2.5 el frontend tenía la lista hardcodeada como `["FGE", "EPMTSD"]`. Con este
+> cambio **EPMTSD vuelve a mostrarse** (es una fuente activa vía worker) y **SRI se apaga**.
+
 ---
 
 ## 9. Privacidad y datos sensibles

@@ -10,6 +10,67 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-19 — Market M2.5: stand-by de fuentes + wizard de publicación + referencias
+
+**Repos:** el grueso en `consulta-placas-web` (frontend); en este repo **solo documentación**.
+Decisión de producto de Marcos (plan_market_autos.md §M2.5). Implementado por el
+**controller**; revisado por **revisor-calidad**. **Commit sin push** — Marcos prueba primero.
+
+**El backend NO se tocó.** Verificado: sin cambios en `src/` ni en `alembic/`. Los servicios
+de SRI y FGE quedan vivos y **dormidos**; el ocultamiento es de presentación y reversible.
+
+**Qué se hizo**
+
+1. **Stand-by de fuentes.** Nuevo `src/lib/fuentes.ts` con `fuenteInactiva(clave)`, manejado
+   por la env var **`NEXT_PUBLIC_FUENTES_INACTIVAS`** (default `sri,fge`; `""` reactiva todo).
+   SRI y FGE salen de **toda** la UI: tarjeta "Valores SRI", enlace passthrough al portal del
+   SRI, chips del tablero "Fuentes consultadas", lista del pie de página, filas de `/precios`
+   (SRI y alertas legales) y metadatos SEO. El total "A pagar" del encabezado ya no suma
+   valores del SRI (mostrar un monto sin su fuente era inexplicable). Documentado en
+   **AGENTS.md §8**. ⚠️ **EPMTSD vuelve a mostrarse**: la lista vieja estaba hardcodeada como
+   `["FGE","EPMTSD"]` y EPMTSD sí es una fuente activa vía worker residencial. Su enlace
+   oficial pasó a `destacado` al quedar como acción principal de la sección.
+2. **Wizard de publicación (3 pasos).** `/marketplace/publicar` pasó de formulario suelto a
+   **datos básicos → ficha técnica → fotos**, con barra de pasos. Al crear la publicación
+   **navega automático al paso 2** (antes el usuario caía en el feed y la ficha nacía vacía —
+   ese era el problema que motivó la etapa). "Completar después" siempre disponible. Se
+   conservan vinculación con el garage, selector de plan y manejo de 401/402.
+   `FichaEditor` acepta un `onCompletitud` opcional (patrón latest-ref) para que el
+   contenedor refresque el % en vivo.
+3. **Transparencia de la ficha.** Umbrales en `src/lib/ficha.ts`
+   (`UMBRAL_FICHA_INCOMPLETA = 30`, `FICHA_COMPLETA = 100`). CTA persistente
+   **"Completa tu ficha (N %)"** en mis-publicaciones (abre el editor, el % baja en vivo) y
+   en `/marketplace/{id}` **solo si el visitante es el dueño**. Bajo 30 %, feed y detalle
+   público muestran **"Ficha incompleta"** en lugar del chip de porcentaje (`null` cuenta
+   como incompleta).
+4. **Referencias externas.** Copy exacto **"Referencia externa · datos no verificados"** en
+   el feed (`ListingCard`) y en `mis-referencias`. El formulario de referenciar no se tocó.
+   De paso, corregido un voseo preexistente ("Podés" → "Puedes") en mis-referencias.
+
+**Verificación**
+- `npx tsc --noEmit` limpio; `npm run lint` → **4 errores, los 4 preexistentes** (ninguno
+  nuevo); `npm run build` OK (16 rutas).
+- Sobre el **HTML renderizado** del build: el pie lista solo ANT y AMT; `/precios` ya no
+  muestra las filas de SRI ni de alertas legales.
+- **revisor-calidad**: 2 hallazgos MAYORES, **ambos corregidos en la sesión** —
+  (a) `.env.example` quedaba fuera del repo por el patrón `.env*` del `.gitignore`
+  (se agregó `!.env.example`, si no la variable nueva quedaba sin documentar);
+  (b) `hayFuentesEnProceso` no filtraba fuentes ocultas, así que una FGE `en_proceso` dejaba
+  el perfil repollando cada 4 s con el encabezado en "Consultando…" para siempre.
+  Sin hallazgos de privacidad: el CTA del dueño no dispara nada sin sesión y falla en silencio.
+
+**Pendientes**
+- **Correr el guión de prueba v2** ([guion_prueba_market.md](guion_prueba_market.md) §3-bis,
+  secciones A–E) en local. Con eso se cierran **M2.5 y M2** juntas.
+- **Push pendiente** de ambos repos (Marcos prueba antes).
+- Menor (anotado por el revisor, diferido a M3): el detalle público descarga
+  `listarMisPublicaciones()` completo solo para saber si el anuncio es propio; un campo
+  `es_mia` en el detalle lo resolvería.
+- Menor: el botón del paso 1 ya no dice "Publicar Premium/gratis"; el aviso de que Premium
+  cobra tokens vive solo en el selector de plan.
+
+---
+
 ## 2026-07-19 — Market M2 (frontend): uploader + galería de fotos
 
 **Repo:** `consulta-placas-web`. Implementado por el **controller** (el subagente dev-frontend se

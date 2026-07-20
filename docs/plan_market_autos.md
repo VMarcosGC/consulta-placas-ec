@@ -95,6 +95,58 @@ sirve `activa`).
 **Compuerta M2:** subir/borrar/reordenar funciona; URLs largas no truncadas (aprender de
 `imagen_url` 2048); el feed usa la primera foto como portada.
 
+### M2.5 — Publicación transparente: las 3 vías del vendedor ← **etapa vigente**
+**Decisión de producto (Marcos, 2026-07-19).** Un vendedor publica de tres formas:
+1. **Manual (F1, la base):** wizard de 3 pasos — datos básicos → **ficha técnica completa
+   (3 bloques, todos los campos visibles)** → fotos. Al crear la publicación se lo lleva
+   directo a la ficha (hoy queda suelto y la ficha nace vacía). Puede posponer, pero con
+   CTA persistente "Completa tu ficha (N %)" y, bajo 30 % de completitud, el feed/detalle
+   muestran "Ficha incompleta" en vez del chip de porcentaje.
+2. **Con IA por fotos (futuro, etapa M6):** de las fotos se extrae el detalle para
+   prellenar los 3 bloques; el vendedor valida antes de guardar. No se construye ahora.
+3. **Referencia externa (FB/OLX):** formulario reducido (ya existe) + etiqueta visible
+   **"Referencia externa · datos no verificados"** en feed y detalle (copy no agresivo).
+
+**Consulta por placa en stand-by parcial:** la web solo expone fuentes que entregan datos
+sin captcha — ANT y AMT/EPMTSD (worker). SRI y FGE salen de la UI (ni tarjetas
+passthrough), desactivables por env var para reactivar sin redeploy. El código backend
+queda DORMIDO tal cual (reversible).
+
+**Compuerta M2.5:** wizard operativo end-to-end; publicación nueva aterriza en la ficha;
+etiquetas de referencia externa y ficha incompleta visibles; SRI/FGE ausentes de la web;
+guión de prueba v2 pasado. (La compuerta M2 —fotos— se cierra junto con esta, con el
+mismo guión.)
+
+**Estado (2026-07-19): código implementado, compuerta ABIERTA a la espera de la prueba manual.**
+Todo el cambio es de frontend (`consulta-placas-web`); el backend no se tocó.
+- Stand-by por env var `NEXT_PUBLIC_FUENTES_INACTIVAS` (default `sri,fge`) →
+  `src/lib/fuentes.ts`; documentado en AGENTS.md §8. **EPMTSD se reactiva** (era una lista
+  hardcodeada `["FGE","EPMTSD"]`).
+- Wizard de 3 pasos en `/marketplace/publicar`; `FichaEditor` acepta `onCompletitud`.
+- CTA "Completa tu ficha (N %)" en mis-publicaciones y en el detalle **solo para el dueño**;
+  "Ficha incompleta" bajo 30 % en feed y detalle público (`UMBRAL_FICHA_INCOMPLETA`).
+- Etiqueta "Referencia externa · datos no verificados" en feed y en mis-referencias.
+- Verificado: `tsc --noEmit` limpio, `npm run lint` = 4 errores preexistentes (0 nuevos),
+  `npm run build` OK. Revisión `revisor-calidad` con 2 hallazgos MAYORES, **ambos corregidos**.
+- **Falta para cerrar:** correr el **guión de prueba v2**
+  ([guion_prueba_market.md](guion_prueba_market.md) §3-bis, secciones A–E) contra local.
+
+### M2.6 — Market-first + datos oficiales automáticos (sigue a M2.5)
+**Decisión de producto (Marcos, 2026-07-19).**
+1. **Reposicionamiento: el producto ES el market de autos.** La consulta por placa pasa a
+   ser herramienta secundaria ("adicional") hasta resolver los bloqueos de las páginas
+   estatales. Landing/hero, navegación, títulos y copy giran a market: comprar/vender con
+   transparencia. El feed gana protagonismo en la home.
+2. **Enriquecimiento oficial automático:** al ingresar la placa en el paso 1 del wizard,
+   el frontend dispara en segundo plano el `GET /consultar/{placa}` existente (fire &
+   forget) → los datos quedan cacheados en `consultas` (regla §10.2 intacta: el CRUD de
+   publicaciones jamás invoca scraping). El detalle público del anuncio muestra la sección
+   **"Datos oficiales"** (solo fuentes activas: ANT, AMT) — matrícula y multas visibles
+   junto a la ficha del vendedor.
+**Compuerta M2.6:** home market-first; publicar dispara la consulta sin bloquear el flujo
+(fallo de fuente = silencioso para el vendedor); detalle muestra datos oficiales cuando
+existen en caché; consulta por placa sigue accesible como sección secundaria.
+
 ### M3 — Búsqueda y filtros del feed
 **Repos:** ambos
 - Backend: `GET /marketplace/feed` con query params: `tipo`, `combustible`,
@@ -120,6 +172,13 @@ del patio es comercial (pública), la del particular sigue protegida.
   contador de clics como métrica de demanda). Chat interno queda para después — evitar
   construir mensajería antes de validar demanda.
 **Compuerta M5:** el vendedor elige exponer o no su canal; nada de PII sin opt-in.
+
+### M6 — Registro asistido por IA (vía 2 de publicación)
+- De las fotos del vehículo se extrae el detalle (visión) para **prellenar** los 3 bloques
+  de la ficha; el vendedor **valida campo por campo** antes de guardar (la IA propone, el
+  humano firma — coherente con "declarado por el vendedor").
+- Evaluar costo por análisis en `plan_costos.md` antes de construir (F2+).
+**Compuerta M6:** precisión validada sobre ≥20 autos reales; nunca guarda sin validación.
 
 ---
 
