@@ -243,3 +243,37 @@ def moderar_referencia(
     sesion.commit()
     sesion.refresh(ref)
     return PublicacionReferenciadaSalida.model_validate(ref)
+
+
+# NOTA de orden: esta ruta con path param dinámico va AL FINAL del router. Si se
+# declarara antes que las literales GET (`/mias`, `/pendientes`), "mias" intentaría
+# parsearse como int y esas rutas quedarían inalcanzables (422). No mover hacia arriba.
+@router.get("/{referencia_id}", response_model=PublicacionReferenciadaSalida)
+def detalle_referencia(
+    referencia_id: int,
+    sesion: Session = Depends(obtener_sesion),
+):
+    """Detalle público de una referencia externa (M2.9).
+
+    Anónimo: alimenta la página local `/marketplace/referencias/{id}`, donde el visitante
+    ve fotos y detalle ANTES de decidir salir al portal de origen.
+
+    Solo sirve las **aprobadas y activas**: una referencia `pendiente` o `rechazada` no
+    puede filtrarse por URL directa (mismo criterio que el feed). 404 indistinto, para no
+    revelar si el id existe pero está sin moderar.
+    """
+    ref = sesion.execute(
+        select(PublicacionReferenciada).where(
+            and_(
+                PublicacionReferenciada.id == referencia_id,
+                PublicacionReferenciada.estado_moderacion
+                == EstadoModeracion.APROBADA.value,
+                PublicacionReferenciada.activa.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Referencia no encontrada"
+        )
+    return PublicacionReferenciadaSalida.model_validate(ref)

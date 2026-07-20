@@ -10,6 +10,58 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-20 — Market M2.9: detalle local de las referencias externas
+
+**Repos:** ambos (frontend el grueso; backend **un endpoint nuevo**, sin migración).
+Ajuste de UX pedido por Marcos sobre M2.8. Revisado por **revisor-calidad** (**APTO**, sin
+bloqueantes). **Commit sin push**.
+
+**El problema:** la tarjeta de referencia era un `<a>` directo al portal externo. Un clic
+te expulsaba del sitio **sin haber visto nada** — ni las fotos ni el detalle que el
+aportante se había tomado el trabajo de copiar en M2.8.
+
+**Qué se hizo — dos interacciones separadas**
+1. **Clic en la tarjeta → detalle LOCAL** `/marketplace/referencias/{id}`: aviso ámbar con
+   el copy exacto "Referencia externa · datos no verificados" **arriba del todo** (antes de
+   la galería y del precio: el visitante sabe qué mira antes de leer los datos), galería
+   con swipe en móvil, precio, descripción, ciudad, kilometraje y portal de origen. Si la
+   referencia trae placa, también "Verificar esta placa".
+2. **Botón explícito "Ver anuncio original en {fuente} ↗"** — la única salida al portal
+   externo, en pestaña nueva (`rel="noopener noreferrer"`), avisando que abre otro sitio.
+   En la tarjeta del feed el texto pasó de "Ver en {fuente} ↗" a "Ver detalle · {fuente}"
+   (sin flecha: ese clic ya no sale del sitio).
+
+**Backend (no estaba pedido, pero era necesario):** `GET /marketplace/referencias/{id}`
+público. No existía forma de traer UNA referencia, y resolverlo desde el feed no servía
+porque está capado a 30 (`LIMITE_REFERENCIADAS_FEED`): una referencia más antigua habría
+dado 404. Sirve **solo aprobadas y activas** (mismo filtro que el feed, en el `WHERE`), con
+404 indistinto — una `pendiente` o `rechazada` **no se puede ver por URL directa**, que era
+el punto crítico de abrir una superficie pública nueva. Declarado **al final** del router
+para no capturar las literales `GET /mias` y `GET /pendientes`.
+
+**Verificación**
+- Backend: `import main` → **64 rutas**; orden de rutas confirmado sobre las registradas
+  (`/mias` y `/pendientes` siguen antes del dinámico); `alembic heads` → `0019` (sin
+  migración nueva).
+- Frontend: `tsc --noEmit` limpio; lint **4 errores, los 4 preexistentes**; `build` OK con
+  la ruta `/marketplace/referencias/[id]` registrada.
+- Revisor: sin bloqueantes. Confirmó el filtro aprobada+activa, el orden de rutas, el
+  `rel="noopener noreferrer"` y que `PublicacionReferenciadaSalida` no expone `usuario_id`
+  ni datos del aportante (no se amplía la superficie de datos, solo el alcance).
+- Menores del revisor, **corregidos**: comentario de cabecera de `ListingCard` que seguía
+  diciendo "link vivo al portal", y las dos menciones desactualizadas en **AGENTS.md §10.6**
+  y `proyecto-snapshot.md`. (`docs/diagramas/modelo_datos.mermaid` dice "enlace vivo" sobre
+  la columna `url_externa`, donde **sigue siendo cierto** — no se tocó.)
+
+**Pendientes**
+- Guión de prueba: nueva **sección Q** en [guion_prueba_market.md](guion_prueba_market.md)
+  (§3-quinquies) y corregido el paso de la sección E que describía el comportamiento viejo.
+- Sigue pendiente ⚠️ **`alembic upgrade head` (0019)** de M2.8 y el push de ambos repos.
+- Anotado por el revisor (no es deuda nueva, es el patrón del proyecto): la página es
+  client-only, así que los detalles de referencia no tienen SEO ni preview al compartirse.
+
+---
+
 ## 2026-07-19 — Market M2.8: borrador con umbral, ficha para todos, garage y referencias ricas
 
 **Repos:** ambos. Backend con **migración `0019`** (⚠️ **pendiente de aplicar en Neon: la

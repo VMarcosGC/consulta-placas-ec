@@ -138,7 +138,8 @@ Como **vendedor** con sesión iniciada:
 
 - [ ] Feed `/marketplace`, sección "Referencias externas": cada tarjeta muestra el copy
       **exacto** "Referencia externa · datos no verificados" + el nombre de la fuente aparte.
-- [ ] La tarjeta sigue siendo un **enlace vivo** al anuncio original (abre en pestaña nueva).
+- [ ] ~~La tarjeta es un enlace vivo al anuncio original~~ → **cambiado en M2.9**: ahora la
+      tarjeta abre el **detalle local**. Ver sección Q.
 - [ ] `/marketplace/mis-referencias`: la misma etiqueta aparece en cada referencia propia.
 - [ ] El **formulario de referenciar no cambió** (sigue reducido).
 
@@ -343,6 +344,25 @@ mobile-first y ahí es donde se nota.
 - [ ] Con más de una foto, la portada muestra el contador **📷 N**.
 - [ ] **Editar el contenido** de una referencia ya aprobada (descripción o fotos) → vuelve
       a **pendiente** (anti bait-and-switch).
+
+### Q. Detalle local de la referencia (M2.9 — dos interacciones separadas)
+
+- [ ] Feed `/marketplace`, sección "Referencias externas": al hacer clic en una tarjeta
+      **NO se sale del sitio**; abre `/marketplace/referencias/{id}` dentro de la web.
+- [ ] En la tarjeta el texto dice **"Ver detalle · {fuente}"** (sin la flecha ↗ de "salgo
+      del sitio").
+- [ ] En el detalle, **arriba del todo**, el aviso ámbar con el copy exacto
+      **"Referencia externa · datos no verificados"** y la explicación de que la plataforma
+      no verifica ni intermedia.
+- [ ] Se ven las **fotos** (galería con swipe en móvil), **precio**, título,
+      **descripción**, **ciudad**, **kilometraje** y el portal de origen.
+- [ ] Botón explícito **"Ver anuncio original en {fuente} ↗"** → abre la URL externa en
+      **pestaña nueva** (la web queda abierta detrás).
+- [ ] Si la referencia trae placa, aparece también **"Verificar esta placa"** → consulta.
+- [ ] **Una referencia `pendiente` o `rechazada` no se puede ver por URL directa**: abrir
+      `/marketplace/referencias/{id}` de una sin aprobar → "No encontramos esta referencia"
+      (404 del backend, indistinto).
+- [ ] Sin fotos, el detalle muestra el placeholder y **no se rompe**.
 
 **Hallazgos del guión v5:**
 - (anotar aquí)
