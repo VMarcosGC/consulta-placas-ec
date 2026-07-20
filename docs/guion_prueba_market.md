@@ -268,6 +268,85 @@ mobile-first y ahí es donde se nota.
 **Hallazgos del guión v4:**
 - (anotar aquí)
 
+---
+
+## 3-quinquies. Guión v5 — etapa M2.8 (borrador, ficha para todos, garage, referencias ricas)
+
+> ⚠️ **Antes de probar: `alembic upgrade head`** (migración **0019**, referencias ricas).
+> Sin eso, el alta de referencias falla. `alembic current` debe decir `0019`.
+> Backend levantado (`python run.py`) + frontend (`npm run dev`).
+
+### M. BUG del plan light: la ficha es idéntica en light y premium
+
+- [ ] Crear un anuncio en **plan light** → en el paso 2 del wizard se puede **llenar y
+      guardar** la ficha igual que en premium (3 pestañas + extras).
+- [ ] En `/marketplace/mis-publicaciones`, el botón **📋 Ficha técnica** de una light abre
+      el editor **con los datos ya cargados** (no "No pudimos cargar la ficha").
+- [ ] Lo mismo con **📷 Fotos** en una light.
+- [ ] Repetir sobre una publicación **pausada**: la ficha también carga (antes tampoco).
+
+> Causa real: el editor prellenaba con el endpoint **público**, que solo sirve
+> publicaciones `activa`. Se agregó `GET /marketplace/publicaciones/{id}/mia` (dueño,
+> cualquier estado). No había ningún gate por plan en el frontend.
+
+### N. Borrador + umbral de publicación
+
+- [ ] Paso 1 del wizard → el aviso dice **"Guardado como borrador — aún no publicado"**
+      (ya NO "tu anuncio ya está publicado").
+- [ ] Con la ficha vacía, el botón **"Publicar anuncio"** está **deshabilitado** y dice
+      cuánto falta (ej. "Falta 30 % de ficha").
+- [ ] Llenar ficha hasta pasar el 30 % → el botón **se habilita**; al pulsarlo el anuncio
+      pasa a activa y aparece en el feed.
+- [ ] **Borrador invisible para terceros**: con el id del borrador, abrir
+      `/marketplace/{id}` en **incógnito** → **404** ("No encontramos esta publicación").
+      Tampoco aparece en `/marketplace` ni en la home.
+- [ ] `/marketplace/mis-publicaciones`: el borrador muestra el chip ámbar
+      **"Borrador · no publicado"** y su propio botón de publicar con el umbral.
+- [ ] **Forzar el 422**: en Swagger, `PATCH /marketplace/publicaciones/{id}` con
+      `{"estado":"activa"}` sobre un borrador de ficha vacía → **422** con
+      *"Completa al menos el 30% de la ficha para publicar. Vas en 0%."*
+- [ ] **Cobro premium al ACTIVAR** (no al crear): crear un borrador **premium** → el saldo
+      de tokens **no baja**. Publicarlo → **ahí sí** baja 3 tokens.
+- [ ] **Sin doble cobro**: pausar ese anuncio y volver a activarlo → el saldo **no vuelve
+      a bajar**.
+- [ ] **No se puede retroceder**: `PATCH` con `{"estado":"borrador"}` sobre un anuncio ya
+      publicado → **422** ("pásalo a pausada").
+- [ ] **No se puede esquivar el umbral por otro estado**: `PATCH` con `{"estado":"pausada"}`
+      sobre un **borrador** → **422** ("Un borrador solo puede pasar a publicado").
+      (Sin esta regla, `borrador → pausada → activa` llegaba al feed sin umbral ni cobro.)
+- [ ] **Sin doble cobro por ascender antes de publicar**: crear borrador **light** →
+      `PATCH {"plan":"premium"}` (sigue borrador, **no cobra**) → publicar → cobra **una
+      sola vez** (3 tokens en total, no 6).
+- [ ] **Sin retro-validación**: las publicaciones que ya estaban activas siguen activas y
+      visibles aunque su ficha esté bajo el umbral.
+
+### O. Mi garage: estado de venta por vehículo
+
+- [ ] `/mi-garage`, vehículo **sin** publicación → botón **"Publicar este auto"**.
+- [ ] Al pulsarlo, el wizard abre con **placa y vínculo al garage ya prellenados**.
+- [ ] Vehículo **con** publicación y ficha < 100 % → **"Completa tu ficha (N %)"**, que
+      lleva a mis-publicaciones.
+- [ ] Vehículo con ficha al 100 % → **"✓ Ficha completa"**.
+- [ ] Si el listado de publicaciones falla, el garage **igual carga** (el CTA es un extra).
+
+### P. Referencias externas ricas
+
+- [ ] `/marketplace/referenciar`: aparecen los campos nuevos **Ciudad**, **Kilometraje**,
+      **Descripción del anuncio** y el uploader **"Subir fotos"**.
+- [ ] Subir 2-3 fotos → se ven las miniaturas y se pueden **quitar** con la ✕.
+- [ ] Intentar subir más de **5** → el botón se deshabilita al llegar al tope.
+- [ ] Sin Cloudinary configurado, el uploader avisa con gracia y **el resto del formulario
+      sigue funcionando** (se puede pegar el enlace de imagen).
+- [ ] Enviar → entra en moderación **pendiente** (no aparece en el feed todavía).
+- [ ] Aprobarla como admin → en el feed la tarjeta muestra **la foto subida**, ciudad y
+      kilometraje, y **mantiene el copy exacto** "Referencia externa · datos no verificados".
+- [ ] Con más de una foto, la portada muestra el contador **📷 N**.
+- [ ] **Editar el contenido** de una referencia ya aprobada (descripción o fotos) → vuelve
+      a **pendiente** (anti bait-and-switch).
+
+**Hallazgos del guión v5:**
+- (anotar aquí)
+
 ## 4. De la versión test a productivo F1 (cuando el guión pase limpio)
 
 1. **Cerrar compuerta M2** en `plan_market_autos.md` + entrada en bitácora con los hallazgos.

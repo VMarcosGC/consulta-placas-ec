@@ -37,6 +37,7 @@ from src.modules.marketplace.schemas import (
     FeedMarketplaceSalida,
     FichaActualizar,
     FichaSalida,
+    calcular_completitud_ficha,
     FirmaSubidaSalida,
     FotoRegistrar,
     FotoReordenar,
@@ -66,6 +67,11 @@ LIMITE_REFERENCIADAS_FEED = 30
 # Máximo de fotos por publicación (M2). Superarlo → 409.
 MAX_FOTOS_POR_PUBLICACION = 12
 
+# Completitud mínima de la ficha para ACTIVAR una publicación (M2.8). Un anuncio con la
+# ficha casi vacía no aporta al comprador y ensucia el feed; el borrador deja armarlo con
+# calma sin bloquear a nadie. Configurable por si el umbral resulta muy alto o muy bajo.
+UMBRAL_FICHA_PUBLICACION = int(os.getenv("UMBRAL_FICHA_PUBLICACION", "30"))
+
 
 def _cobrar_premium(sesion: Session, usuario: Usuario, placa: str) -> None:
     """Debita el costo premium y commitea; traduce saldo insuficiente a 402."""
@@ -82,6 +88,67 @@ def _cobrar_premium(sesion: Session, usuario: Usuario, placa: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e)
         )
+
+
+def _completitud_ficha(pub: PublicacionInterna) -> int:
+    """% de completitud de la ficha de la publicación (0 si todavía no tiene ficha)."""
+    if pub.ficha is None:
+        return 0
+    return calcular_completitud_ficha(
+        pub.ficha.motor_suspension, pub.ficha.carroceria, pub.ficha.interiores
+    )
+
+
+def _exigir_umbral_ficha(pub: PublicacionInterna) -> None:
+    """422 si la ficha no llega al umbral para publicar (M2.8).
+
+    Es validación de negocio, no de formato: el borrador existe justamente para que el
+    vendedor complete antes de exponerse al comprador. Copy es-EC, accionable.
+    """
+    pct = _completitud_ficha(pub)
+    if pct < UMBRAL_FICHA_PUBLICACION:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Completa al menos el {UMBRAL_FICHA_PUBLICACION}% de la ficha para "
+                f"publicar. Vas en {pct}%."
+            ),
+        )
+
+
+def _aplicar_transicion_estado(
+    pub: PublicacionInterna, nuevo: EstadoPublicacion
+) -> None:
+    """Valida y aplica un cambio de estado (M2.8). 422 si la transición no es legal.
+
+    Máquina de estados explícita, porque los atajos costaban caro:
+    - Desde `borrador` **solo** se sale a `activa`, y validando el umbral de ficha. Si se
+      permitiera `borrador → pausada → activa`, el anuncio llegaba al feed **sin pasar por
+      el umbral ni por el cobro** del premium.
+    - A `borrador` no se vuelve nunca: para ocultar un anuncio está `pausada`.
+    El resto de transiciones (activa/pausada/vendida entre sí) siguen siendo libres.
+    """
+    actual = pub.estado
+    if nuevo == EstadoPublicacion.BORRADOR and actual != EstadoPublicacion.BORRADOR.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "No puedes devolver un anuncio publicado a borrador. "
+                "Si quieres ocultarlo, pásalo a pausada."
+            ),
+        )
+    if actual == EstadoPublicacion.BORRADOR.value:
+        if nuevo != EstadoPublicacion.ACTIVA:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Un borrador solo puede pasar a publicado. "
+                    "Publícalo primero y después podrás pausarlo o marcarlo como vendido."
+                ),
+            )
+        _exigir_umbral_ficha(pub)
+
+    pub.estado = nuevo.value
 
 
 def _vehiculo_del_usuario(sesion: Session, vehiculo_id: int, usuario: Usuario) -> Vehiculo:
@@ -136,10 +203,15 @@ def crear_publicacion(
     sesion: Session = Depends(obtener_sesion),
     usuario: Usuario = Depends(usuario_actual),
 ):
-    """Publica un vehículo. Plan premium se cobra con tokens (402 si no alcanza).
+    """Crea la publicación como **BORRADOR** (M2.8). No cobra nada todavía.
 
-    Premium queda `destacado` y con verificación `pendiente` (la verificación real
-    "Verificado por la plataforma" es un paso administrativo aparte, fuera de alcance).
+    El borrador solo lo ve su dueño: no sale en el feed ni por la URL pública (404). El
+    vendedor arma la ficha y las fotos con calma y luego lo publica con
+    `PATCH .../{id}` enviando `estado: activa`, que valida el umbral de ficha y **ahí sí**
+    cobra el premium.
+
+    Por qué el cobro se movió a la activación: antes se debitaba al crear, así que un
+    borrador abandonado dejaba al usuario sin tokens por un anuncio que nadie vio.
     """
     # Validar propiedad del vehículo vinculado (si se envió).
     if datos.vehiculo_id is not None:
@@ -155,19 +227,14 @@ def crear_publicacion(
         descripcion=datos.descripcion,
         precio_usd=datos.precio_usd,
         plan=datos.plan.value,
-        estado=EstadoPublicacion.ACTIVA.value,
+        estado=EstadoPublicacion.BORRADOR.value,
         # Premium compra el "destacado"; la verificación es un paso aparte que el dueño
         # SOLICITA con tokens (POST .../solicitar-verificacion). Nace no_verificado.
         estado_verificacion=EstadoVerificacion.NO_VERIFICADO.value,
         destacado=es_premium,
     )
     sesion.add(pub)
-    sesion.flush()  # asigna id sin cerrar la transacción (el cobro va junto)
-
-    if es_premium:
-        _cobrar_premium(sesion, usuario, datos.placa)
-    else:
-        sesion.commit()
+    sesion.commit()
 
     # Recargar con vehículo+mantenimientos para derivar la salida premium.
     return PublicacionInternaSalida.desde_modelo(_mi_publicacion(sesion, pub.id, usuario))
@@ -196,6 +263,25 @@ def listar_mis_publicaciones(
     return [PublicacionInternaSalida.desde_modelo(p) for p in pubs]
 
 
+@router.get(
+    "/publicaciones/{publicacion_id}/mia", response_model=PublicacionDetalleSalida
+)
+def detalle_publicacion_propia(
+    publicacion_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Detalle de MI publicación en **cualquier estado** (incluido `borrador`).
+
+    Existe porque el editor de ficha y el de fotos necesitan prellenar sus campos, y el
+    detalle público solo sirve publicaciones `activa`. Sin este endpoint, un borrador
+    —o una publicación pausada— no se podría terminar de completar: justo lo que M2.8
+    necesita habilitar. 404 indistinto si no existe o no es del usuario.
+    """
+    pub = _mi_publicacion(sesion, publicacion_id, usuario)
+    return PublicacionDetalleSalida.desde_modelo(pub)
+
+
 @router.patch("/publicaciones/{publicacion_id}", response_model=PublicacionInternaSalida)
 def actualizar_publicacion(
     publicacion_id: int,
@@ -203,7 +289,12 @@ def actualizar_publicacion(
     sesion: Session = Depends(obtener_sesion),
     usuario: Usuario = Depends(usuario_actual),
 ):
-    """Edita precio/descripción/estado o asciende a premium (cobra tokens).
+    """Edita precio/descripción/estado, publica un borrador o asciende a premium.
+
+    **Transición `borrador → activa` (M2.8):** exige que la ficha llegue a
+    `UMBRAL_FICHA_PUBLICACION` (422 si no) y es el momento en que se **cobra el premium**.
+    No se puede volver a `borrador` desde otro estado: gracias a eso el cobro es
+    exactamente-una-vez y re-activar tras una pausa nunca vuelve a debitar.
 
     Bajar de premium a light no reembolsa y quita el destacado. Subir a premium cobra
     `TOKENS_PUBLICACION_PREMIUM` (402 si no alcanza).
@@ -216,20 +307,32 @@ def actualizar_publicacion(
         pub.descripcion = datos.descripcion
     if datos.precio_usd is not None:
         pub.precio_usd = datos.precio_usd
-    if datos.estado is not None:
-        pub.estado = datos.estado.value
 
-    asciende_a_premium = (
-        datos.plan == PlanPublicacion.PREMIUM
-        and pub.plan != PlanPublicacion.PREMIUM.value
-    )
+    if datos.estado is not None:
+        _aplicar_transicion_estado(pub, datos.estado)
+
     if datos.plan is not None:
         pub.plan = datos.plan.value
         # Premium = destacado. La verificación NO se activa aquí: el dueño la solicita
         # aparte con tokens. Bajar a light quita el destacado (y el sello deja de aplicar).
         pub.destacado = datos.plan == PlanPublicacion.PREMIUM
 
-    if asciende_a_premium:
+    # Cobro del premium: UN solo predicado sobre el estado RESULTANTE, no sobre flags de
+    # lo que cambió. Se debita cuando el anuncio queda premium Y activa y todavía no se
+    # había cobrado (`premium_cobrado_en`). Con eso:
+    #   - un borrador premium no cuesta nada hasta publicarse,
+    #   - pausar y reactivar no vuelve a cobrar,
+    #   - `light → premium → activa` cobra UNA vez (antes cobraba dos).
+    # Bajar a light no reembolsa, y volver a premium tampoco re-cobra (marca ya puesta).
+    cobra_premium = (
+        pub.plan == PlanPublicacion.PREMIUM.value
+        and pub.estado == EstadoPublicacion.ACTIVA.value
+        and pub.premium_cobrado_en is None
+    )
+    if cobra_premium:
+        # Se marca ANTES de debitar: van en la misma transacción, así que si el saldo no
+        # alcanza el rollback de `_cobrar_premium` también revierte la marca.
+        pub.premium_cobrado_en = datetime.now(timezone.utc)
         _cobrar_premium(sesion, usuario, pub.placa)
     else:
         sesion.commit()

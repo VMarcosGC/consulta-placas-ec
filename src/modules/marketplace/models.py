@@ -22,8 +22,20 @@ class PlanPublicacion(str, enum.Enum):
 
 
 class EstadoPublicacion(str, enum.Enum):
-    """Ciclo de vida de una publicación interna."""
+    """Ciclo de vida de una publicación interna.
 
+    `BORRADOR` (M2.8) es el estado inicial: el vendedor arma el anuncio con calma
+    (ficha y fotos) y NADIE más lo ve — ni el feed ni la URL pública (404). Solo pasa a
+    `ACTIVA` cuando su ficha llega al umbral (`UMBRAL_FICHA_PUBLICACION`).
+
+    La columna es `String` en BD, así que sumar un valor NO requiere migración de tipo.
+    Transición permitida hacia afuera del borrador: **solo** `borrador → activa` (si se
+    permitiera `borrador → pausada → activa`, el anuncio llegaría al feed sin pasar por el
+    umbral ni por el cobro). Tampoco se vuelve a `borrador`: para ocultar está `pausada`.
+    Ver `_aplicar_transicion_estado` en `routers/publicaciones.py`.
+    """
+
+    BORRADOR = "borrador"
     ACTIVA = "activa"
     PAUSADA = "pausada"
     VENDIDA = "vendida"
@@ -150,6 +162,14 @@ class PublicacionInterna(Base):
     # Momento en que un admin marcó la publicación como verificada (auditoría).
     # NULL mientras no esté verificada (pendiente/rechazado/no_verificado).
     verificado_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Momento del débito del plan premium (M2.8). Hace el cobro IDEMPOTENTE por dato:
+    # solo se debita si es NULL. Sin esta marca, caminos como
+    # `light → premium (borrador) → activa` cobraban dos veces.
+    # NULL = todavía no se cobró (o es light, o es un premium anterior a M2.8 que ya
+    # se cobró al crearse: como ya está activa, nunca vuelve a pasar por el cobro).
+    premium_cobrado_en: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     destacado: Mapped[bool] = mapped_column(
@@ -314,6 +334,17 @@ class PublicacionReferenciada(Base):
     # 2048: las URLs de imagen de CDNs (Facebook fbcdn, etc.) traen muchos parámetros
     # firmados y superan los 500 con facilidad.
     imagen_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # ── Referencias ricas (M2.8, migración 0019) ──
+    # El aportante puede copiar los detalles del anuncio original (FB/OLX) para que la
+    # tarjeta sea útil sin salir del feed. Sigue siendo dato NO verificado.
+    descripcion: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    ciudad: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    kilometraje: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Lista de URLs (máx. 5, validado en Pydantic). JSONB para no crear otra tabla por
+    # algo que siempre se lee entero y nunca se consulta por elemento.
+    fotos: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list
+    )
     estado_moderacion: Mapped[str] = mapped_column(
         String(16),
         nullable=False,

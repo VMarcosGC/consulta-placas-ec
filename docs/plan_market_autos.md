@@ -206,6 +206,45 @@ endpoint **dispara scraping en cache miss**. El rediseño reescribió el compone
 ninguna de las dos mitigaciones ya acordadas (`solo_cache=true`, o disparar solo con
 interacción del usuario). Resolverlo antes de que el market reciba tráfico real.
 
+### M2.8 — Borrador con umbral, ficha para todos, garage y referencias ricas (feedback 2026-07-19)
+1. **BUG:** el plan light no deja llenar la ficha — debe ser idéntico a premium (el
+   backend nunca restringió por plan; gate mal puesto en frontend).
+2. **Estado `borrador` + umbral de publicación:** el wizard crea la publicación como
+   borrador (solo visible al dueño); se puede guardar a medias; **"Publicar" solo se
+   habilita con ficha ≥ umbral** (`UMBRAL_FICHA_PUBLICACION`, default 30 %, env var).
+   Activar sin umbral → 422. El cobro premium se mueve al momento de ACTIVAR (no se
+   cobra por borradores). Publicaciones activas existentes no se retro-validan.
+3. **Mi garage:** cada vehículo muestra su estado de venta: con publicación → CTA
+   "Completa tu ficha (N %)" / "✓ Ficha completa"; sin publicación → "Publicar este
+   auto" (wizard prellenado con placa y vínculo).
+4. **Referencias externas ricas:** migración `0019` — `descripcion`, `ciudad`,
+   `kilometraje`, `fotos` (JSONB lista, máx 5 vía Cloudinary) en
+   `publicaciones_referenciadas`, para copiar los detalles del anuncio de FB. La
+   etiqueta "Referencia externa · datos no verificados" se mantiene; editar contenido
+   sigue devolviendo la referencia a moderación `pendiente`.
+**Compuerta M2.8:** los 4 puntos re-probados (guión v5); borrador nunca visible en feed
+ni por URL pública; imposible activar bajo el umbral; light y premium con ficha idéntica.
+
+**Estado (2026-07-19): código implementado, compuerta ABIERTA a la espera de la prueba manual.**
+⚠️ **Marcos debe correr `alembic upgrade head`** (migración **0019**) antes de probar.
+- **BUG del light:** no existía ningún gate por plan en el frontend. La causa real era que
+  los editores de ficha y fotos prellenaban con el endpoint **público**, que solo sirve
+  publicaciones `activa`. Se agregó `GET /marketplace/publicaciones/{id}/mia` (dueño,
+  cualquier estado) — imprescindible además para que el borrador se pueda completar.
+- **Borrador + umbral:** `EstadoPublicacion.BORRADOR`, creación sin cobro,
+  `UMBRAL_FICHA_PUBLICACION` (env, default 30) y cobro premium al ACTIVAR, idempotente por
+  la columna nueva `premium_cobrado_en`.
+- **Mi garage:** CTA por vehículo cruzando por placa con las publicaciones propias.
+- **Referencias ricas:** migración `0019` (`descripcion`, `ciudad`, `kilometraje`, `fotos`
+  JSONB máx 5) + firma Cloudinary propia + formulario con uploader. Editar el contenido
+  sigue devolviendo la referencia a moderación `pendiente`.
+- Verificado: `import main` → 63 rutas; `alembic heads` → `0019`; `tsc --noEmit` limpio;
+  lint 4 preexistentes; `build` OK.
+- Revisión `revisor-calidad`: **2 BLOQUEANTES + 1 MAYOR, los tres corregidos y
+  re-verificados con simulación de los caminos exactos** (ver bitácora).
+- **Falta para cerrar:** guión v5 ([guion_prueba_market.md](guion_prueba_market.md)
+  §3-quinquies, secciones M–P), tras aplicar la migración.
+
 ### M3 — Búsqueda y filtros del feed
 **Repos:** ambos
 - Backend: `GET /marketplace/feed` con query params: `tipo`, `combustible`,

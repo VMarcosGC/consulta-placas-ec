@@ -10,6 +10,79 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-19 — Market M2.8: borrador con umbral, ficha para todos, garage y referencias ricas
+
+**Repos:** ambos. Backend con **migración `0019`** (⚠️ **pendiente de aplicar en Neon: la
+corre Marcos con `alembic upgrade head`**). Implementado por el **controller**, revisado por
+**revisor-calidad**. **Commit sin push** — Marcos prueba primero.
+
+**Qué se hizo**
+
+1. **BUG "el plan light no deja llenar la ficha" — la causa no era la que parecía.**
+   Busqué el gate por plan en el frontend y **no existe**: ni en el wizard, ni en
+   mis-publicaciones, ni en el detalle; el `PATCH .../ficha` del backend tampoco restringe.
+   La causa real es que `FichaEditor` y `GaleriaFotosEditor` prellenaban con
+   `obtenerPublicacionDetalle` = el endpoint **público**, que solo sirve publicaciones
+   `activa` (deuda ya anotada en M1). Fix: **`GET /marketplace/publicaciones/{id}/mia`**
+   (dueño, cualquier estado) y los dos editores lo usan. Esto era además **requisito** del
+   borrador: por definición no es `activa`, así que sin este endpoint el paso 2 del wizard
+   no habría cargado nunca.
+2. **Borrador + umbral de publicación.** `EstadoPublicacion.BORRADOR` (String en BD, sin
+   migración de tipo). `POST /publicaciones` crea en borrador y **ya no cobra**. Publicar es
+   `PATCH {estado: activa}`: valida `UMBRAL_FICHA_PUBLICACION` (env, default 30) → **422**
+   *"Completa al menos el 30% de la ficha para publicar. Vas en N%."*, y **ahí** se debita
+   el premium. Verificado que `borrador` no se expone: feed y detalle público ya filtraban
+   por `activa` (el revisor auditó todos los consumidores). Las activas existentes **no se
+   retro-validan**.
+3. **Mi garage.** Cada vehículo cruza con las publicaciones propias **por placa** — no por
+   `vehiculo_id`, porque exponerlo obligaría a sacar un id interno del garage en
+   `PublicacionInternaSalida`, que también sirve el feed anónimo (el revisor validó la
+   decisión). CTA "Publicar este auto" (wizard prellenado por query params, con `Suspense`
+   por `useSearchParams`), "Completa tu ficha (N %)", "Borrador sin publicar" o
+   "✓ Ficha completa".
+4. **Referencias ricas.** Migración `0019`: `descripcion` (2000), `ciudad` (80),
+   `kilometraje` (BigInteger) y `fotos` (JSONB NOT NULL default `'[]'`, **máx 5** validado
+   en Pydantic con dedup). Endpoint `POST /marketplace/referencias/firma-foto` con carpeta
+   propia. Formulario con los campos nuevos + uploader. Los campos ricos entran a
+   `_CAMPOS_CONTENIDO`: editarlos devuelve la referencia a moderación `pendiente`.
+
+**Verificación**
+- Backend: `import main` → **63 rutas**; `alembic heads` → **`0019`** único; validación de
+  fotos (dedup + rechazo de 6) y del umbral (0 % → 422 con el copy exacto; 35 % → pasa).
+- Frontend: `tsc --noEmit` limpio; lint **4 errores, los 4 preexistentes**; `build` OK.
+
+**Hallazgos del revisor — 2 BLOQUEANTES y 1 mayor, los tres corregidos**
+- **Doble cobro del premium.** Mi idempotencia "por construcción" (prohibir volver a
+  borrador) **no se sostenía**: `light → PATCH plan=premium (en borrador) → PATCH
+  estado=activa` cobraba **6 tokens** en vez de 3, porque `asciende_a_premium` y
+  `publica_borrador` eran flags independientes.
+- **Activación saltándose el umbral Y sin pagar.** `borrador → pausada → activa` dejaba el
+  anuncio **activo, premium, destacado, con ficha al 0 % y costo 0 tokens**.
+- **Corrección de ambos:** máquina de estados explícita (`_aplicar_transicion_estado`: desde
+  `borrador` **solo** se sale a `activa`, validando umbral; a `borrador` no se vuelve) +
+  cobro derivado de **un solo predicado sobre el estado resultante** ("queda premium Y
+  activa Y `premium_cobrado_en is None`"), con la marca persistida nueva
+  **`premium_cobrado_en`** (agregada a la misma migración `0019`, que aún no se aplicó).
+  Re-verificado simulando los caminos exactos del revisor: 1 cobro en vez de 2, y 422 en el
+  atajo por `pausada`.
+- **Mayor:** `PATCH /referencias/{id}` con `{"fotos": null}` reventaba en 500 (columna NOT
+  NULL). Ahora un `null` explícito se normaliza a lista vacía ("quitar todas").
+- Menores corregidos: docstrings que citaban un endpoint `activar` inexistente, `descripcion`
+  de referencias ahora sí se renderiza en la tarjeta, `carpeta_referencia` muerta eliminada,
+  el garage distingue borrador/vendida, y el wizard avisa del cobro premium **antes** de
+  pulsar publicar (antes se enteraba con un 402).
+
+**Pendientes**
+- ⚠️ **`alembic upgrade head` (0019) en Neon** — sin eso, las referencias y el cobro
+  idempotente no funcionan.
+- **Correr el guión v5** ([guion_prueba_market.md](guion_prueba_market.md) §3-quinquies,
+  secciones M–P), incluidos los dos casos de abuso que encontró el revisor.
+- **Push pendiente** de ambos repos.
+- Sigue abierta la deuda de M2.6/M2.7: `DatosOficialesMini` dispara scraping en cache miss
+  desde una página pública e indexable (resolver en M3 con `solo_cache=true`).
+
+---
+
 ## 2026-07-19 — Market M2.7: pulido UX (consulta compacta, tarjetas, entradas)
 
 **Repo:** `consulta-placas-web` (**el backend no se tocó** — verificado por el revisor: sin

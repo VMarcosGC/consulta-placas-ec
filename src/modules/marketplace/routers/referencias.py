@@ -26,17 +26,32 @@ from src.modules.marketplace.models import (
     PublicacionReferenciada,
 )
 from src.modules.marketplace.schemas import (
+    FirmaSubidaSalida,
     ModeracionReferencia,
     PublicacionReferenciadaActualizar,
     PublicacionReferenciadaCrear,
     PublicacionReferenciadaSalida,
 )
+from src.modules.marketplace.services import cloudinary
 
 
 router = APIRouter(prefix="/marketplace/referencias", tags=["marketplace"])
 
 # Campos cuyo cambio invalida una aprobación previa (el anuncio "ya no es el mismo").
-_CAMPOS_CONTENIDO = ("marca", "modelo", "anio", "precio_usd", "imagen_url", "placa")
+# M2.8 suma los campos ricos: si el aportante reescribe la descripción o cambia las fotos
+# después de aprobada, vuelve a moderación — es exactamente el bait-and-switch que esto evita.
+_CAMPOS_CONTENIDO = (
+    "marca",
+    "modelo",
+    "anio",
+    "precio_usd",
+    "imagen_url",
+    "placa",
+    "descripcion",
+    "ciudad",
+    "kilometraje",
+    "fotos",
+)
 
 
 def _mi_referencia(
@@ -81,6 +96,11 @@ def crear_referencia(
         precio_usd=datos.precio_usd,
         imagen_url=datos.imagen_url,
         placa=datos.placa,
+        # Campos ricos (M2.8): opcionales, para copiar el detalle del anuncio original.
+        descripcion=datos.descripcion,
+        ciudad=datos.ciudad,
+        kilometraje=datos.kilometraje,
+        fotos=datos.fotos,
         estado_moderacion=EstadoModeracion.PENDIENTE.value,
         activa=True,
     )
@@ -95,6 +115,28 @@ def crear_referencia(
         )
     sesion.refresh(ref)
     return PublicacionReferenciadaSalida.model_validate(ref)
+
+
+@router.post("/firma-foto", response_model=FirmaSubidaSalida)
+def firmar_subida_foto_referencia(
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """Firma para subir a Cloudinary una foto de referencia (M2.8).
+
+    El binario NO pasa por el backend: el navegador sube directo con esta firma y luego
+    manda la URL en el alta/edición de la referencia. Como el formulario sube ANTES de
+    crear la referencia (todavía no hay id), la carpeta se agrupa por usuario.
+
+    503 si Cloudinary no está configurado (config faltante, no error de negocio).
+    """
+    if not cloudinary.esta_configurado():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="La subida de fotos no está disponible por ahora.",
+        )
+    return FirmaSubidaSalida(
+        **cloudinary.firmar_subida(cloudinary.carpeta_referencia_nueva(usuario.id))
+    )
 
 
 @router.get("/mias", response_model=list[PublicacionReferenciadaSalida])
@@ -130,7 +172,12 @@ def actualizar_referencia(
     contenido_cambio = False
     for campo in _CAMPOS_CONTENIDO:
         if campo in cambios:
-            setattr(ref, campo, cambios[campo])
+            valor = cambios[campo]
+            # `fotos` es NOT NULL en BD: un `fotos: null` explícito significa "quitar
+            # todas", no "guardar NULL" (que reventaría en un IntegrityError → 500).
+            if campo == "fotos" and valor is None:
+                valor = []
+            setattr(ref, campo, valor)
             contenido_cambio = True
     if "activa" in cambios:
         ref.activa = cambios["activa"]

@@ -313,6 +313,28 @@ def _validar_url_externa(v: str) -> str:
     return v
 
 
+# Tope de fotos de una referencia externa (M2.8). Menor que el de una publicación propia
+# (12): la referencia es un puntero al anuncio original, no el anuncio en sí.
+MAX_FOTOS_REFERENCIA = 5
+
+
+def _validar_fotos_referencia(v: list[str]) -> list[str]:
+    """Normaliza la lista de fotos: URLs http(s) válidas, sin vacíos y sin duplicados."""
+    limpias: list[str] = []
+    for url in v:
+        url = (url or "").strip()
+        if not url:
+            continue
+        if len(url) > 2048:
+            raise ValueError("La URL de la foto es demasiado larga.")
+        _validar_url_externa(url)
+        if url not in limpias:
+            limpias.append(url)
+    if len(limpias) > MAX_FOTOS_REFERENCIA:
+        raise ValueError(f"Puedes subir hasta {MAX_FOTOS_REFERENCIA} fotos por referencia.")
+    return limpias
+
+
 class PublicacionReferenciadaCrear(BaseModel):
     """Alta de una referencia: el usuario pega el link y completa los datos a mano.
 
@@ -328,11 +350,21 @@ class PublicacionReferenciadaCrear(BaseModel):
     precio_usd: Decimal | None = Field(default=None, gt=0)
     imagen_url: str | None = Field(default=None, max_length=2048)
     placa: str | None = Field(default=None, max_length=10)
+    # Referencias ricas (M2.8): el aportante copia los detalles del anuncio original.
+    descripcion: str | None = Field(default=None, max_length=2000)
+    ciudad: str | None = Field(default=None, max_length=80)
+    kilometraje: int | None = Field(default=None, ge=0, le=2_000_000)
+    fotos: list[str] = Field(default_factory=list, max_length=MAX_FOTOS_REFERENCIA)
 
     @field_validator("url_externa")
     @classmethod
     def _url_valida(cls, v: str) -> str:
         return _validar_url_externa(v)
+
+    @field_validator("fotos")
+    @classmethod
+    def _fotos_validas(cls, v: list[str]) -> list[str]:
+        return _validar_fotos_referencia(v)
 
     @field_validator("placa")
     @classmethod
@@ -353,12 +385,21 @@ class PublicacionReferenciadaActualizar(BaseModel):
     precio_usd: Decimal | None = Field(default=None, gt=0)
     imagen_url: str | None = Field(default=None, max_length=2048)
     placa: str | None = Field(default=None, max_length=10)
+    descripcion: str | None = Field(default=None, max_length=2000)
+    ciudad: str | None = Field(default=None, max_length=80)
+    kilometraje: int | None = Field(default=None, ge=0, le=2_000_000)
+    fotos: list[str] | None = Field(default=None, max_length=MAX_FOTOS_REFERENCIA)
     activa: bool | None = None
 
     @field_validator("placa")
     @classmethod
     def _placa_valida(cls, v: str | None) -> str | None:
         return validar_placa(v) if v else None
+
+    @field_validator("fotos")
+    @classmethod
+    def _fotos_validas(cls, v: list[str] | None) -> list[str] | None:
+        return _validar_fotos_referencia(v) if v is not None else None
 
 
 class PublicacionReferenciadaSalida(BaseModel):
@@ -375,6 +416,10 @@ class PublicacionReferenciadaSalida(BaseModel):
     fuente: str
     url_externa: str
     imagen_url: str | None
+    descripcion: str | None = None
+    ciudad: str | None = None
+    kilometraje: int | None = None
+    fotos: list[str] = Field(default_factory=list)
     estado_moderacion: EstadoModeracion
     activa: bool
     creado_en: datetime

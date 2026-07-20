@@ -70,6 +70,20 @@ def carpeta_publicacion(publicacion_id: int) -> str:
     return f"{carpeta_base()}/{publicacion_id}"
 
 
+def carpeta_referencia_nueva(usuario_id: int) -> str:
+    """Carpeta de las fotos de una referencia externa, agrupadas por usuario (M2.8).
+
+    Rama propia (`<base>/referencias/<usuario_id>`) para no mezclarlas con las fotos de
+    publicaciones internas: son fotos de un anuncio ajeno, con otro ciclo de vida
+    (moderación) y otro tope (5 vs 12).
+
+    Se agrupa por usuario y no por referencia porque el formulario sube las fotos ANTES
+    de crear la referencia, cuando todavía no hay id. El `folder` va firmado igual, así
+    que el navegador no puede subir a una ruta arbitraria.
+    """
+    return f"{carpeta_base()}/referencias/{usuario_id}"
+
+
 def _firmar_parametros(parametros: dict[str, str]) -> str:
     """SHA-1 hex de `k=v&...` (claves ordenadas) + api_secret. Excluye vacíos."""
     partes = [
