@@ -696,3 +696,32 @@ class FeedMarketplaceSalida(BaseModel):
     premium: list[PublicacionInternaSalida] = Field(default_factory=list)
     estandar: list[PublicacionInternaSalida] = Field(default_factory=list)
     referenciadas: list[PublicacionReferenciadaSalida] = Field(default_factory=list)
+
+
+# ════════════════ Búsqueda del comprador (MC2 — lista plana paginada) ════════════════
+#
+# A diferencia del feed (3 cubos curados para la portada MC1), la búsqueda devuelve una
+# LISTA PLANA ordenada, filtrable y paginada por cursor keyset, que la app futura (MC3,
+# reel vertical) reutiliza tal cual. Cada item lleva un discriminador `tipo_publicacion`
+# para que el frontend elija la tarjeta (interna vs referenciada). Se reusan los schemas
+# de salida existentes → misma garantía de privacidad (ni VIN ni nombre del dueño).
+
+
+class ItemBusqueda(BaseModel):
+    """Un resultado de la búsqueda plana. Solo uno de `interna`/`referenciada` viene
+    lleno, según el discriminador `tipo_publicacion`."""
+
+    tipo_publicacion: Literal["interna", "referenciada"]
+    interna: PublicacionInternaSalida | None = None
+    referenciada: PublicacionReferenciadaSalida | None = None
+
+
+class ResultadoBusquedaSalida(BaseModel):
+    """Página de resultados de `GET /marketplace/buscar`.
+
+    `siguiente_cursor` es un token opaco (base64) que se pasa tal cual en el próximo
+    request para traer la siguiente página; `None` cuando ya no hay más resultados.
+    """
+
+    items: list[ItemBusqueda] = Field(default_factory=list)
+    siguiente_cursor: str | None = None

@@ -11,11 +11,14 @@ por ser un flujo de pago, igual que el desbloqueo de perfil). Solo toca la BD pr
 (nunca invoca scraping, §10.2).
 """
 
+import base64
+import json
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, and_
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select, and_, or_, cast, literal, union_all, Integer
 from sqlalchemy.orm import Session, selectinload
 
 from src.core.database import obtener_sesion
@@ -34,6 +37,7 @@ from src.modules.marketplace.models import (
     PublicacionReferenciada,
 )
 from src.modules.marketplace.schemas import (
+    Combustible,
     FeedMarketplaceSalida,
     FichaActualizar,
     FichaSalida,
@@ -42,11 +46,15 @@ from src.modules.marketplace.schemas import (
     FotoRegistrar,
     FotoReordenar,
     FotoSalida,
+    ItemBusqueda,
     PublicacionDetalleSalida,
     PublicacionInternaActualizar,
     PublicacionInternaCrear,
     PublicacionInternaSalida,
     PublicacionReferenciadaSalida,
+    ResultadoBusquedaSalida,
+    TipoCarroceria,
+    Transmision,
     VerificacionPublicacion,
 )
 from src.modules.marketplace.services import cloudinary
@@ -449,6 +457,292 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
         estandar=estandar,
         referenciadas=[PublicacionReferenciadaSalida.model_validate(r) for r in referenciadas],
     )
+
+
+# ──────────────── Búsqueda del comprador (MC2 — lista plana + cursor) ────────────────
+#
+# Endpoint NUEVO, independiente del feed (que sigue alimentando la portada curada MC1).
+# Devuelve una lista PLANA ordenada, filtrable y paginada por cursor KEYSET (no offset:
+# el offset se degrada con el volumen y el reel de la app —MC3— necesita paginación
+# estable). Público/anónimo: el comprador no necesita cuenta. Solo BD propia (§10.2).
+#
+# ORDEN de la lista (monetización + recencia):
+#     destacado DESC, creado_en DESC, fuente_orden ASC (internas=0, referenciadas=1), id DESC
+# Las referenciadas se tratan como destacado=False, así caen debajo de las premium pero
+# se intercalan con las light por fecha.
+
+# Máximo de resultados por página (tope duro para no inflar la respuesta ni el reel).
+LIMITE_BUSQUEDA_MAX = 50
+LIMITE_BUSQUEDA_DEFAULT = 20
+
+# fuente_orden: identifica de qué tabla viene la fila (y desempata premium ↔ referenciada).
+FUENTE_INTERNA = 0
+FUENTE_REFERENCIADA = 1
+
+
+def _codificar_cursor(destacado: bool, creado_en: datetime, fuente: int, id_: int) -> str:
+    """Serializa la posición de la ÚLTIMA fila de la página a un token opaco (base64).
+
+    Claves cortas para no inflar el token: d=destacado, c=creado_en ISO, f=fuente_orden,
+    i=id. El ISO preserva microsegundos y offset, así el `==` del keyset casa exacto.
+    """
+    crudo = json.dumps(
+        {"d": destacado, "c": creado_en.isoformat(), "f": fuente, "i": id_},
+        separators=(",", ":"),
+    )
+    return base64.urlsafe_b64encode(crudo.encode("utf-8")).decode("ascii")
+
+
+def _decodificar_cursor(cursor: str) -> tuple[bool, datetime, int, int]:
+    """Decodifica el cursor opaco. Cursor corrupto/ilegible → ValueError (el endpoint
+    lo traduce a 400: es un error de FORMATO, no de negocio)."""
+    try:
+        crudo = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        datos = json.loads(crudo)
+        return (
+            bool(datos["d"]),
+            datetime.fromisoformat(datos["c"]),
+            int(datos["f"]),
+            int(datos["i"]),
+        )
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
+        raise ValueError(f"Cursor inválido: {e}") from e
+
+
+def _patron_ilike(termino: str) -> str:
+    """Escapa los comodines LIKE del término del usuario para que `%`/`_` no actúen
+    como comodines (se buscan literales). El escape char es `\\` (ver ilike(escape=...))."""
+    seguro = termino.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{seguro}%"
+
+
+@router.get("/buscar", response_model=ResultadoBusquedaSalida)
+def buscar_publicaciones(
+    sesion: Session = Depends(obtener_sesion),
+    q: str | None = Query(default=None, max_length=80),
+    tipo: TipoCarroceria | None = Query(default=None),
+    combustible: Combustible | None = Query(default=None),
+    transmision: Transmision | None = Query(default=None),
+    precio_min: Decimal | None = Query(default=None, ge=0),
+    precio_max: Decimal | None = Query(default=None, ge=0),
+    anio_min: int | None = Query(default=None),
+    anio_max: int | None = Query(default=None),
+    cursor: str | None = Query(default=None),
+    limite: int = Query(default=LIMITE_BUSQUEDA_DEFAULT, ge=1, le=LIMITE_BUSQUEDA_MAX),
+):
+    """Búsqueda plana del comprador: filtros combinables + paginación por cursor keyset.
+
+    Filtros (todos opcionales; valor fuera de catálogo → 422 con las opciones, gratis):
+    - `q`: texto libre sobre título/marca/modelo (ILIKE; el plegado de acentos queda como
+      deuda —las marcas comunes no llevan tilde—; NO se agrega la extensión `unaccent`).
+    - `tipo`/`combustible`/`transmision`: catálogos de la ficha técnica.
+    - `precio_min`/`precio_max`, `anio_min`/`anio_max`: rangos.
+
+    Cursor opaco (base64); inválido → **400** (formato). `siguiente_cursor=null` cuando
+    ya no hay más páginas. Anónimo (sin `Depends(usuario_actual)`). Solo BD propia (§10.2).
+    """
+    hay_filtro_ficha = tipo is not None or combustible is not None or transmision is not None
+
+    # ── Paso 1: KEYSET sobre una proyección liviana ──────────────────────────────
+    # Se proyectan solo las 4 columnas de ordenamiento/keyset + el (fuente, id) que
+    # identifica la fila para hidratarla después. Los filtros se aplican DENTRO de cada
+    # rama del UNION (antes de unir), así cada rama filtra por sus propias columnas.
+
+    # Rama INTERNAS (solo activas). Se unen ficha/vehículo solo si un filtro los necesita.
+    sel_internas = select(
+        literal(FUENTE_INTERNA).label("fuente"),
+        PublicacionInterna.id.label("id"),
+        PublicacionInterna.destacado.label("destacado"),
+        PublicacionInterna.creado_en.label("creado_en"),
+    ).where(PublicacionInterna.estado == EstadoPublicacion.ACTIVA.value)
+
+    # Join a vehículo (LEFT) si `q` o filtro de año lo requieren. Con LEFT + WHERE de año,
+    # una interna SIN vehículo vinculado queda con anio NULL y NO pasa el filtro de año
+    # (exclusión pedida). Para `q`, el título puede casar aunque no haya vehículo.
+    if q is not None or anio_min is not None or anio_max is not None:
+        sel_internas = sel_internas.join(
+            Vehiculo, PublicacionInterna.vehiculo_id == Vehiculo.id, isouter=True
+        )
+    if anio_min is not None:
+        sel_internas = sel_internas.where(Vehiculo.anio >= anio_min)
+    if anio_max is not None:
+        sel_internas = sel_internas.where(Vehiculo.anio <= anio_max)
+    if q is not None:
+        patron = _patron_ilike(q)
+        sel_internas = sel_internas.where(
+            or_(
+                PublicacionInterna.titulo.ilike(patron, escape="\\"),
+                Vehiculo.marca.ilike(patron, escape="\\"),
+                Vehiculo.modelo.ilike(patron, escape="\\"),
+            )
+        )
+    # Join a ficha (INNER) si hay filtro de ficha: una interna sin ficha no puede cumplir
+    # un filtro de tipo/combustible/transmisión, así que se excluye del INNER join.
+    if hay_filtro_ficha:
+        sel_internas = sel_internas.join(
+            FichaPublicacion, FichaPublicacion.publicacion_id == PublicacionInterna.id
+        )
+        if combustible is not None:
+            sel_internas = sel_internas.where(
+                FichaPublicacion.motor_suspension["combustible"].astext == combustible
+            )
+        if transmision is not None:
+            sel_internas = sel_internas.where(
+                FichaPublicacion.motor_suspension["transmision"].astext == transmision
+            )
+        if tipo is not None:
+            sel_internas = sel_internas.where(
+                FichaPublicacion.carroceria["tipo"].astext == tipo
+            )
+    if precio_min is not None:
+        sel_internas = sel_internas.where(PublicacionInterna.precio_usd >= precio_min)
+    if precio_max is not None:
+        sel_internas = sel_internas.where(PublicacionInterna.precio_usd <= precio_max)
+
+    ramas = [sel_internas]
+
+    # Rama REFERENCIADAS (solo activas + aprobadas). Se OMITE por completo si hay filtro
+    # de ficha: una referencia no tiene ficha técnica, no puede cumplir esos filtros.
+    if not hay_filtro_ficha:
+        sel_ref = select(
+            literal(FUENTE_REFERENCIADA).label("fuente"),
+            PublicacionReferenciada.id.label("id"),
+            literal(False).label("destacado"),
+            PublicacionReferenciada.creado_en.label("creado_en"),
+        ).where(
+            and_(
+                PublicacionReferenciada.activa.is_(True),
+                PublicacionReferenciada.estado_moderacion == EstadoModeracion.APROBADA.value,
+            )
+        )
+        if anio_min is not None:
+            sel_ref = sel_ref.where(PublicacionReferenciada.anio >= anio_min)
+        if anio_max is not None:
+            sel_ref = sel_ref.where(PublicacionReferenciada.anio <= anio_max)
+        if precio_min is not None:
+            sel_ref = sel_ref.where(PublicacionReferenciada.precio_usd >= precio_min)
+        if precio_max is not None:
+            sel_ref = sel_ref.where(PublicacionReferenciada.precio_usd <= precio_max)
+        if q is not None:
+            patron = _patron_ilike(q)
+            sel_ref = sel_ref.where(
+                or_(
+                    PublicacionReferenciada.marca.ilike(patron, escape="\\"),
+                    PublicacionReferenciada.modelo.ilike(patron, escape="\\"),
+                )
+            )
+        ramas.append(sel_ref)
+
+    u = (union_all(*ramas) if len(ramas) > 1 else ramas[0]).subquery("u")
+
+    consulta = select(u.c.fuente, u.c.id, u.c.destacado, u.c.creado_en)
+
+    # Keyset: filas ESTRICTAMENTE después del cursor en el orden
+    # (destacado DESC, creado_en DESC, fuente ASC, id DESC). Como fuente ordena ASC
+    # mientras el resto DESC, NO cabe un row-value único: se expande por niveles.
+    if cursor is not None:
+        try:
+            c_dest, c_creado, c_fuente, c_id = _decodificar_cursor(cursor)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+            )
+        consulta = consulta.where(
+            or_(
+                # destacado es Boolean: SQLAlchemy no permite `<` con un literal bool, así
+                # que se compara como entero (false=0 < true=1) para el "viene después".
+                cast(u.c.destacado, Integer) < (1 if c_dest else 0),
+                and_(u.c.destacado == c_dest, u.c.creado_en < c_creado),
+                and_(
+                    u.c.destacado == c_dest,
+                    u.c.creado_en == c_creado,
+                    u.c.fuente > c_fuente,
+                ),
+                and_(
+                    u.c.destacado == c_dest,
+                    u.c.creado_en == c_creado,
+                    u.c.fuente == c_fuente,
+                    u.c.id < c_id,
+                ),
+            )
+        )
+
+    consulta = consulta.order_by(
+        u.c.destacado.desc(), u.c.creado_en.desc(), u.c.fuente.asc(), u.c.id.desc()
+    ).limit(limite + 1)  # +1 detecta si hay página siguiente sin un COUNT aparte
+
+    filas = sesion.execute(consulta).all()
+
+    hay_mas = len(filas) > limite
+    filas_pagina = filas[:limite]
+
+    # ── Paso 2: HIDRATACIÓN en lote (sin N+1) + re-ensamble en el orden del paso 1 ──
+    ids_internas = [f.id for f in filas_pagina if f.fuente == FUENTE_INTERNA]
+    ids_ref = [f.id for f in filas_pagina if f.fuente == FUENTE_REFERENCIADA]
+
+    mapa_internas: dict[int, PublicacionInterna] = {}
+    if ids_internas:
+        internas = (
+            sesion.execute(
+                select(PublicacionInterna)
+                .where(PublicacionInterna.id.in_(ids_internas))
+                .options(
+                    selectinload(PublicacionInterna.vehiculo).selectinload(
+                        Vehiculo.mantenimientos
+                    ),
+                    selectinload(PublicacionInterna.ficha),
+                    selectinload(PublicacionInterna.fotos),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        mapa_internas = {p.id: p for p in internas}
+
+    mapa_ref: dict[int, PublicacionReferenciada] = {}
+    if ids_ref:
+        refs = (
+            sesion.execute(
+                select(PublicacionReferenciada).where(
+                    PublicacionReferenciada.id.in_(ids_ref)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        mapa_ref = {r.id: r for r in refs}
+
+    items: list[ItemBusqueda] = []
+    for f in filas_pagina:
+        if f.fuente == FUENTE_INTERNA:
+            pub = mapa_internas.get(f.id)
+            if pub is None:
+                continue  # desapareció entre el paso 1 y 2 (carrera improbable): se omite
+            items.append(
+                ItemBusqueda(
+                    tipo_publicacion="interna",
+                    interna=PublicacionInternaSalida.desde_modelo(pub),
+                )
+            )
+        else:
+            ref = mapa_ref.get(f.id)
+            if ref is None:
+                continue
+            items.append(
+                ItemBusqueda(
+                    tipo_publicacion="referenciada",
+                    referenciada=PublicacionReferenciadaSalida.model_validate(ref),
+                )
+            )
+
+    siguiente_cursor = None
+    if hay_mas and filas_pagina:
+        ultima = filas_pagina[-1]
+        siguiente_cursor = _codificar_cursor(
+            bool(ultima.destacado), ultima.creado_en, int(ultima.fuente), int(ultima.id)
+        )
+
+    return ResultadoBusquedaSalida(items=items, siguiente_cursor=siguiente_cursor)
 
 
 # ──────────────── Verificación premium (admin) ────────────────

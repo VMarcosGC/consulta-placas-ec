@@ -316,11 +316,50 @@ que sigue pendiente) antes de probar: sin ella el ♡ falla al guardar.
 - **Falta para cerrar:** guión v6 ([guion_prueba_market.md](guion_prueba_market.md)
   §3-sexies, secciones R–U), **en celular**.
 
+### MC1.1 — Orden del feed + narrativa de referencias externas (feedback 2026-07-20)
+1. **Separar criterios en el feed** (hoy se mezclan autos con bandas de precio/año en la
+   misma tira). Estructura clara con secciones autocontenidas y separadas:
+   navegación (buscador + años + precio compacto) **arriba, aparte** · luego **Destacados
+   (premium)** · luego **Autos (normales/light)** · al final **De otros markets (referidos
+   externos)** — cada bloque con su encabezado y sin intercalar filtros entre autos.
+2. **Narrativa de las referencias externas.** No es "un enlace": es **"mira autos de otros
+   markets (Mercado Libre, Facebook) dentro de nuestro feed"**. Encabezado de sección con
+   ese mensaje. Cada tarjeta: si NUESTRA ficha del referido **no está llena** → disclaimer
+   "Publicación no verificada — datos incompletos"; si el aportante SÍ completó ficha/fotos
+   → baja el disclaimer a "Referencia externa · revisa en el market de origen". El botón
+   lleva a la publicación original (Mercado Libre/FB) con el disclaimer visible. Corregir el
+   texto actual del enlace externo (está mal redactado).
+
 ### MC2 — Búsqueda y filtros (absorbe la antigua M3)
 Backend: feed con query params (`tipo`, `combustible`, `transmision`, `precio_min/max`,
 `anio_min/max`, `q`) + **paginación por cursor** (la app futura la reutiliza tal cual).
 Frontend: barra de filtros con estado en la URL.
 **Compuerta MC2:** filtros combinables sin N+1; sin regresión del orden del feed.
+
+**Estado (2026-07-21): código implementado, compuerta ABIERTA a la espera de la prueba manual.**
+Decisión de arquitectura (Marcos): **NO tocar el feed de 3 cubos** (alimenta la portada
+curada MC1); se agrega un endpoint NUEVO de búsqueda plana. Así cada endpoint tiene un
+trabajo claro y MC1 no se re-verifica.
+- **Backend**: `GET /marketplace/buscar` (público, sin auth) — lista **plana** filtrable
+  (`q`, `tipo`, `combustible`, `transmision`, `precio_min/max`, `anio_min/max`) y paginada
+  por **cursor keyset** (no offset — el reel de la app MC3 lo reutiliza). Orden
+  `destacado DESC · creado_en DESC · internas antes que referenciadas · id DESC`. Con
+  filtro de ficha activo las referenciadas se omiten (no tienen ficha). Cursor opaco;
+  corrupto → 400, param fuera de catálogo → 422, nunca 500. Dos queries (keyset liviano +
+  hidratación en lote con `selectinload`): sin N+1. **Sin migración** (`alembic heads` =
+  `0020`); índices GIN/btree anotados como deuda para cuando haya volumen.
+- **Frontend**: `/marketplace` sin filtros = bloques curados MC1 intactos; con filtro o
+  búsqueda = grilla plana server-side + "Cargar más autos" (cursor). **Estado de los
+  filtros en la URL** (compartible: `?tipo=suv&precio_max=15000` reproduce la búsqueda);
+  `leerFiltros` valida contra los catálogos, así un `?tipo=zzz` se descarta sin pegarle al
+  backend. Se eliminó el filtro de texto en cliente de MC1. ♡ favorito y badge de baja
+  conservados en las tarjetas de resultado.
+- Verificado: `import main` → 65 rutas, `alembic heads` = `0020`; `tsc --noEmit` limpio,
+  lint 4 preexistentes (0 nuevos), `build` OK. Simulación del cursor (4 páginas, sin
+  repetir ni saltar) pasada por el agente y **contraejemplo interna-vs-referenciada
+  verificado por el revisor**. Revisión `revisor-calidad`: **APTO**, sin bloqueantes.
+- **Falta para cerrar:** guión MC2 ([guion_prueba_market.md](guion_prueba_market.md)
+  §3-octies, secciones Y–Z).
 
 ### MC3 — Feed vertical estilo reels (app, futuro)
 Swipe por anuncio (foto full-screen, precio, ficha resumida, ♡). Condicionado a: web

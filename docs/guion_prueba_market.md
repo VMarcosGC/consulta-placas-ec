@@ -476,6 +476,45 @@ editar una referencia externa después de crearla.
 **Hallazgos del guión M2.10:**
 - (anotar aquí)
 
+## 3-octies. Guión MC2 — Búsqueda y filtros del market
+
+Endpoint nuevo `GET /marketplace/buscar` (lista plana, filtros, cursor). El feed curado de
+MC1 no se tocó. El buscador es independiente de las migraciones; el ♡ sí necesita la 0020.
+
+### Y. Buscar y filtrar
+
+- [ ] `/marketplace` **sin filtros**: se ven los bloques curados de MC1 tal cual (favoritos,
+      destacados, verificados, marcas, recientes, presupuesto, referencias).
+- [ ] Escribir una marca (ej. "Chevrolet") + **Buscar** → los bloques curados se reemplazan
+      por una **grilla plana** de resultados; la URL pasa a `?q=Chevrolet`; arriba sale el
+      conteo y un pill removible.
+- [ ] Un **chip de marca** (bloque "Explora por marca") dispara la misma búsqueda server-side.
+- [ ] Una **banda de presupuesto** aplica `precio_min`/`precio_max`; volver a tocarla la apaga.
+- [ ] Panel **"Filtros"**: Tipo, Combustible, Transmisión, Precio desde/hasta, Año
+      desde/hasta. Cada cambio refetchea y agrega un pill; el botón muestra el conteo de
+      filtros avanzados activos.
+- [ ] Con **Tipo/Combustible/Transmisión** activo, **no aparecen referencias externas** (no
+      tienen ficha) — sí aparecen cuando esos filtros están apagados.
+- [ ] Estado vacío: una combinación imposible → "No encontramos autos con esos filtros.
+      Prueba con menos filtros." (no un error).
+- [ ] `precio_min` mayor que `precio_max` (o año min > max) → lista vacía, **no** rompe.
+
+### Z. Paginación, URL compartible y favoritos
+
+- [ ] Con un filtro amplio (>20 resultados): botón **"Cargar más autos"** agrega la página
+      siguiente y sube el conteo; desaparece cuando ya no hay más.
+- [ ] **URL compartible**: abrir directo **`/marketplace?tipo=suv&precio_max=15000`** en
+      pestaña nueva reproduce la búsqueda (panel abierto con SUV y "Hasta $15.000", grilla
+      filtrada, pills correctos).
+- [ ] URL con valor corrupto **`?tipo=zzz`** → ese filtro se ignora, la página **no** se
+      rompe ni manda basura al backend.
+- [ ] El **♡ favorito** y el badge **"↓ Bajó $X"** siguen funcionando en las tarjetas de
+      resultado (logueado); anónimo → invitación amable, no un 401.
+- [ ] **Quitar pills** uno a uno y **"Limpiar filtros"** → vuelven los bloques curados de MC1.
+
+**Hallazgos del guión MC2:**
+- (anotar aquí)
+
 ## 4. De la versión test a productivo F1 (cuando el guión pase limpio)
 
 1. **Cerrar compuerta M2** en `plan_market_autos.md` + entrada en bitácora con los hallazgos.

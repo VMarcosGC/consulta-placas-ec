@@ -10,6 +10,68 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-21 — Market MC2: búsqueda y filtros del feed (carril comprador)
+
+**Repos:** ambos. Segunda etapa del carril C. Revisado por **revisor-calidad** (**APTO**,
+sin bloqueantes). **Commit sin push.**
+
+**Decisión de arquitectura (Marcos): endpoint nuevo, no reemplazar el feed.** El feed de 3
+cubos (`GET /marketplace/feed`) alimenta la portada curada MC1 y **queda intacto**. La
+búsqueda vive en un endpoint NUEVO de **lista plana** — un feed filtrable y paginado por
+cursor quiere ser una lista ordenada, no tres cubos (en la página 2 ya no puedes "volver a
+poner premium arriba"). Cada endpoint con un trabajo claro; MC1 no se re-verifica. La
+alternativa (reescribir el feed y re-derivar los bloques de MC1) se descartó por riesgo de
+regresión sobre lo recién hecho.
+
+**Backend — `GET /marketplace/buscar`** (público, sin auth):
+- Filtros: `q` (título/marca/modelo, ILIKE), `tipo`/`combustible`/`transmision` (validados
+  contra los `Literal` de la ficha → 422 gratis), `precio_min/max`, `anio_min/max`. Los de
+  ficha salen del JSONB (`motor_suspension->>'combustible'` etc.); el año de la interna sale
+  del vehículo vinculado (interna sin vehículo se excluye si hay filtro de año).
+- **Paginación por cursor keyset** (no offset — el reel de la app MC3 lo reutiliza tal cual).
+  Orden `destacado DESC · creado_en DESC · fuente ASC (internas=0, referenciadas=1) · id
+  DESC`. Cursor opaco (base64 de `{d,c,f,i}`); corrupto → **400**. La condición keyset se
+  arma **por niveles** (no row-value ingenuo) porque `fuente` ordena ASC mientras el resto
+  DESC — una comparación de tupla con direcciones mixtas se saltaría/repetiría filas. Detalle
+  SQLAlchemy: `destacado` es Boolean y no admite `<`, se compara con `cast(..., Integer)`.
+- **Referencias externas**: participan como `destacado=false` (se intercalan con las light
+  por fecha), pero con **cualquier filtro de ficha activo se omiten por completo** (no tienen
+  ficha, no pueden cumplirlo; el join a `FichaPublicacion` es INNER).
+- **Dos queries, sin N+1**: keyset sobre una proyección liviana (4 columnas) para obtener los
+  `(fuente,id)` de la página en orden, luego hidratación en lote con `selectinload`
+  (vehículo+mantenimientos+ficha+fotos). El keyset filtra en BD, no en Python.
+- Privacidad: reusa `PublicacionInternaSalida`/`PublicacionReferenciadaSalida` (sin VIN, sin
+  nombre del dueño, sin `vehiculo_id`); solo internas `activa` y referenciadas
+  `activa+aprobada`. **Sin migración** (`alembic heads` = `0020`); índices GIN/btree anotados
+  como deuda para cuando haya volumen (decenas de filas hoy).
+
+**Frontend:** `/marketplace` sin filtros = bloques curados MC1 intactos; con filtro o
+búsqueda = grilla plana server-side + **"Cargar más autos"** (cursor). **Estado de filtros
+en la URL** (`?q=&tipo=&combustible=&transmision=&precio_min=&precio_max=&anio_min=&anio_max=`,
+compartible); `leerFiltros` valida contra los catálogos, así un `?tipo=zzz` manipulado se
+descarta sin pegarle al backend. Los chips de marca y las bandas de presupuesto de MC1 ahora
+alimentan los filtros reales; se **eliminó el filtro de texto en cliente**. Nuevo
+`src/lib/busqueda.ts`. Para no repintar stock viejo sin `setState` síncrono en el efecto
+(lint), los resultados se atan a `busqueda.clave`: si no coincide con el filtro actual, la
+grilla dice "Buscando…". ♡ favorito y badge de baja conservados en las tarjetas de resultado.
+
+**Verificación:** `import main` → 65 rutas · `alembic heads` = `0020` · `tsc --noEmit`
+limpio · lint **4 preexistentes, 0 nuevos** · `build` OK. La **simulación del cursor** (7
+publicaciones mezcladas, `limite=2`, 4 páginas sin repetir ni saltar, `siguiente_cursor` →
+null) la corrió el agente; el revisor **verificó a mano el contraejemplo interna-vs-
+referenciada con fecha igual** (la fila-cursor siempre queda excluida en los 4 niveles).
+
+**Pendientes**
+- Correr el **guión MC2** ([guion_prueba_market.md](guion_prueba_market.md) §3-octies,
+  secciones Y–Z).
+- **MC1.1** (feedback de Marcos, ya en el plan) sigue **sin implementar**: reordenar el feed
+  en secciones autocontenidas y reescribir la narrativa de las referencias externas ("autos
+  de otros markets" + disclaimer según completitud de la ficha del referido).
+- Deuda arrastrada: `alembic upgrade head` (0019 + 0020) contra Neon; plegado de acentos en
+  `q`; índices cuando haya volumen. Push acumulado en ambos repos.
+
+---
+
 ## 2026-07-20 — Market M2.10: aclarar Garage vs Publicar + editar referencias
 
 **Repo:** solo frontend (`consulta-placas-web`); **backend intacto** (el PATCH de
