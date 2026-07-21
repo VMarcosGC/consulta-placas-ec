@@ -10,6 +10,57 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-20 — Market M2.10: aclarar Garage vs Publicar + editar referencias
+
+**Repo:** solo frontend (`consulta-placas-web`); **backend intacto** (el PATCH de
+referencias ya existía desde M2.8). Feedback de Marcos. Revisado por **revisor-calidad**
+(**APTO**, sin bloqueantes). **Commit sin push.**
+
+**El problema (tarea 1):** el garage y publicar se sentían idénticos porque el wizard
+recapturaba placa/marca/modelo que el garage ya tiene. **No se fusionaron** —garage es
+historial **privado**, la publicación es un anuncio **público** de venta— sino que se
+**conectaron y diferenciaron**:
+- `mi-garage`: "Publicar este auto" ahora pasa **marca/modelo/año** además de placa y
+  `vehiculo_id` (`?placa=…&vehiculo=…&marca=…&modelo=…&anio=…`). Un vehículo que ya tiene
+  publicación vinculada muestra **"Ya publicado →"** (borrador → mis-publicaciones;
+  activa/pausada/vendida → `/marketplace/{id}`), sin perder los CTA de ficha de M2.8. Copy
+  breve que explica la diferencia: *"Tu garage es privado (tu historial). Publicar crea un
+  anuncio público de venta."*
+- Wizard paso 1: cuando llega prellenado desde el garage, **no vuelve a pedir** esos datos
+  —bloque de confirmación "Publicando desde tu garage → {marca} {modelo} {año}" con título
+  propuesto editable y un "Ajustar o publicar otra placa" que devuelve al modo manual.
+  marca/modelo/año son **solo contexto**: no son campos de la publicación interna, así que
+  **no se envían** al POST (el flujo por placa suelta queda intacto).
+- Detalle `/marketplace/{id}`: chip **"Vive en tu garage"** — **solo para el dueño**.
+
+**Privacidad del chip.** `vehiculo_id` **no** viaja en ninguna salida pública
+(`PublicacionInternaSalida`/`PublicacionDetalleSalida` no lo exponen; solo está en el input
+`...Crear`). El chip se infiere en el cliente cruzando la **placa** contra el garage propio
+y solo si `esMia`; el fetch del garage **falla cerrado** (si no carga, no hay chip) y no se
+dispara para anónimos (retorno temprano sin sesión). Un comprador nunca ve el chip ni el id.
+
+**Editar referencias externas (tarea 2).** El backend ya lo soportaba
+(`PATCH /marketplace/referencias/{id}`, devuelve a `pendiente` al cambiar contenido). Faltaba
+la UI: en `mis-referencias`, botón **"Editar"** → formulario inline con los campos ricos
+(marca, modelo, año, precio, ciudad, kilometraje, descripción) + uploader de fotos, todo
+prellenado, con aviso **"Al editar, tu referencia vuelve a revisión."** El uploader
+`FotosReferencia` se **extrajo** de la página de referenciar a un componente reutilizable
+(crear y editar comparten UI). Se agregaron `actualizarReferencia()` en `lib/api.ts` y el
+tipo `ReferenciaActualizar` (mirror del schema). Dejar un campo en blanco **conserva** el
+dato previo (`exclude_unset`); `fotos` es la excepción (viaja completa, así que se puede
+vaciar).
+
+**Verificación:** `tsc --noEmit` limpio · lint **4 preexistentes, 0 nuevos** · `build` OK ·
+backend `git status` sin cambios de código. Revisor **APTO**; su único hallazgo (un
+comentario que decía "null" cuando el código manda `undefined`) se corrigió.
+
+**Pendientes**
+- Correr el **guión M2.10** ([guion_prueba_market.md](guion_prueba_market.md) §3-septies,
+  secciones V–X).
+- Siguen pendientes de M2.8/MC1: `alembic upgrade head` (0019 + 0020) contra Neon.
+
+---
+
 ## 2026-07-20 — Market MC1: portada del market para el comprador
 
 **Repos:** ambos (frontend el grueso; backend **una migración mínima**). Primera etapa del

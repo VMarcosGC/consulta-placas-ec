@@ -245,6 +245,40 @@ ni por URL pública; imposible activar bajo el umbral; light y premium con ficha
 - **Falta para cerrar:** guión v5 ([guion_prueba_market.md](guion_prueba_market.md)
   §3-quinquies, secciones M–P), tras aplicar la migración.
 
+### M2.10 — Aclarar Garage vs Publicar + editar referencias (feedback 2026-07-20)
+1. **Garage ≠ Publicar (UX):** hoy se sienten iguales porque el wizard recaptura datos que
+   el garage ya tiene. NO fusionar (garage = historial privado; publicación = anuncio
+   público). En su lugar CONECTAR: desde una tarjeta del garage, "Publicar este auto" abre
+   el wizard **prellenado** desde el vehículo (placa, marca, modelo, año, vínculo); una
+   publicación con `vehiculo_id` muestra "Vive en tu garage"; copy que explique la
+   diferencia ("Tu garage es privado. Publicar crea un anuncio público."). Revisar que el
+   paso 1 no pida de nuevo lo que ya vino del garage.
+2. **Editar referencias externas (solo frontend — el backend YA lo soporta):**
+   `PATCH /marketplace/referencias/{id}` y el schema `PublicacionReferenciadaActualizar`
+   ya aceptan `fotos`, `descripcion`, `ciudad`, `kilometraje`, precio, etc. Falta la vista:
+   en `/marketplace/mis-referencias`, botón "Editar" por referencia → formulario de edición
+   con uploader de fotos (máx `MAX_FOTOS_REFERENCIA`) y los campos ricos. Recordar al
+   usuario que editar el contenido la devuelve a moderación `pendiente` (regla anti
+   bait-and-switch ya implementada en el router).
+**Compuerta M2.10:** publicar desde el garage prellena sin recapturar; referencia editable
+después de crearla, con carga de fotos; ambas re-probadas.
+
+**Estado (2026-07-20): código implementado, compuerta ABIERTA a la espera de la prueba manual.**
+Solo frontend — **el backend no se tocó** (el PATCH de referencias ya existía desde M2.8).
+- **Garage ↔ Publicar conectados, no fusionados:** "Publicar este auto" pasa
+  marca/modelo/año + `vehiculo_id`; el wizard muestra un bloque de confirmación en vez de
+  recapturar; "Ya publicado →" cuando el vehículo ya tiene anuncio; copy que explica
+  privado vs público; chip **"Vive en tu garage"** solo para el dueño (`vehiculo_id` nunca
+  sale en vistas públicas — verificado por el revisor).
+- **Editar referencias:** botón "Editar" en `mis-referencias` con formulario rico +
+  uploader (`FotosReferencia` extraído a componente reutilizable), aviso "vuelve a
+  revisión"; `actualizarReferencia()` + tipo `ReferenciaActualizar` nuevos.
+- Verificado: `tsc --noEmit` limpio, lint 4 preexistentes (0 nuevos), `build` OK, backend
+  sin cambios de código. Revisión `revisor-calidad`: **APTO**, sin bloqueantes (único
+  hallazgo, un comentario engañoso, corregido).
+- **Falta para cerrar:** guión M2.10 ([guion_prueba_market.md](guion_prueba_market.md)
+  §3-septies, secciones V–X).
+
 ---
 
 ## 2-bis. Carril COMPRADOR (decisión 2026-07-20)

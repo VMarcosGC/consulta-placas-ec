@@ -430,6 +430,52 @@ Probar **en celular** (o DevTools ~360 px) además de escritorio.
 **Hallazgos del guión v6:**
 - (anotar aquí)
 
+## 3-septies. Guión M2.10 — Garage vs Publicar + editar referencias
+
+Solo frontend. Aclara la diferencia garage (privado) / publicación (pública) y habilita
+editar una referencia externa después de crearla.
+
+### V. Publicar desde el garage (sin recapturar)
+
+- [ ] `/mi-garage` (logueado): se lee el texto **"Tu garage es privado (tu historial).
+      Publicar crea un anuncio público de venta."**
+- [ ] Un vehículo con marca/modelo/año y **sin** publicación → botón **"Publicar este auto"**.
+      Al pulsarlo, la URL lleva `?placa=…&vehiculo=…&marca=…&modelo=…&anio=…`.
+- [ ] En el **paso 1 del wizard**, viniendo del garage: aparece un bloque de confirmación
+      **"Publicando desde tu garage → {marca} {modelo} {año} · placa {placa}"** y **no**
+      vuelve a pedir esos datos en frío. El título llega **propuesto** (editable).
+- [ ] Botón **"Ajustar o publicar otra placa"** → reaparecen el select de garage y el campo
+      de placa (modo manual).
+- [ ] Publicar **por placa suelta** (entrar directo a `/marketplace/publicar` sin query):
+      el flujo sigue **igual que antes** (select de garage + campo de placa en frío).
+- [ ] Crear el borrador y volver a `/mi-garage`: ese vehículo muestra el estado de ficha
+      **y** un enlace **"Ya publicado →"** (borrador → mis-publicaciones; activa →
+      `/marketplace/{id}`).
+
+### W. Chip "Vive en tu garage" (privacidad)
+
+- [ ] `/marketplace/{id}` de un anuncio propio **con sesión de dueño**: se ve el chip
+      **"Vive en tu garage"**.
+- [ ] La **misma URL en incógnito** (sin sesión) o con **otra cuenta**: el chip **NO**
+      aparece. `vehiculo_id` no se filtra en ninguna respuesta pública.
+
+### X. Editar una referencia externa
+
+- [ ] `/marketplace/mis-referencias`: cada tarjeta tiene botón **"Editar"** junto a
+      "Eliminar".
+- [ ] Al abrir el formulario: campos ricos (marca, modelo, año, precio, ciudad,
+      kilometraje, descripción) **prellenados** + uploader de fotos, y el aviso
+      **"Al editar, tu referencia vuelve a revisión."**
+- [ ] Subir fotos (máx 5) y guardar → el formulario se cierra y, si la referencia estaba
+      **aprobada**, el badge pasa a **"⏳ En revisión"**.
+- [ ] Dejar un campo de texto en blanco al editar **no borra** el dato previo (se conserva
+      a propósito); vaciar la galería de fotos **sí** la deja sin fotos.
+- [ ] El formulario de **referenciar** (crear) sigue funcionando igual: el uploader se ve y
+      opera idéntico (componente extraído, sin regresión).
+
+**Hallazgos del guión M2.10:**
+- (anotar aquí)
+
 ## 4. De la versión test a productivo F1 (cuando el guión pase limpio)
 
 1. **Cerrar compuerta M2** en `plan_market_autos.md` + entrada en bitácora con los hallazgos.
