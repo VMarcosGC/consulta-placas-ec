@@ -10,6 +10,29 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-07-25 — Market: detalle público solo lee datos oficiales en caché
+
+**Repos:** ambos. Cierre de la deuda de M2.6/M2.7: una visita al detalle público de
+un anuncio ya no inicia scraping ni encola trabajo para una placa fría.
+
+**Backend:** `GET /consultar/{placa}/perfil` acepta `solo_cache=true` (retrocompatible;
+sin el parámetro conserva el flujo normal). En este modo lee únicamente resultados vigentes
+de `consultas`; en un cache miss devuelve el nuevo estado consolidado `no_consultada`.
+No llama Playwright, servicios externos ni `encolar_scraping`.
+
+**Frontend:** `DatosOficialesMini` del detalle de marketplace usa `solo_cache=true`.
+Una placa sin datos muestra “Aún no hay datos oficiales disponibles” y enlaza a la consulta
+completa; solo muestra “Consultando” cuando una consulta normal realmente dejó una fuente
+en `en_proceso`. Se actualizó el tipo espejo `EstadoFuenteConsolidada`.
+
+**Verificación:** 4 pruebas unitarias backend (placa fría, ANT cacheado, selección
+cache-only y flujo normal) OK; `import main` = 65 rutas; `alembic heads` = `0020`;
+`npx tsc --noEmit --incremental false` OK; `git diff --check` OK. Revisión
+`revisor-calidad`: **APTO PARA COMMIT**, sin bloqueantes.
+
+**Pendiente:** prueba manual contra una placa fría y otra precargada, después de aplicar
+las migraciones `0019` y `0020` en Neon.
+
 ## 2026-07-21 — Market MC2: búsqueda y filtros del feed (carril comprador)
 
 **Repos:** ambos. Segunda etapa del carril C. Revisado por **revisor-calidad** (**APTO**,

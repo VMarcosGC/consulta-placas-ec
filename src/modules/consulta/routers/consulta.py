@@ -33,6 +33,7 @@ from src.modules.consulta.services.cache import (
     TTL_TRANSACCIONAL_MINUTOS,
 )
 from src.modules.consulta.services.cola import encolar_scraping, fuente_en_error_reciente
+from src.modules.consulta.services.catalogo_fuentes import CATALOGO_FUENTES
 from src.modules.consulta.services.consolidador import consolidar_placa
 from src.modules.consulta.services.proveedor import (
     capacidades_proveedor,
@@ -292,9 +293,46 @@ async def _obtener_fuentes_placa(sesion: Session, placa_limpia: str) -> dict:
     }
 
 
+def _leer_fuente_solo_cache(sesion: Session, placa_limpia: str, fuente: str) -> dict:
+    """Lee una fuente de caché sin consultar ni encolar trabajo externo.
+
+    Se usa desde el detalle público del marketplace: una visita o un crawler no debe
+    disparar Playwright ni trabajos del worker para una placa que aún no fue consultada.
+    El estado interno `no_consultada` permite al consolidador distinguir este cache miss
+    de una fuente que todavía no está integrada.
+    """
+    try:
+        cacheada = obtener_consulta_reciente(sesion, placa_limpia, fuente)
+        if cacheada is not None:
+            return {**cacheada, "_cache": True}
+    except Exception as e:
+        logger.warning("Cache lookup falló para %s/%s: %r", fuente, placa_limpia, e)
+        sesion.rollback()
+
+    return {
+        "fuente": fuente,
+        "placa": placa_limpia,
+        "estado": "no_consultada",
+        "datos": None,
+    }
+
+
+async def _obtener_fuentes_placa_solo_cache(sesion: Session, placa_limpia: str) -> dict:
+    """Obtiene el perfil únicamente con resultados vigentes ya cacheados.
+
+    No invoca servicios externos, no usa Playwright y no encola al worker. Mantiene
+    todas las claves del catálogo para que `estado_fuentes` siga siendo estable.
+    """
+    return {
+        fuente: _leer_fuente_solo_cache(sesion, placa_limpia, fuente)
+        for fuente in CATALOGO_FUENTES
+    }
+
+
 @router.get("/consultar/{placa}/perfil", response_model=VehiculoConsolidadoResponse)
 async def consultar_perfil(
     placa: str,
+    solo_cache: bool = False,
     sesion: Session = Depends(obtener_sesion),
     usuario: Usuario | None = Depends(usuario_actual_opcional),
 ):
@@ -314,7 +352,11 @@ async def consultar_perfil(
         productos_desbloqueados(sesion, usuario.id, placa_limpia) if usuario else set()
     )
     catalogo = catalogo_activo(sesion)
-    fuentes = await _obtener_fuentes_placa(sesion, placa_limpia)
+    fuentes = (
+        await _obtener_fuentes_placa_solo_cache(sesion, placa_limpia)
+        if solo_cache
+        else await _obtener_fuentes_placa(sesion, placa_limpia)
+    )
     # Proveedor: NO se llama en el preview gratis. Solo se lee lo ya cacheado (de un
     # desbloqueo previo) y las capacidades (para marcar las tarjetas disponibles).
     proveedor_datos = leer_proveedor_cacheado(sesion, placa_limpia)

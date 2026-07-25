@@ -34,6 +34,7 @@ class EstadoFuente(str, Enum):
     ERROR = "error"                     # error técnico del scraping
     CONSULTA_EXTERNA = "consulta_externa"  # se ofrece enlace al portal (SRI)
     NO_INTEGRADA = "no_integrada"       # fuente del catálogo aún sin servicio
+    NO_CONSULTADA = "no_consultada"     # modo solo caché sin resultado vigente
 
     @classmethod
     def desde_estado_servicio(cls, estado: str | None) -> "EstadoFuente":
@@ -47,6 +48,7 @@ class EstadoFuente(str, Enum):
             "bloqueado_captcha": cls.ERROR,
             "consulta_externa": cls.CONSULTA_EXTERNA,
             "pendiente_integracion": cls.NO_INTEGRADA,
+            "no_consultada": cls.NO_CONSULTADA,
         }
         return mapa.get(estado or "", cls.ERROR)
 
