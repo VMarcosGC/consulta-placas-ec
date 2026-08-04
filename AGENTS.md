@@ -438,3 +438,51 @@ Aplicación práctica: para AMT terminamos en ~6 rondas porque saltamos estos pa
 - No commitear `.env` o variables sensibles. Todas las claves se generan o se piden por env var.
 - No mezclar lógica de UI con lógica de scraping — frontend y backend están separados a propósito.
 - No agregar campos sensibles (VIN, motor, chasis, kilometraje real) a respuestas públicas — usar schemas con nivel de visibilidad apropiado.
+
+
+---
+
+## 16. Ruteo de ejecución entre herramientas
+
+Claude Code y Codex leen este archivo y ambos pueden ejecutar el mismo trabajo.
+La elección no es por costumbre ni por cuál esté abierta.
+
+**Va a Claude Code** cuando el diff correcto depende de entender otras partes del
+sistema: cambios que cruzan módulos DDD (§1.1), migraciones Alembic, contratos de
+API o schemas Pydantic, modelo de tokens, y todo lo que toque ofuscación (§7) o
+privacidad (§9).
+
+**Va a Codex** cuando la tarea es cercada y su criterio de aceptación es obvio:
+selectores de scrapers contra fixtures, tests, bumps de dependencias, cambios
+mecánicos con alcance de archivos ya definido.
+
+Codex trabaja leyendo este archivo. **No tiene agentes propios en `.codex/`, y es
+deliberado**: los `.toml` eran copia de `.claude/agents/*.md` y se eliminaron para
+que exista una sola fuente. No recrearlos.
+
+Ante duda entre ambos, gana Codex. La cuota de Claude Pro es el recurso escaso y se
+reserva para el trabajo que requiere criterio arquitectónico.
+
+### 16.1 Independencia de la revisión
+
+`revisor-calidad` corre en la herramienta que **no** ejecutó el trabajo.
+
+- Ejecutó Claude Code → revisa Codex, contra este archivo y el checklist §5 de
+  `docs/plan_market_autos.md`.
+- Ejecutó Codex → revisa `revisor-calidad` en Claude Code.
+
+Un modelo que revisa su propio diff tiende a confirmar la interpretación con la que
+lo escribió. Ese es justamente el error que la revisión debe atrapar: no un fallo de
+estilo, sino haber implementado algo **adyacente** a lo pedido.
+
+Por eso el revisor recibe siempre **qué se pidió**, no solo el diff. Sin el
+requisito original, el checklist detecta violaciones de reglas generales pero no
+puede detectar que se resolvió el problema equivocado.
+
+### 16.2 Sandbox de Codex y scrapers
+
+Los fixes de selectores se testean contra un fixture HTML capturado de la página
+real, guardado en `tests/fixtures/<fuente>_<AAAAMMDD>.html`. Nunca contra el sitio
+vivo: los tests deben ser deterministas y no romperse cuando AMT o FGE cambien el DOM.
+
+La captura del fixture la hace el humano antes de asignar la tarea.
