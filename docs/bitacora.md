@@ -8,6 +8,41 @@ Complementa, no reemplaza:
 Entradas nuevas arriba (más reciente primero). Formato por entrada:
 fecha · rama · qué se hizo · verificación · pendientes.
 
+> **Nota de corrección (2026-08-05) — sobre los "Commit sin push" de julio.**
+> Las entradas del 2026-07-18 al 2026-07-25 llevan marcas de *"Commit sin push"*,
+> *"Push pendiente de ambos repos"* o *"Push acumulado"*. **Ninguna sigue vigente:** el
+> backend ya estaba sincronizado y los 3 commits del frontend (M2.10, MC2 y el fix de
+> `solo_cache`) se pushearon el 2026-08-05, con el build desplegado verificado. Ver la
+> entrada *"Frontend pusheado: la deuda de M2.6/M2.7 queda cerrada en producción"*.
+> Se dejan tal cual porque son el registro de lo que pasó ese día; esta nota es el
+> puntero para no volver a leerlas como estado actual. La lección de fondo: un pendiente
+> arrastrado entrada tras entrada deja de leerse, y por eso conviene comprobar el estado
+> real antes de escribirlo (es lo que persigue TASK-007).
+
+---
+
+## 2026-08-05 — Frontend pusheado: la deuda de M2.6/M2.7 queda cerrada en producción
+
+**Repo:** `consulta-placas-web`. Se pushearon los **3 commits** que estaban solo en local
+desde el 20-25 de julio: `ad46440` (M2.10), `a4cb76d` (MC2) y `98372e4` (fix de
+`solo_cache`). `origin/main` quedó sincronizado con el local.
+
+**Lo importante no es el push, es lo que destraba.** La entrada del 2026-07-25 declaraba
+cerrada la deuda de M2.6/M2.7 —el detalle público de un anuncio disparaba scraping en
+*cache miss* sobre una página indexable— pero el arreglo vivía **solo en local**. Estuvo
+documentado como resuelto y sin resolver durante once días. Ahora sí está en producción.
+
+**Verificado sobre el sitio desplegado, no sobre el push.** Un push no es un deploy, así
+que se descargaron los bundles de `/marketplace` en Vercel y se buscaron marcadores del
+código nuevo: **`solo_cache` está presente**, junto con `Cargar más`, `combustible`,
+`transmision`, `precio_min` y `anio_max` (MC2). Como `solo_cache` solo existe en `98372e4`,
+que es el HEAD de `origin/main`, los otros dos commits son ancestros suyos y están
+necesariamente incluidos en ese build. (`"Vive en tu garage"`, de M2.10, no aparece en
+esos bundles porque vive en el chunk del detalle, no en el de `/marketplace`.)
+
+**Consecuencia:** de las cinco discrepancias que abrieron este ciclo, esta era la única con
+impacto sobre usuarios reales. Queda cerrada **y comprobada**, que no es lo mismo.
+
 ---
 
 ## 2026-08-05 — Ciclo real de migraciones contra BD desechable (desbloquea TASK-001)
@@ -244,6 +279,9 @@ que motivaron este ciclo: la bitácora venía registrando intención):
 - **Frontend con 3 commits sin pushear** (M2.10, MC2 y el fix de `solo_cache`), verificado
   con `git fetch`. Por eso la deuda de M2.6/M2.7 que la entrada del 2026-07-25 declara
   cerrada **sigue viva para los usuarios**: el fix existe solo en local. Es la tarea T1.
+  > **RESUELTO el 2026-08-05:** los 3 commits se pushearon y el build desplegado se
+  > verificó marcador a marcador. La deuda está cerrada en producción. Ver la entrada
+  > "Frontend pusheado", arriba.
 - **Pre-flight del backfill de TASK-001 (limpio):** 0 publicaciones con `usuario_id`
   huérfano en `publicaciones_internas` y `publicaciones_referenciadas`; 3 vendedores a
   crear; 2 internas y 3 referenciadas; ningún usuario con `nombre` vacío, así que el
