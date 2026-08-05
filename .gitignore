@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 .env
+# Config local de desarrollo (p. ej. la BD desechable de migraciones). Nunca se sube.
+.env.local
+# Carpeta de traspaso de documentos hacia docs/. Su contenido se copia y se versiona
+# allí; dejarla en el repo duplicaría specs y arriesgaría versiones contradictorias.
+zip/
 /debug/
 debug_*.png
 debug_*.html
