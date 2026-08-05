@@ -164,7 +164,21 @@ las tocó o las reubicó:
   Se reactiva cuando el flujo de particulares funcione con usuarios reales. El plan la
   listaba antes de M5; ese orden ya no aplica.
 
-## 7. Fuera de este ciclo
+## 7. Candidatos a discutir por separado
+
+Cosas que aparecieron ejecutando el ciclo, que **no son deuda ni bug**, sino decisiones de
+producto que merecen su propia conversación en vez de colarse dentro de otra tarea.
+
+- **Jerarquía de CTAs en el detalle del anuncio.** Al implementar el contacto (TASK-011)
+  se ascendió "Ver teléfono" a CTA primario y "Verificar esta placa" bajó a secundario.
+  **Se revirtió** en la auditoría: hoy manda "Verificar esta placa", como antes. El
+  argumento a favor del cambio es real —en un market, contactar es la acción de conversión—
+  pero cambiar qué acción manda en un anuncio afecta al posicionamiento del producto
+  (§1.0.1: la consulta es complemento, el market es el producto) y no debía decidirse
+  dentro de una tarea de contacto. Decidir con el guión de prueba en la mano, o con datos
+  de `ContactoRevelado` cuando haya tráfico real.
+
+## 8. Fuera de este ciclo
 
 Patios e ingesta masiva (etapa 2). Pasarela de pago. SRI y FGE. Feed tipo reels y app
 móvil. Mensajería interna. Verificación de teléfono por OTP.

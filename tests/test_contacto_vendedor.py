@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 
 import main
 from src.core.database import obtener_sesion
-from src.modules.auth.dependencies import usuario_actual
+from src.modules.auth.dependencies import usuario_actual, usuario_actual_opcional
 from src.modules.auth.models import Usuario
 from src.modules.marketplace.models import (
     ContactoRevelado,
@@ -364,7 +364,12 @@ class ContactoPublicacionTests(unittest.TestCase):
         sesion.add.assert_not_called()
 
     def test_no_exige_autenticacion_ni_cobra_tokens(self):
-        """El contacto es público y libre (§1.0.3): sin `usuario_actual`, sin 402."""
+        """El contacto es público y libre (§1.0.3): sin `usuario_actual`, sin 402.
+
+        La auth es **opcional**: `usuario_actual_opcional` sí está entre las dependencias
+        (nunca lanza 401) y solo sirve para no contar al propio vendedor en la métrica.
+        Lo que no puede aparecer es `usuario_actual`, que exigiría sesión.
+        """
         sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
         self._con_sesion(sesion)
 
@@ -378,6 +383,61 @@ class ContactoPublicacionTests(unittest.TestCase):
         )
         nombres_dependencias = {d.call.__name__ for d in ruta.dependant.dependencies}
         self.assertNotIn("usuario_actual", nombres_dependencias)
+        self.assertIn("usuario_actual_opcional", nombres_dependencias)
+
+
+class ContactoNoCuentaAlVendedorTests(unittest.TestCase):
+    """El dueño del anuncio recibe el contacto, pero no ensucia la métrica de demanda.
+
+    `ContactoRevelado` existe para medir **demanda de compradores**. El vendedor abriendo
+    su propio anuncio no es demanda, y con un puñado de cuentas de prueba el autoconsumo
+    domina el número desde el primer día — es exactamente lo que pasó con los desbloqueos
+    por tokens, que resultaron ser todos del equipo y por eso no dicen nada.
+    """
+
+    def setUp(self):
+        self.cliente = TestClient(main.app)
+
+    def tearDown(self):
+        main.app.dependency_overrides.clear()
+
+    def _con(self, sesion, usuario):
+        main.app.dependency_overrides[obtener_sesion] = lambda: sesion
+        main.app.dependency_overrides[usuario_actual_opcional] = lambda: usuario
+
+    def test_el_vendedor_recibe_el_contacto_pero_no_se_registra(self):
+        sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
+        self._con(sesion, _usuario())  # id=7 == `_vendedor().usuario_id`
+
+        respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["telefono"], "593987654321")
+        # Ni la fila ni el commit: la métrica queda intacta.
+        sesion.add.assert_not_called()
+        sesion.commit.assert_not_called()
+
+    def test_otro_usuario_autenticado_si_cuenta(self):
+        """Estar logueado no exime: solo se descuenta al vendedor de ESE anuncio."""
+        sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
+        self._con(sesion, _usuario(id_=99, nombre="Compradora"))
+
+        respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(sesion.add.call_count, 1)
+        self.assertIsInstance(sesion.add.call_args.args[0], ContactoRevelado)
+
+    def test_anonimo_sigue_registrando_igual_que_antes(self):
+        """Sin token, el comportamiento no cambia: es el caso mayoritario."""
+        sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
+        self._con(sesion, None)
+
+        respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(sesion.add.call_count, 1)
+        sesion.commit.assert_called_once()
 
 
 def _indice_ruta(path: str, metodo: str) -> int:

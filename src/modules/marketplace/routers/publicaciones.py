@@ -22,7 +22,11 @@ from sqlalchemy import select, and_, or_, cast, literal, union_all, Integer
 from sqlalchemy.orm import Session, selectinload
 
 from src.core.database import obtener_sesion
-from src.modules.auth.dependencies import usuario_actual, admin_actual
+from src.modules.auth.dependencies import (
+    usuario_actual,
+    usuario_actual_opcional,
+    admin_actual,
+)
 from src.modules.auth.models import Usuario
 from src.modules.tokens.service import debitar_tokens, SaldoInsuficiente
 from src.modules.vehiculos.models.vehiculo import Vehiculo
@@ -1074,6 +1078,7 @@ def _vendedor_de(sesion: Session, pub: PublicacionInterna) -> Vendedor | None:
 def revelar_contacto(
     publicacion_id: int,
     sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario | None = Depends(usuario_actual_opcional),
 ):
     """Devuelve el contacto del vendedor y registra la revelación (métrica anónima).
 
@@ -1082,6 +1087,17 @@ def revelar_contacto(
     - **409** si el vendedor todavía no cargó un teléfono. Es "dato no disponible", no
       un fallo: se responde con copy que explica la alternativa, nunca un 500.
     - Registra un `ContactoRevelado` **anónimo**: ni IP, ni user-agent, ni usuario (§9).
+
+    **Auth opcional** (`usuario_actual_opcional`, nunca 401): el endpoint sigue siendo
+    público y sin token se comporta igual que antes. Si llega un Bearer válido y quien
+    consulta **es el propio vendedor**, se le devuelve el contacto pero **no se registra
+    la revelación**: `ContactoRevelado` mide *demanda de compradores*, y el vendedor
+    mirando su propio anuncio no es demanda. Con un puñado de cuentas de prueba, el
+    autoconsumo domina la métrica desde el primer día — es lo que ya pasó con los
+    desbloqueos por tokens, todos del equipo, que por eso no dicen nada.
+
+    Un token inválido o vencido no rompe nada: `usuario_actual_opcional` devuelve `None`
+    y el flujo cae en la rama anónima.
     """
     pub = sesion.execute(
         select(PublicacionInterna).where(
@@ -1106,8 +1122,14 @@ def revelar_contacto(
             ),
         )
 
-    sesion.add(ContactoRevelado(publicacion_interna_id=pub.id))
-    sesion.commit()
+    # El dueño del anuncio no cuenta como demanda: se le entrega el contacto igual, pero
+    # sin ensuciar la métrica. Se compara contra el vendedor RESUELTO (no contra
+    # `pub.usuario_id`), que es quien de verdad recibe los mensajes; en la etapa 2 esos
+    # dos dejan de coincidir.
+    es_el_vendedor = usuario is not None and vendedor.usuario_id == usuario.id
+    if not es_el_vendedor:
+        sesion.add(ContactoRevelado(publicacion_interna_id=pub.id))
+        sesion.commit()
 
     return ContactoVendedorSalida(
         telefono=vendedor.telefono,
