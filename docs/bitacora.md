@@ -21,6 +21,47 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-05 — Un solo planificador: el eje M pasa a historia y la serie TASK se unifica
+
+**Solo documentación.** Ningún archivo de `src/`, `alembic/` ni `tests/`.
+
+**El problema.** Había **dos ejes planificando a la vez**. El plan tenía M0→M5 y el orden
+de trabajo tenía TASK-001→007, y describían el mismo trabajo con nombres distintos: el
+contacto comprador-vendedor era **a la vez "M5" y "TASK-001"**. Consecuencia visible: el
+plan seguía listando M5 como etapa futura cuando su backend ya estaba implementado,
+auditado y pusheado. Además circulaban **dos series TASK incompatibles**: en el orden de
+trabajo TASK-002 era "frontend del contacto"; en el backlog, "coherencia del bundle".
+
+**Qué se decidió**
+- **`ORDEN-DE-TRABAJO.md` es el único planificador**; la unidad de trabajo es la spec
+  `TASK-NNN` de `docs/specs/`.
+- **`plan_market_autos.md` pasa a historia de lo construido.** Se conserva entero —es buen
+  registro de decisiones por etapa— pero deja de decir qué viene. Su checklist §5 y su
+  ritual §3 siguen vigentes: son proceso, no planificación.
+- **M5** queda marcada con el **backend hecho** y apunta a TASK-001; su frontend es
+  TASK-011. **M4 (patios)** se marca **etapa 2** por AGENTS §1.0.2, y se anota que el orden
+  original del plan (M4 antes de M5) ya no aplica.
+
+**Renumeración TASK.** Se conserva la serie del backlog (003–009 ya coincidían, y
+008/009/010 solo existían ahí) y el **frontend del contacto pasa de TASK-002 a TASK-011**.
+Queda constancia en `ORDEN-DE-TRABAJO.md` §2 para que nadie busque el número viejo.
+
+**Estado registrado con evidencia** (P0 proveedor `mock` cortado y verificado en el
+catálogo público · P1 frontend `b953710..98372e4` pusheado y verificado en el build
+desplegado · P2 `e9c969e` · TASK-001 `99e1fbf`, auditada por Codex y con migraciones
+probadas contra Postgres real, pendiente solo el merge), más el orden de lo que sigue y el
+backlog por riesgo.
+
+**Corrección menor:** el archivo decía "siete compuertas abiertas" y enumeraba **ocho**
+(M2, M2.5, M2.6, M2.7, M2.8, M2.10, MC1, MC2). Se buscó en todo el repo: el error **no se
+había propagado** a ningún otro documento.
+
+**Nota:** se evaluó crear un `ESTADO-CICLO.md` nuevo y se descartó — habría sido un tercer
+documento de estado compitiendo con los dos que ya existían, que es justo el problema que
+esta entrada resuelve.
+
+---
+
 ## 2026-08-05 — Frontend pusheado: la deuda de M2.6/M2.7 queda cerrada en producción
 
 **Repo:** `consulta-placas-web`. Se pushearon los **3 commits** que estaban solo en local

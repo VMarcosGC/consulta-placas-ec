@@ -1,6 +1,18 @@
 # Plan del Market de Autos — etapas, agentes y control de calidad
 
-**Fecha:** 2026-07-18 · **Estado:** vigente
+**Fecha:** 2026-07-18 · **Estado:** **historia de lo construido** (desde 2026-08-05)
+
+> **Este documento ya NO planifica.** El eje M (M0→M5, MC1→MC3) se conserva como
+> **registro de lo que se construyó** en cada etapa: qué se hizo, con qué decisiones y qué
+> compuerta quedó abierta. Es material de consulta, no la lista de lo que viene.
+>
+> **El planificador del ciclo es [`ORDEN-DE-TRABAJO.md`](ORDEN-DE-TRABAJO.md)** y la unidad
+> de trabajo es la spec `TASK-NNN` de [`specs/`](specs/). Motivo: tener dos ejes vivos hizo
+> que el mismo trabajo tuviera dos nombres —el contacto comprador-vendedor era a la vez
+> "M5" y "TASK-001"—, y que una etapa se diera por futura cuando su backend ya estaba
+> hecho. Donde una etapa M siga viva, se dice abajo y se apunta a su spec TASK.
+>
+> El **checklist §5** y el **ritual §3** siguen vigentes: son proceso, no planificación.
 **Contexto:** el pilar de consulta llegó a su techo razonable (SRI/FGE passthrough, AMT
 vía worker, proveedor real pendiente de API key). El foco pasa al **market de autos**
 para uso particular y patios. La etapa M0 (ficha técnica: 3 bloques + extras) ya está
@@ -375,7 +387,15 @@ validada + volumen de fotos de calidad. No construir antes.
 **Compuerta M3:** filtros combinables sin N+1 (revisar SQL emitido); feed pagina; sin
 regresión del orden premium → light → referenciadas.
 
-### M4 — Cuentas de patio (multi-vehículo)
+### M4 — Cuentas de patio (multi-vehículo) → **ETAPA 2, fuera de este ciclo**
+> **Reubicada (2026-08-05).** AGENTS §1.0.2 dejó los patios y la ingesta masiva en la
+> **etapa 2**, fuera del alcance vigente. Se reactivan cuando el flujo de **particulares**
+> funcione con usuarios reales. El orden original de este plan la ponía **antes** de M5;
+> ese orden ya no aplica: M5 se hizo primero. Las reglas de negocio siguen sin definir y
+> se definen al abrir la etapa, no antes. La capa `Vendedor` de TASK-001 ya dejó el modelo
+> preparado: la etapa 2 solo levanta la UK de `vendedores.usuario_id` y empieza a usar el
+> tipo `patio`.
+
 **Repos:** ambos · **Decisión de modelo previa con el controller**
 - `perfiles_patio` (usuario_id, nombre comercial, RUC opcional validado con
   `validar_ruc`, ciudad, logo, teléfono): un usuario "patio" publica N vehículos con
@@ -385,7 +405,19 @@ regresión del orden premium → light → referenciadas.
 **Compuerta M4:** página pública del patio; el feed distingue particular vs patio; PII
 del patio es comercial (pública), la del particular sigue protegida.
 
-### M5 — Contacto comprador-vendedor
+### M5 — Contacto comprador-vendedor → **BACKEND HECHO en TASK-001**
+> **Estado (2026-08-05).** Esta etapa **se ejecutó como spec TASK**, no como etapa M: era
+> el mismo trabajo con dos nombres.
+> - **Backend ✅** — [`specs/TASK-001-contacto-vendedor.md`](specs/TASK-001-contacto-vendedor.md),
+>   commit `99e1fbf` en `feat/TASK-001-contacto-vendedor` (falta el merge). Capa `Vendedor`,
+>   `POST /marketplace/publicaciones/{id}/contacto` público y gratis, y `whatsapp_url` con
+>   mensaje prellenado. El "contador de clics como métrica de demanda" de abajo es la tabla
+>   **`ContactoRevelado`**, anónima por §9: sin IP, sin user-agent y sin usuario.
+> - **Frontend ⏳** — **TASK-011** (ver `ORDEN-DE-TRABAJO.md`).
+> - **Compuerta M5 cumplida en el backend:** el teléfono no viaja en feed, `/buscar` ni
+>   detalle; sale solo bajo acción explícita del comprador. Y publicar el número exige un
+>   `nombre_publico` elegido a mano — nada de PII sin opt-in.
+
 - Arranque simple: botón de contacto (WhatsApp deep link con placa/título pre-llenados +
   contador de clics como métrica de demanda). Chat interno queda para después — evitar
   construir mensajería antes de validar demanda.
