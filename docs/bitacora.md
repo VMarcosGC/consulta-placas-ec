@@ -10,6 +10,68 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-05 — Ciclo real de migraciones contra BD desechable (desbloquea TASK-001)
+
+**Rama:** `feat/TASK-001-contacto-vendedor` · **Solo verificación**: ningún archivo de
+`src/` ni `alembic/` cambió. Cierra el criterio de aceptación de TASK-001 que había
+quedado **BLOCKED por falta de una BD desechable**.
+
+**Entorno.** Contenedor `pg-dev` (PostgreSQL 16.14) en `localhost:5433`, con tres bases
+creadas al efecto: `task001_head`, `task001_backfill` y `task001_ref`. **Neon no se tocó
+en ningún momento**: cada invocación llevó `DATABASE_URL` sobrescrita en el entorno y se
+verificó la URL resuelta antes de la primera migración. Control al cerrar: Neon sigue en
+`0020` y sin las tablas nuevas.
+
+**Lo que se ejerció, y su resultado**
+- **Cadena completa desde cero:** las **22 migraciones** corren de `0001` a `0022` sin un
+  solo error. Es la primera vez que la cadena entera se aplica contra una base real; hasta
+  hoy solo se había renderizado SQL offline.
+- **Esquema:** `vendedores` y `contactos_revelados` con las columnas exactas de la spec;
+  `uq_vendedores_usuario_id`; el `CheckConstraint` de exactamente-un-FK; FK a `usuarios`
+  con `CASCADE` y las dos a `vendedores` con `SET NULL`.
+- **Backfill con el escenario acordado** (2 usuarios: uno con 2 publicaciones internas,
+  otro con 1 referencia externa; cargados en `0020` **antes** de aplicar `0021`). Las cinco
+  aserciones pasan: se creó **un solo** vendedor —el del usuario con internas—, el
+  **aportante no recibió perfil**, las 2 internas quedaron con `vendedor_id`, la
+  **referencia quedó en NULL** y **`nombre_publico` quedó NULL**. La reentrancia que
+  promete el docstring también se comprobó: correr el backfill por segunda vez no duplica.
+- **Downgrade sin residuos:** tras `0022→0021→0020`, se comparó el catálogo completo contra
+  una base migrada limpia a `0020`. **Idénticos en los cinco conjuntos**: 18 tablas, 157
+  columnas, 39 constraints, 53 índices y 17 secuencias, sin sobrantes ni faltantes.
+- **Re-upgrade limpio:** volver a `head` después del downgrade corre sin error, así que el
+  downgrade no deja la base en un estado no re-migrable.
+
+**El hueco de restricciones de BD quedó PARCIALMENTE CUBIERTO.** No basta con que las
+restricciones existan: se comprobó que **muerden**. Un segundo vendedor para la misma
+cuenta da `UniqueViolation`; `contactos_revelados` rechaza tanto la fila sin ninguna
+publicación como la que trae las dos, y acepta ambas formas válidas; un `vendedor_id`
+inexistente da `ForeignKeyViolation`; borrar la publicación arrastra sus contactos por
+`CASCADE`; borrar el vendedor deja `vendedor_id` en NULL sin llevarse la publicación.
+
+Consecuencia para los tests: **el test de carrera que estaba simulado queda validado** —
+la UK sí produce el `IntegrityError` que `obtener_o_crear_vendedor` captura, así que el
+`Mock` no estaba fingiendo un comportamiento inexistente.
+
+**TASK-009 sigue vigente**, con el alcance ahora acotado a lo que de verdad falta: los
+**tests de parser de los scrapers** contra fixtures HTML (§14.5 y §16.2), que siguen sin
+existir — `tests/fixtures/` no está creado y cada scraper es un parser sin red de
+seguridad ante un cambio de DOM. La decisión sobre el runner (pytest vs `unittest`) sigue
+ahí también.
+
+**Hallazgo de entorno que originó TASK-010.** `alembic/env.py` toma la URL de
+`src/core/database.py`, que hace `load_dotenv()` — y eso lee **`.env`**, que apunta a
+**Neon de producción**. `.env.local` no lo lee nadie. Hoy el default local ES producción y
+lo único que lo evita es exportar `DATABASE_URL` a mano en cada comando. Un olvido corre
+migraciones contra Neon. Abierta **[TASK-010](specs/TASK-010-entorno-local.md)** (ruteo
+Codex) para invertirlo. Se agregó `.env.local` al `.gitignore`, que solo tenía `.env`
+exacto.
+
+**Limpieza:** se eliminó `zip/` de la raíz (carpeta de traspaso con copias ya versionadas
+en `docs/`, una de ellas una versión **vieja** de la spec de TASK-001) y se agregó al
+`.gitignore` para que no vuelva a entrar.
+
+---
+
 ## 2026-08-04 — TASK-001: capa Vendedor + contacto comprador-vendedor (backend)
 
 **Rama:** `feat/TASK-001-contacto-vendedor` · **Ejecutó:** agente `dev-backend` ·
@@ -45,6 +107,10 @@ anuncio y no tenía cómo llegar al vendedor.
 con `$ref` resueltos · orden de rutas verificado sobre las registradas.
 
 **⚠️ DOS LÍMITES DELIBERADOS — para el auditor de T4: esto NO es una omisión del agente.**
+> **Actualización 2026-08-05:** el límite 1 (ciclo `upgrade`/`downgrade`) **ya no aplica**:
+> se ejerció contra una BD desechable y pasó completo, incluidas las restricciones reales.
+> Ver la entrada del 2026-08-05, arriba. El límite 2 (`unittest` en vez de pytest) sigue
+> vigente y se decide en TASK-009.
 1. **El ciclo `alembic upgrade` / `downgrade` real queda BLOCKED.** `DATABASE_URL` apunta a
    **Neon de producción con datos reales** y aplicar migraciones es tarea de Marcos (modelo
    de trabajo de `plan_market_autos.md`). En su lugar se verificó **offline** con
