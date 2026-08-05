@@ -10,6 +10,74 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-04 — Reorientación de AGENTS.md §1 al marketplace + corrección de la spec TASK-001
+
+**Repo:** solo backend, **solo documentación** (ningún archivo de `src/` ni `alembic/`).
+Abre el ciclo marketplace definido en `docs/ORDEN-DE-TRABAJO.md`. **Commit en `main`, sin push.**
+
+**Qué se hizo**
+- **`AGENTS.md` §1 reemplazada.** La decisión M2.6 (2026-07-19) giró el producto a
+  marketplace y §1 se quedó describiendo el producto anterior ("consulta por placa,
+  cuatro pilares"). Los tres agentes leen este archivo como fuente única, así que
+  decidían con una definición obsoleta. Nueva §1 con §1.0.1 (jerarquía: el marketplace
+  es el producto, la consulta es complemento y **su fallo nunca bloquea el flujo**),
+  §1.0.2 (alcance del ciclo, con tabla de lo que queda fuera y su criterio de
+  reactivación), §1.0.3 (**monetización suspendida, no eliminada**: precios en 0, `mock`
+  prohibido en producción) y §1.0.4 (etapas 1 particulares / 2 patios, con la capa
+  `Vendedor` incorporada desde ya para no pagar una migración cara después).
+  **§1.1 y el resto de la numeración no se tocaron.**
+- **`.claude/agents/revisor-calidad.md`**: el checklist suma que un fallo de consulta
+  externa nunca bloquea publicar, buscar, ver un anuncio ni contactar (§1.0.1).
+- **`docs/specs/TASK-001-contacto-vendedor.md` corregida antes de ejecutarla.** Su
+  "Alcance de archivos" permitía tocar `src/modules/marketplace/router.py`, que **no
+  existe**: el módulo tiene varios grupos y sus routers están en `routers/` (cuatro
+  archivos), que es lo que manda §5. Se disparó la condición de BLOCKED de la propia
+  spec ("si los routers están repartidos de otra forma, reportar antes de crear
+  archivos"). Alcance corregido a `routers/vendedor.py` (nuevo, prefijo
+  `/marketplace/vendedor`), `routers/publicaciones.py` (solo el endpoint de contacto) y
+  una línea de `include_router` en `main.py`. **La spec estaba mal escrita, no el repo.**
+
+**Verificación — estado real, no declarado**
+Contra el sistema, no contra la documentación (es la causa común de las discrepancias
+que motivaron este ciclo: la bitácora venía registrando intención):
+- **Neon está en `0020`**, igual que el head del código. Las cinco entradas previas que
+  arrastraban "⚠️ Marcos debe correr `alembic upgrade head` (0019 + 0020)" describían un
+  pendiente **ya resuelto**.
+- **Backend en Render al día** (expone `solo_cache` en el perfil). Arranque en frío ~19 s.
+- **P0 confirmado en producción:** `identificadores_tecnicos`, `titular_validado` y
+  `reporte_compra_segura` responden `disponible: false`. El proveedor `mock` —que
+  fabricaba VIN y titular y aun así cobraba— está efectivamente cortado.
+- **Frontend con 3 commits sin pushear** (M2.10, MC2 y el fix de `solo_cache`), verificado
+  con `git fetch`. Por eso la deuda de M2.6/M2.7 que la entrada del 2026-07-25 declara
+  cerrada **sigue viva para los usuarios**: el fix existe solo en local. Es la tarea T1.
+- **Pre-flight del backfill de TASK-001 (limpio):** 0 publicaciones con `usuario_id`
+  huérfano en `publicaciones_internas` y `publicaciones_referenciadas`; 3 vendedores a
+  crear; 2 internas y 3 referenciadas; ningún usuario con `nombre` vacío, así que el
+  default de `nombre_publico` aplica a todos.
+
+**Contradicciones detectadas dentro de AGENTS.md, reportadas y NO corregidas**
+La reorientación de §1 dejó dos choques con secciones que no entraban en el alcance:
+- **§3 "Próximas fases"** sigue prometiendo Fase 6 = app móvil + gateway de pago
+  (PlaceToPay/MercadoPago), justo lo que §1.0.2 acaba de poner **fuera de alcance**.
+- **§10.3** lista el catálogo con precios vivos (3/5/8/10/12/40/100 tokens) mientras
+  §1.0.3 declara que **todos los precios están en 0**. Hoy el código le da la razón a
+  §10.3. Es TASK-003 del backlog.
+- Menores: §1.1 rotula los módulos como "Pilar 1+2/3/4" y la `description` de
+  `dev-backend.md` cita "los pilares existentes" — pilares que §1 ya no define. Y §1.0.4
+  introduce el vocabulario "Etapa 1/2" mientras §3 sigue en "Fase 1…6".
+
+**Pendientes**
+- **T1: pushear el frontend** (3 commits). Hasta entonces la deuda de M2.6/M2.7 sigue
+  abierta en producción pese a estar documentada como cerrada.
+- **T3: ejecutar TASK-001** en `feat/TASK-001-contacto-vendedor`, con auditoría cruzada
+  de Codex (§16.1) antes de commitear.
+- Resolver las dos contradicciones de arriba (§3 y §10.3) para que la fuente de verdad
+  deje de contradecirse.
+- `zip/` en la raíz quedó con copias de los tres documentos ya ubicados en `docs/`; no
+  está en `.gitignore`.
+
+---
+
 ## 2026-07-25 — Market: detalle público solo lee datos oficiales en caché
 
 **Repos:** ambos. Cierre de la deuda de M2.6/M2.7: una visita al detalle público de

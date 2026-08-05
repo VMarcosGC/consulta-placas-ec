@@ -22,6 +22,9 @@ Procedimiento:
      salida públicos — nada completo/crudo hacia afuera. Endpoints privados con
      `Depends(usuario_actual)` o `vehiculo_propio`.
    - CRUD sin imports de `services/` de scraping (ant, sri, amt, fiscalia, epmtsd).
+   - Un fallo de consulta externa nunca bloquea el flujo del marketplace (§1.0.1):
+     publicar, buscar, ver un anuncio y contactar no dependen de que una fuente
+     responda.
    - Listados con `selectinload`; ojo con N+1 en relaciones nuevas.
    - Rutas dinámicas declaradas después de las literales del mismo prefijo.
    - Tokens: ningún cobro nuevo por datos gratuitos/transparencia; débitos siempre vía
