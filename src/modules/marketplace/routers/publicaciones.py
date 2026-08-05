@@ -27,6 +27,7 @@ from src.modules.auth.models import Usuario
 from src.modules.tokens.service import debitar_tokens, SaldoInsuficiente
 from src.modules.vehiculos.models.vehiculo import Vehiculo
 from src.modules.marketplace.models import (
+    ContactoRevelado,
     EstadoModeracion,
     EstadoPublicacion,
     EstadoVerificacion,
@@ -35,9 +36,13 @@ from src.modules.marketplace.models import (
     PlanPublicacion,
     PublicacionInterna,
     PublicacionReferenciada,
+    Vendedor,
 )
+from src.modules.marketplace.routers.vendedor import obtener_o_crear_vendedor
 from src.modules.marketplace.schemas import (
+    armar_whatsapp_url,
     Combustible,
+    ContactoVendedorSalida,
     FeedMarketplaceSalida,
     FichaActualizar,
     FichaSalida,
@@ -227,8 +232,16 @@ def crear_publicacion(
 
     es_premium = datos.plan == PlanPublicacion.PREMIUM
 
+    # Identidad comercial que vende (TASK-001). Se resuelve o se crea ANTES de armar la
+    # publicación para que `vendedor_id` quede poblado desde la primera fila: si el alta
+    # no lo enganchara, toda publicación nueva nacería con el vínculo en NULL y la
+    # invariante se degradaría con cada anuncio. Va antes de agregar `pub` a la sesión
+    # porque ante una carrera hace rollback (ver su precondición).
+    vendedor = obtener_o_crear_vendedor(sesion, usuario)
+
     pub = PublicacionInterna(
         usuario_id=usuario.id,
+        vendedor_id=vendedor.id,
         vehiculo_id=datos.vehiculo_id,
         placa=datos.placa,
         titulo=datos.titulo,
@@ -1023,6 +1036,84 @@ def eliminar_foto(
     sesion.delete(foto)
     sesion.commit()
     return None
+
+
+# ──────────────── Contacto con el vendedor (TASK-001) ────────────────
+#
+# Cierra el circuito del marketplace: el comprador pide el número y se va a WhatsApp.
+# PÚBLICO (sin `usuario_actual`) y GRATIS (sin `debitar_tokens`): §1.0.3 dice que el
+# contacto es libre. El teléfono no viaja en el feed ni en el detalle — solo aquí, bajo
+# una acción explícita, que además es la barrera contra el scraping de números (§9).
+#
+# Va declarado ANTES de la dinámica `GET /publicaciones/{publicacion_id}` del final (§5).
+
+
+def _vendedor_de(sesion: Session, pub: PublicacionInterna) -> Vendedor | None:
+    """Resuelve el vendedor de una publicación interna por su vínculo explícito.
+
+    **Una sola vía: `vendedor_id`.** La migración `0021` lo pobló en las publicaciones
+    que ya existían y `crear_publicacion` lo puebla en las nuevas, así que no hace falta
+    resolución alternativa.
+
+    Deliberadamente NO se cae a `Vendedor.usuario_id == pub.usuario_id`. Ese atajo es
+    equivalente solo mientras la relación cuenta↔vendedor sea 1:1: en la etapa 2, con la
+    UK levantada, devolvería un vendedor **arbitrario** de la cuenta —en silencio y sin
+    forma de notarlo— o reventaría con `MultipleResultsFound` en un 500. Un `vendedor_id`
+    en NULL debe salir como 409 ("todavía no hay contacto"), que es honesto y visible.
+    """
+    if pub.vendedor_id is None:
+        return None
+    return sesion.execute(
+        select(Vendedor).where(Vendedor.id == pub.vendedor_id)
+    ).scalar_one_or_none()
+
+
+@router.post(
+    "/publicaciones/{publicacion_id}/contacto", response_model=ContactoVendedorSalida
+)
+def revelar_contacto(
+    publicacion_id: int,
+    sesion: Session = Depends(obtener_sesion),
+):
+    """Devuelve el contacto del vendedor y registra la revelación (métrica anónima).
+
+    - **404** si la publicación no existe o no es visible públicamente (borrador,
+      pausada o vendida): indistinto, para no revelar qué ids existen.
+    - **409** si el vendedor todavía no cargó un teléfono. Es "dato no disponible", no
+      un fallo: se responde con copy que explica la alternativa, nunca un 500.
+    - Registra un `ContactoRevelado` **anónimo**: ni IP, ni user-agent, ni usuario (§9).
+    """
+    pub = sesion.execute(
+        select(PublicacionInterna).where(
+            and_(
+                PublicacionInterna.id == publicacion_id,
+                PublicacionInterna.estado == EstadoPublicacion.ACTIVA.value,
+            )
+        )
+    ).scalar_one_or_none()
+    if pub is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Publicación no encontrada"
+        )
+
+    vendedor = _vendedor_de(sesion, pub)
+    if vendedor is None or not vendedor.telefono:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Este anuncio todavía no tiene un número de contacto publicado. "
+                "Puedes guardarlo en favoritos y volver a intentarlo más tarde."
+            ),
+        )
+
+    sesion.add(ContactoRevelado(publicacion_interna_id=pub.id))
+    sesion.commit()
+
+    return ContactoVendedorSalida(
+        telefono=vendedor.telefono,
+        nombre_publico=vendedor.nombre_publico,
+        whatsapp_url=armar_whatsapp_url(vendedor.telefono, pub.titulo or pub.placa),
+    )
 
 
 # NOTA de orden: esta ruta con path param dinámico va AL FINAL del router. Si se

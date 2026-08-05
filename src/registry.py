@@ -31,10 +31,12 @@ from src.modules.consulta.models.desbloqueos import (  # noqa: F401
 
 # marketplace
 from src.modules.marketplace.models import (  # noqa: F401
+    ContactoRevelado,
     EnlaceCompartido,
     EstadoModeracion,
     FichaPublicacion,
     FotoPublicacion,
     PublicacionInterna,
     PublicacionReferenciada,
+    Vendedor,
 )

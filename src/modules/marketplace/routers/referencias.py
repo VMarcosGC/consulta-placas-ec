@@ -86,6 +86,12 @@ def crear_referencia(
     `fuente` se deriva del dominio del link (no se confía en el cliente). Si el mismo
     `url_externa` ya existe → 409 (dedup por índice único).
     """
+    # `vendedor_id` se deja NULL A PROPÓSITO (TASK-001) — no es un olvido, no lo
+    # "arregles": aquí `usuario_id` es el APORTANTE, quien copió un anuncio ajeno de
+    # Facebook o Mercado Libre. El vendedor real es un tercero sin cuenta en la
+    # plataforma. Engancharle el `Vendedor` del aportante publicaría su nombre y su
+    # teléfono como si vendiera este auto, que es falso y expone PII de alguien que solo
+    # aportó un enlace. La columna espera a la etapa 2.
     ref = PublicacionReferenciada(
         usuario_id=usuario.id,
         url_externa=datos.url_externa,

@@ -58,14 +58,24 @@ despliegue, y el repo frontend (va en tarea aparte).
 | `id` | BigInteger PK | |
 | `usuario_id` | FK `usuarios.id` ON DELETE CASCADE, **UNIQUE** | la UK impone 1:1 en etapa 1; se levanta en etapa 2 |
 | `tipo` | Enum `particular` \| `patio` | `particular` por defecto y único valor usado en este ciclo |
-| `nombre_publico` | String(120) | por defecto el nombre del usuario |
+| `nombre_publico` | String(120) nullable | **NULL** mientras el vendedor no lo elija; no se hereda del nombre de la cuenta (ver opt-in en Endpoints) |
 | `telefono` | String(20) nullable | E.164 sin `+` (ej. `593987654321`) |
 | `telefono_verificado` | Boolean default false | reservado; no se usa en este ciclo |
 | `creado_en` / `actualizado_en` | timestamptz | patrón existente |
 
-`PublicacionInterna` y `PublicacionReferenciada` reciben `vendedor_id`.
+`PublicacionInterna` y `PublicacionReferenciada` reciben la **columna** `vendedor_id`.
 `usuario_id` **se conserva** en ambas: en referenciadas documenta al aportante,
 que no siempre es el vendedor. No se borra ninguna columna en esta tarea.
+
+> **Corregido el 2026-08-04 — contradicción de la versión original.** La spec decía a
+> la vez que en las referenciadas `usuario_id` es el **aportante** (no el vendedor) y
+> que el backfill poblara `vendedor_id` en **ambas** tablas desde `usuario_id`. Lo
+> segundo afirma justo lo que lo primero niega: convertiría a quien copió un anuncio de
+> Facebook en el vendedor de ese auto, publicando su nombre y su teléfono por un coche
+> que no vende. **Regla vigente:** en `publicaciones_referenciadas` la columna
+> `vendedor_id` se crea pero **queda NULL** — no la puebla el backfill ni el alta.
+> Espera a la etapa 2, cuando exista una vía legítima de asociar un vendedor real a una
+> referencia. Solo `publicaciones_internas` se backfillea.
 
 ### `ContactoRevelado` (nuevo)
 
@@ -79,9 +89,21 @@ Exactamente uno de los dos FK debe estar presente: CheckConstraint.
 ### Migraciones
 
 Manuales, numeradas, con `downgrade`, revisadas a mano (nunca `--autogenerate`
-a ciegas). Backfill en `0021`: un `Vendedor` por cada usuario con publicaciones,
-`nombre_publico` = `usuario.nombre`, `telefono` NULL, y `vendedor_id` poblado en
-ambas tablas. `alembic heads` debe resolver a una sola cabeza.
+a ciegas). Backfill en `0021`: un `Vendedor` por cada usuario con publicaciones
+**internas**, con `nombre_publico` y `telefono` en **NULL**, y `vendedor_id` poblado
+**solo en `publicaciones_internas`** (ver la corrección de arriba).
+`alembic heads` debe resolver a una sola cabeza.
+
+`nombre_publico` queda NULL a propósito, no se copia de `usuarios.nombre`: un backfill no
+puede dejar filas en un estado que la regla de opt-in prohíbe crear por la API (compuerta
+M5). El primer `PATCH` que publique un teléfono obliga a elegir el nombre.
+
+De ahí en adelante el vínculo lo pone el **alta**: `crear_publicacion` resuelve o crea
+el `Vendedor` de la cuenta y asigna `vendedor_id`. Un backfill corre una sola vez; si el
+alta no engancha el vínculo, toda publicación nueva nace en NULL y la invariante se
+degrada con cada anuncio. **No existe resolución alternativa por `usuario_id` al leer:**
+esa segunda vía es equivalente solo mientras la relación cuenta↔vendedor sea 1:1, y en
+la etapa 2 devolvería un vendedor arbitrario en silencio.
 
 ## Endpoints
 
@@ -92,6 +114,19 @@ no existe. Valida formato de teléfono ecuatoriano: celular de 10 dígitos
 Teléfono inválido → **422**.
 
 **`GET /marketplace/vendedor/mi-perfil`** — devuelve el perfil propio.
+`Depends(usuario_actual)`. **Si la cuenta todavía no tiene perfil devuelve 404**, porque
+el perfil se crea con el `PATCH`: un GET no escribe en la BD.
+
+- Ese 404 es un **estado de onboarding, no un fallo**. **T5 (frontend) debe tratarlo
+  como "todavía no configuraste tu contacto"** y mostrar el formulario de perfil, nunca
+  un error ni una pantalla rota. Es la única ruta del proyecto donde 404 no significa
+  "no existe o no es tuyo" (§10.2), y por eso queda fijado aquí.
+- **Cargar el teléfono exige `nombre_publico` explícito.** Un `PATCH` que solo manda
+  `telefono` responde **422**: el nombre con el que te ven los compradores se elige a
+  mano, no se hereda del nombre de la cuenta. Teléfono y nombre salen juntos por el
+  endpoint de contacto, así que cargar el número es lo que vuelve público al vendedor
+  (compuerta M5: nada de PII sin opt-in). La regla se evalúa sobre el estado resultante,
+  así que tampoco se puede borrar el nombre dejando un teléfono publicado.
 
 **`POST /marketplace/publicaciones/{publicacion_id}/contacto`** — devuelve el
 teléfono y registra la revelación. **Público**, sin auth y **sin cobro**.

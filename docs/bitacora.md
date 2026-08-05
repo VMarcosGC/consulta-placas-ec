@@ -10,6 +10,134 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-04 — TASK-001: capa Vendedor + contacto comprador-vendedor (backend)
+
+**Rama:** `feat/TASK-001-contacto-vendedor` · **Ejecutó:** agente `dev-backend` ·
+**Revisa:** Codex (§16.1 — revisa quien no ejecutó). **Sin commitear**: el diff queda en
+el árbol para la auditoría cruzada.
+
+**Qué se hizo.** Cierra el circuito del marketplace: hasta hoy un comprador veía el
+anuncio y no tenía cómo llegar al vendedor.
+- **`Vendedor`** (migración `0021`): `usuario_id` FK CASCADE **UNIQUE** (la UK impone el
+  1:1 de etapa 1 y se levanta en etapa 2), `tipo` (`particular`|`patio`), `nombre_publico`,
+  `telefono` E.164 sin `+`, `telefono_verificado` reservado. `vendedor_id` agregado a
+  `publicaciones_internas` y `publicaciones_referenciadas`; **`usuario_id` se conserva** en
+  ambas (en referenciadas documenta al aportante, que no siempre es el vendedor).
+  Backfill en SQL plano y reentrante (`ON CONFLICT DO NOTHING` + `WHERE vendedor_id IS NULL`).
+- **`ContactoRevelado`** (migración `0022`): métrica anónima de cada revelación. Sin IP,
+  sin user-agent, sin usuario (§9: es métrica de producto, no vigilancia). CheckConstraint
+  de exactamente un FK presente.
+- **Endpoints:** `GET`/`PATCH /marketplace/vendedor/mi-perfil` (dueño) en un router nuevo
+  `routers/vendedor.py`, y `POST /marketplace/publicaciones/{id}/contacto` **público y sin
+  cobro** (§1.0.3: el contacto es libre), que devuelve teléfono, nombre público y
+  `whatsapp_url`. Teléfono inválido → 422 · vendedor sin teléfono → 409 · publicación
+  inexistente o no pública → 404 indistinto.
+- **Privacidad:** el teléfono **no aparece** en feed, `/buscar` ni detalle. Solo lo entrega
+  el endpoint de contacto, bajo acción explícita del comprador. La acción explícita es la
+  barrera contra cosecha automatizada, y de paso produce la métrica.
+
+**Verificación ejecutada** (la corrí yo, independiente del reporte del agente):
+`import main` → **68 rutas** (eran 65) · las 2 rutas nuevas presentes en
+`app.openapi()["paths"]` · `alembic heads` → **`0022`, cabeza única**, cadena
+`0020→0021→0022` consecutiva · ambas migraciones con `upgrade` **y** `downgrade` ·
+`unittest discover -s tests` → **19 tests OK** (15 nuevos + los 4 previos, sin regresión) ·
+`telefono` ausente de todo schema de listado/detalle, comprobado recorriendo el OpenAPI real
+con `$ref` resueltos · orden de rutas verificado sobre las registradas.
+
+**⚠️ DOS LÍMITES DELIBERADOS — para el auditor de T4: esto NO es una omisión del agente.**
+1. **El ciclo `alembic upgrade` / `downgrade` real queda BLOCKED.** `DATABASE_URL` apunta a
+   **Neon de producción con datos reales** y aplicar migraciones es tarea de Marcos (modelo
+   de trabajo de `plan_market_autos.md`). En su lugar se verificó **offline** con
+   `alembic upgrade 0020:0021 --sql`, `0021:0022 --sql` y los `downgrade --sql`, confirmando
+   simetría, más el contraste del DDL de `Base.metadata` contra el de las migraciones. Se
+   desbloquea cuando exista una **BD desechable**. Confirmado que producción quedó intacta:
+   `alembic_version` sigue en `0020` y ni `vendedores` ni `contactos_revelados` existen.
+2. **El test es `unittest`, no `pytest`.** El criterio de aceptación de la spec pedía
+   `pytest tests/test_contacto_vendedor.py -q`, pero **pytest no está instalado ni en
+   `requirements.txt`**, y agregarlo sería una dependencia nueva (§4). Se siguió el estilo
+   del único test previo (`tests/test_consulta_solo_cache.py`: `unittest` + `Mock`, sin BD —
+   necesario además porque los modelos usan JSONB y SQLite no sirve). Corre con
+   `python -m unittest tests.test_contacto_vendedor -v`. La decisión sobre pytest es **TASK-009**.
+
+**Auditoría cruzada y correcciones aplicadas (misma sesión).** La revisión encontró un
+**bloqueante** y cuatro puntos menores; los cinco se corrigieron con el alcance ampliado a
+`publicaciones.py`, `referencias.py`, `vendedor.py` y `0021_vendedor.py`:
+
+1. **La invariante de `vendedor_id` nacía rota (bloqueante).** `crear_publicacion` no
+   poblaba el vínculo, así que toda publicación creada tras la `0021` habría quedado en
+   NULL para siempre: un backfill corre una vez y el dato se degradaba con cada anuncio.
+   Ahora el alta llama a `obtener_o_crear_vendedor` y asigna `vendedor_id`.
+2. **Fallback eliminado.** `_vendedor_de` resolvía por `usuario_id` cuando el vínculo
+   faltaba. Se quitó por completo (no se cambió a `.first()`: eso dejaba una segunda vía
+   que en etapa 2 devuelve un vendedor **arbitrario en silencio**, que es peor que fallar).
+   Un `vendedor_id` NULL sale como 409 honesto. De paso desaparece el
+   `MultipleResultsFound` → 500 que la etapa 2 habría destapado.
+3. **Upsert a prueba de carreras.** `obtener_o_crear_vendedor` captura `IntegrityError`
+   sobre `uq_vendedores_usuario_id`, hace `rollback` y relee el perfil que ganó. Si la
+   violación no fue esa UK, se relanza en vez de tragarla. Nunca 500.
+4. **Referencias: `vendedor_id` queda NULL a propósito.** Se quitó del backfill de la
+   `0021` el UPDATE sobre `publicaciones_referenciadas` y el INSERT de vendedores ya no
+   incluye a los aportantes. En una referencia, `usuario_id` es **quien copió un anuncio
+   ajeno**, no quien vende: derivar un `Vendedor` de ahí publicaría su nombre y su teléfono
+   por un auto que no vende. Documentado en el docstring de la migración y en el alta de
+   `referencias.py`, para que nadie lo "arregle" después.
+5. **Opt-in explícito del nombre (compuerta M5).** Un `PATCH` que solo mandaba teléfono
+   heredaba el nombre de la CUENTA y lo publicaba sin que nadie lo eligiera. Ahora cargar
+   teléfono exige `nombre_publico` explícito → **422**. La regla se evalúa sobre el estado
+   resultante, así que tampoco se puede borrar el nombre dejando el teléfono publicado.
+   El perfil que crea el alta nace con `nombre_publico` NULL por el mismo motivo.
+
+**Spec actualizada:** se fijó que `GET /mi-perfil` devuelve **404 cuando no hay perfil** y
+que **T5 debe tratarlo como estado de onboarding, no como fallo** (es la única ruta donde
+404 no significa "no existe o no es tuyo"); y se corrigió la contradicción sobre
+referencias, que a la vez decía que `usuario_id` es el aportante y mandaba backfillear
+`vendedor_id` desde él.
+
+**Verificación tras las correcciones:** `import main` → **68 rutas** · `alembic heads` →
+`0022` · **23 tests OK** (eran 19; +4 de las reglas nuevas) · SQL offline de la `0021`
+confirma **cero** sentencias sobre `publicaciones_referenciadas` en el backfill ·
+`telefono` sigue ausente de feed, `/buscar`, detalle y `mias`, comprobado sobre el OpenAPI
+con `$ref` resueltos · orden de rutas intacto · Neon sigue en `0020`, sin tablas nuevas.
+
+**⚠️ Limitación de la suite — insumo para TASK-009.** Los tests aíslan la sesión con
+`Mock`, así que **no ejercen ninguna restricción real de la base**: ni la UK
+`uq_vendedores_usuario_id`, ni el `CheckConstraint` de `contactos_revelados`, ni las FK,
+ni el `ON DELETE`. El test de carrera **simula** el `IntegrityError`; no demuestra que la
+UK lo produzca. El backfill de la `0021` no se ejerce en absoluto. Lo que sí cubren es la
+lógica de router y schema. Cerrar esto pide una **BD desechable** (contenedor Postgres o
+base de pruebas en Neon) y decidir el runner en TASK-009 — es el mismo bloqueo que dejó
+sin correr el ciclo `upgrade`/`downgrade`.
+
+**Pendientes / deuda anotada**
+- `ContactoRevelado.publicacion_referenciada_id` queda **sin escritor** (la spec solo pidió
+  el endpoint de publicaciones internas). No es código muerto: es la etapa siguiente.
+- **TAREA DE SEGUIMIENTO — mover el helper a `services/vendedor.py`.**
+  `publicaciones.py` importa `obtener_o_crear_vendedor` desde `routers/vendedor.py`, o sea
+  un router importando a otro router. Funciona y no hay ciclo, pero su lugar natural es un
+  servicio del módulo, junto a `services/cloudinary.py`. **Se deja donde está a propósito:**
+  mover un helper es un refactor de estructura y no pertenece a esta tarea, que ya se
+  amplió tres veces. Hacerlo aparte, con su propio diff revisable.
+
+**Cierre de los dos residuos del opt-in (ajuste final, alcance ampliado a `schemas.py`)**
+- El docstring de `VendedorActualizar` decía que `nombre_publico: null` "restaura el nombre
+  de la cuenta". Corregido: ahora lo **borra**, y el docstring explica por qué el nombre no
+  se hereda.
+- El backfill de la `0021` ya **no copia** `usuarios.nombre` a `nombre_publico`: lo deja
+  NULL, igual que el teléfono. El criterio: **un backfill no puede dejar filas en un estado
+  que la regla vigente prohíbe crear por la API.** Copiar el nombre de la cuenta habría
+  dejado 3 vendedores con un nombre que su dueño nunca eligió, y al cargar el teléfono ese
+  nombre habría pasado sin opt-in fresco. Con NULL, el primer PATCH que publique un número
+  obliga a elegirlo. Se actualizó también la fila de `nombre_publico` en la tabla de modelo
+  de la spec, que seguía diciendo "por defecto el nombre del usuario".
+- El detalle público no expone si hay teléfono cargado, así que el frontend no puede decidir
+  si mostrar el botón sin arriesgar un 409. Un booleano `tiene_contacto` lo resolvería sin
+  exponer el número; no se agregó por estar fuera de lo pedido. Decisión de producto.
+- **Marcos debe correr `alembic upgrade head` (0021 + 0022)** contra Neon tras la auditoría.
+- La entrada de esta bitácora está fuera del alcance de archivos de la spec; se agrega por
+  el ritual §3 y por pedido explícito, y es el único archivo tocado fuera de esa lista.
+
+---
+
 ## 2026-08-04 — Reorientación de AGENTS.md §1 al marketplace + corrección de la spec TASK-001
 
 **Repo:** solo backend, **solo documentación** (ningún archivo de `src/` ni `alembic/`).

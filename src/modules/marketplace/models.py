@@ -2,7 +2,8 @@ import enum
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import (
-    String, DateTime, BigInteger, Integer, Boolean, Numeric, ForeignKey, func, text,
+    String, DateTime, BigInteger, Integer, Boolean, Numeric, ForeignKey,
+    CheckConstraint, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -68,6 +69,122 @@ class EstadoModeracion(str, enum.Enum):
     RECHAZADA = "rechazada"
 
 
+class TipoVendedor(str, enum.Enum):
+    """Naturaleza del vendedor detrás de una publicación (AGENTS §1.0.4).
+
+    En la **etapa 1** (ciclo vigente) solo se usa `PARTICULAR`: un vendedor es una
+    persona natural y su relación con la cuenta es 1:1 (la impone la UK de
+    `vendedores.usuario_id`). `PATIO` queda declarado desde ya porque la etapa 2 solo
+    tiene que levantar esa UK y empezar a usar el valor: un cambio aditivo, sin
+    reescribir el modelo ni migrar cuatro tablas con datos reales.
+
+    Se guarda como String (no enum nativo de PG), igual que el resto de enums de este
+    módulo: sumar un valor no requiere migración de tipo.
+    """
+
+    PARTICULAR = "particular"
+    PATIO = "patio"
+
+
+class Vendedor(Base):
+    """Identidad COMERCIAL de quien vende, separada de la cuenta de autenticación.
+
+    Por qué existe una tabla aparte y el teléfono no vive en `Usuario` (§1.0.4):
+    - `Usuario` es identidad de cuenta (email, contraseña, saldo). El teléfono de
+      contacto es un dato **comercial**, público bajo pedido, que puede cambiar sin
+      que cambie la cuenta y que en la etapa 2 pertenecerá al patio, no a la persona.
+    - Insertar la capa ahora, con 2 publicaciones internas y 3 referencias en
+      producción, cuesta un backfill trivial; hacerlo cuando existan patios costaría
+      migrar cuatro tablas con datos reales.
+
+    `telefono` se guarda **normalizado a E.164 sin `+`** (ej. `593987654321`), que es
+    justo el formato que consume `https://wa.me/<numero>`; la normalización la hace
+    `normalizar_telefono_ec` en schemas.py. NULL = el vendedor todavía no lo cargó
+    (el endpoint de contacto responde 409, no 500).
+
+    `telefono_verificado` queda reservado: la verificación por SMS/OTP está fuera del
+    alcance de este ciclo, así que hoy siempre es `False`.
+    """
+
+    __tablename__ = "vendedores"
+    # UK nombrada igual que en la migración 0021 (evita drift al diffear el esquema).
+    # Es la que impone el 1:1 cuenta ↔ vendedor de la etapa 1; la etapa 2 la levanta.
+    __table_args__ = (
+        UniqueConstraint("usuario_id", name="uq_vendedores_usuario_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    usuario_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tipo: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=TipoVendedor.PARTICULAR.value,
+        default=TipoVendedor.PARTICULAR.value,
+    )
+    # Nombre con el que el comprador lo ve. Nullable como `Usuario.nombre`: si la cuenta
+    # no tiene nombre, se prefiere NULL ("no informado") antes que inventar un valor.
+    nombre_publico: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    telefono_verificado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    # Relación unidireccional hacia la cuenta: `Usuario` (módulo auth) no se toca.
+    usuario: Mapped["Usuario"] = relationship("Usuario")  # noqa: F821
+
+
+class ContactoRevelado(Base):
+    """Registro ANÓNIMO de cada vez que se reveló el contacto de un vendedor.
+
+    Es una métrica de producto ("cuántos compradores pidieron el número de este
+    anuncio"), no un registro de vigilancia (§9): **no se guarda ni IP, ni
+    user-agent, ni el usuario que pidió el contacto**. El contacto es público y
+    gratuito (§1.0.3), así que ni siquiera hay sesión que registrar.
+
+    Apunta a UNA publicación: interna o referenciada. El CheckConstraint impone que
+    haya exactamente una de las dos, para que no existan filas huérfanas ni ambiguas.
+    """
+
+    __tablename__ = "contactos_revelados"
+    __table_args__ = (
+        CheckConstraint(
+            "(publicacion_interna_id IS NOT NULL)::int "
+            "+ (publicacion_referenciada_id IS NOT NULL)::int = 1",
+            name="ck_contactos_revelados_exactamente_una_publicacion",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    publicacion_interna_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("publicaciones_internas.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    publicacion_referenciada_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("publicaciones_referenciadas.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class EnlaceCompartido(Base):
     """Enlace temporal de solo lectura sobre un vehículo, para mostrarle el
     historial a un comprador interesado sin que necesite cuenta (Fase 4).
@@ -131,6 +248,17 @@ class PublicacionInterna(Base):
         nullable=False,
         index=True,
     )
+    # Identidad comercial que vende (TASK-001). Nullable: las publicaciones anteriores a
+    # la migración 0021 quedaron backfilleadas, pero una publicación puede existir sin
+    # perfil de vendedor cargado. `usuario_id` NO se reemplaza: sigue siendo la cuenta
+    # dueña del registro (permisos), mientras `vendedor_id` es a quién contacta el
+    # comprador. En la etapa 2 (patios) ambos dejan de coincidir.
+    vendedor_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("vendedores.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     vehiculo_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("vehiculos.id", ondelete="SET NULL"),
@@ -189,6 +317,10 @@ class PublicacionInterna(Base):
     # Vehiculo). El router usa selectinload sobre `vehiculo.mantenimientos` para
     # derivar los detalles premium sin N+1.
     vehiculo: Mapped["Vehiculo | None"] = relationship("Vehiculo")  # noqa: F821
+
+    # Vendedor al que contacta el comprador (unidireccional). NUNCA se serializa en el
+    # feed ni en el detalle: su teléfono solo sale por el endpoint de contacto.
+    vendedor: Mapped["Vendedor | None"] = relationship("Vendedor")
 
     # Ficha técnica 1:1 (bloques motor/suspensión, carrocería, interiores + extras).
     # Se borra junto con la publicación (delete-orphan).
@@ -319,6 +451,15 @@ class PublicacionReferenciada(Base):
     usuario_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("usuarios.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Vendedor del anuncio referenciado (TASK-001). `usuario_id` SE CONSERVA porque aquí
+    # documenta al **aportante**, que no siempre es quien vende: son dos roles distintos
+    # y borrar uno perdería información.
+    vendedor_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("vendedores.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

@@ -9,7 +9,7 @@ historial privado en la vista compartida (`VehiculoCompartidoSalida`).
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -23,6 +23,7 @@ from src.modules.marketplace.models import (
     FichaPublicacion,
     PlanPublicacion,
     PublicacionInterna,
+    TipoVendedor,
 )
 
 # TTL máximo del enlace (regla 10.6 y skill modelo-dominio-vehiculo).
@@ -725,3 +726,117 @@ class ResultadoBusquedaSalida(BaseModel):
 
     items: list[ItemBusqueda] = Field(default_factory=list)
     siguiente_cursor: str | None = None
+
+
+# ════════════ Vendedor y contacto comprador-vendedor (TASK-001) ════════════
+#
+# PRIVACIDAD (§9): `telefono` aparece ÚNICAMENTE en el perfil PROPIO del vendedor
+# (`VendedorPerfilSalida`, detrás de `usuario_actual`) y en la respuesta del endpoint
+# de contacto (`ContactoVendedorSalida`). **Nunca** en los schemas de listado ni de
+# detalle de publicación: un teléfono servido en un feed público lo cosechan bots en
+# días. La acción explícita del comprador es la barrera contra ese scraping, y de paso
+# produce la métrica de contactos (`ContactoRevelado`).
+#
+# No es monetización: el contacto es libre y gratuito (§1.0.3).
+
+# Caracteres que un humano teclea al escribir un teléfono; todo lo demás se rechaza en
+# vez de ignorarse en silencio (un teléfono con letras casi siempre es un error real).
+_CARACTERES_TELEFONO = set("0123456789 +-().")
+_DIGITOS = set("0123456789")
+
+_AYUDA_TELEFONO = (
+    "Ingresa un celular ecuatoriano: 10 dígitos que empiezan con 09 "
+    "(ej. 0987654321) o el formato internacional 593 + 9 dígitos "
+    "(ej. 593987654321)."
+)
+
+
+def normalizar_telefono_ec(valor: str) -> str:
+    """Valida un celular ecuatoriano y lo devuelve en **E.164 sin `+`** (`5939XXXXXXXX`).
+
+    Ese es exactamente el formato que consume `https://wa.me/<numero>`, así que se
+    guarda normalizado y el enlace se arma sin transformaciones adicionales.
+
+    Acepta separadores de tecleo (espacios, guiones, paréntesis, `+`) y las dos formas
+    acordadas: `09XXXXXXXX` (10 dígitos) y `5939XXXXXXXX` (E.164). Convencionales
+    (02…, 07…) quedan FUERA a propósito: el canal de contacto es WhatsApp.
+
+    Lanza `ValueError` (→ 422 en el endpoint) con un mensaje que dice cómo corregirlo.
+    """
+    texto = (valor or "").strip()
+    if not texto:
+        raise ValueError(_AYUDA_TELEFONO)
+    if any(c not in _CARACTERES_TELEFONO for c in texto):
+        raise ValueError(_AYUDA_TELEFONO)
+
+    digitos = "".join(c for c in texto if c in _DIGITOS)
+
+    if len(digitos) == 10 and digitos.startswith("09"):
+        return "593" + digitos[1:]
+    if len(digitos) == 12 and digitos.startswith("5939"):
+        return digitos
+    raise ValueError(_AYUDA_TELEFONO)
+
+
+def armar_whatsapp_url(telefono: str, referencia: str | None = None) -> str:
+    """Arma el enlace de WhatsApp con un mensaje prellenado en es-EC, no agresivo.
+
+    `referencia` es el título o la placa del anuncio, para que el vendedor sepa de cuál
+    de sus autos le escriben. El comprador puede editar el texto antes de enviarlo: es
+    una sugerencia, no un mensaje automático.
+    """
+    if referencia:
+        mensaje = (
+            f"Hola, vi tu anuncio de {referencia} en Revisa tu Carro EC "
+            "y me interesa. ¿Sigue disponible?"
+        )
+    else:
+        mensaje = (
+            "Hola, vi tu anuncio en Revisa tu Carro EC y me interesa. "
+            "¿Sigue disponible?"
+        )
+    return f"https://wa.me/{telefono}?text={quote(mensaje)}"
+
+
+class VendedorActualizar(BaseModel):
+    """Edición parcial del perfil de vendedor (`PATCH /marketplace/vendedor/mi-perfil`).
+
+    Semántica por campo (el router usa `model_fields_set`): omitirlo lo deja intacto.
+    Enviar `nombre_publico: null` **borra** el nombre; enviar `telefono: null` retira el
+    número (el anuncio deja de poder contactarse: 409).
+
+    El nombre público **no se hereda** del nombre de la cuenta: publicarlo es una decisión
+    explícita del vendedor (compuerta M5). Por eso cargar un teléfono sin `nombre_publico`
+    —o borrar el nombre teniendo teléfono cargado— responde **422**: los dos salen juntos
+    por el endpoint de contacto, así que el número es lo que te vuelve público.
+    """
+
+    nombre_publico: str | None = Field(default=None, min_length=2, max_length=120)
+    telefono: str | None = Field(default=None, max_length=20)
+
+    @field_validator("telefono")
+    @classmethod
+    def _telefono_valido(cls, v: str | None) -> str | None:
+        return normalizar_telefono_ec(v) if v is not None else None
+
+
+class VendedorPerfilSalida(BaseModel):
+    """Perfil PROPIO del vendedor. Solo lo ve su dueño (`Depends(usuario_actual)`),
+    por eso incluye el teléfono tal como lo guardó."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tipo: TipoVendedor
+    nombre_publico: str | None
+    telefono: str | None
+    telefono_verificado: bool
+    creado_en: datetime
+
+
+class ContactoVendedorSalida(BaseModel):
+    """Respuesta del endpoint de contacto: el único lugar público con el teléfono."""
+
+    telefono: str
+    nombre_publico: str | None
+    whatsapp_url: str
