@@ -21,6 +21,22 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-05 — TASK-010: entorno local anclado a la raíz del proyecto
+
+**Repo:** backend. **Sin commit:** el diff queda para la revisión cruzada.
+
+**Qué se hizo.** `src/core/database.py` carga `.env.local` y `.env` desde la raíz
+derivada de `Path(__file__).resolve().parents[2]`, no desde el CWD. La precedencia se
+mantiene: variable real del entorno > `.env.local` > `.env`, sin `override=True`.
+`.env.local` también queda fuera del contexto de Docker para que una URL local nunca se
+hornee en la imagen.
+
+**Verificación.** Los tres casos de precedencia (local, variable exportada y fallback a
+`.env`) se probaron desde la raíz y desde un subdirectorio. `import main` conserva 68
+rutas y la suite completa pasó. La spec suma explícitamente la prueba desde subdirectorio.
+
+---
+
 ## 2026-08-05 — Un solo planificador: el eje M pasa a historia y la serie TASK se unifica
 
 **Solo documentación.** Ningún archivo de `src/`, `alembic/` ni `tests/`.

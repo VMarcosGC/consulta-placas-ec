@@ -12,6 +12,13 @@ Render free tier ofrece dos runtimes para Python:
 
 El [Dockerfile](../Dockerfile) usa `mcr.microsoft.com/playwright/python:v1.48.0-jammy` (imagen oficial de Microsoft con Chromium + libs ya dentro).
 
+## Entorno local y producción
+
+Para desarrollo local, usa `.env.local` con una `DATABASE_URL` local; ese archivo tiene
+precedencia sobre `.env`. Las variables reales del entorno (incluidas las configuradas en
+Render) tienen prioridad sobre ambos archivos. `.env.local` se excluye del contexto de
+Docker para que una URL local no quede dentro de la imagen.
+
 ---
 
 ## Recursos involucrados

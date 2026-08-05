@@ -1,9 +1,14 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-load_dotenv()
+# Precedencia: entorno real > .env.local > .env. Nunca usar override=True.
+# Se ancla a la raíz para que no dependa del directorio desde el que se arranque.
+RAIZ = Path(__file__).resolve().parents[2]
+load_dotenv(RAIZ / ".env.local")
+load_dotenv(RAIZ / ".env")
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

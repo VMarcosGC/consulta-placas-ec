@@ -36,12 +36,36 @@ aplica, y se aplica en producción.
 
 ## Qué hay que hacer
 
-En `src/core/database.py`, cargar `.env.local` **antes** que `.env`, ambos sin `override`:
+En `src/core/database.py`, cargar `.env.local` **antes** que `.env`, ambos sin `override`
+y ambos **anclados a la raíz del proyecto**:
 
 ```python
-load_dotenv(".env.local")   # si existe, gana
-load_dotenv()               # .env como base; no pisa lo ya definido
+from pathlib import Path
+
+# `database.py` vive en `src/core/`, así que parents[2] es la raíz del repo.
+RAIZ = Path(__file__).resolve().parents[2]
+load_dotenv(RAIZ / ".env.local")   # si existe, gana
+load_dotenv(RAIZ / ".env")         # base; no pisa lo ya definido
 ```
+
+### Por qué anclado a la raíz y NO con rutas relativas
+
+Es el error que se cometió en la primera implementación y que la auditoría detectó. Con
+`load_dotenv(".env.local")` y `load_dotenv()` a secas, los dos archivos se localizan por
+mecanismos **distintos**:
+
+- `load_dotenv(".env.local")` resuelve una ruta **relativa al CWD**.
+- `load_dotenv()` sin argumentos usa `find_dotenv()`, que camina **hacia arriba desde el
+  archivo del módulo**, y por eso encuentra `.env` sin importar el CWD.
+
+Arrancando desde un **subdirectorio** del repo (`src/`, `alembic/`, `scripts/`, o cualquier
+configuración de VS Code cuyo CWD sea la carpeta del archivo), `.env` se encuentra y
+`.env.local` **no**: la app cae a `.env` —producción— **sin un solo aviso**. Es exactamente
+el fallo silencioso que esta tarea existe para eliminar, solo que desplazado de "olvidé
+exportar la variable" a "arranqué desde otra carpeta".
+
+Anclar ambas rutas a `RAIZ` vuelve el comportamiento independiente del CWD. **Verifícalo
+desde un subdirectorio**, no solo desde la raíz (ver criterio de aceptación).
 
 ### Por qué ese orden y NO `override=True`
 
@@ -90,6 +114,9 @@ El cambio de precedencia y la exclusión del build tienen que entrar juntos.
 - [ ] Con `DATABASE_URL` exportada a otro valor, **gana la exportada** (la variable real
       del entorno sigue teniendo la última palabra).
 - [ ] Renombrando temporalmente `.env.local`, se vuelve a leer `.env` sin error.
+- [ ] Los tres casos de precedencia anteriores se prueban tanto desde la raíz del
+      proyecto como desde un subdirectorio, para comprobar que la ubicación de los
+      archivos no depende del CWD.
 - [ ] `python -c "import main"` sin error y con el mismo conteo de rutas que antes.
 - [ ] `.env.local` sigue en `.gitignore` y `git status` no lo muestra.
 - [ ] `.env.local` está en `.dockerignore`.
