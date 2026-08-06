@@ -153,6 +153,17 @@ spec es lo que produjo la doble serie que hubo que reconciliar.
   tocar la navegación: mezclado con un cambio funcional ensucia la auditoría. Va junto con
   los otros 3 (`admin/moderacion`, `admin/verificaciones`, `mis-publicaciones`), que tienen
   la misma causa y conviene resolver de una sola pasada.
+- **Las referencias externas no tienen entrada desde la navegación.**
+  `marketplace/referenciar` y `marketplace/mis-referencias` **sí son alcanzables**, pero
+  solo desde dentro del contenido: `/marketplace` enlaza a ambas y `DestacadosMarket` (en
+  la home) enlaza a `referenciar`. No aparecen en el Header, ni en `MenuCuenta`, ni en la
+  barra móvil, así que hay que toparse con el bloque correcto mientras se navega. "Mis
+  referencias" es además una vista **de gestión propia**, hermana de "Mis publicaciones",
+  que sí quedó en el menú de cuenta. Al revisarlo, decidir si aportar una referencia es
+  una acción de navegación o se queda como descubrimiento contextual dentro del feed.
+  *(Nota: el enunciado original de este seguimiento decía que no tenían entrada "desde
+  ningún lado"; se verificó y no es así — el problema es de descubribilidad, no de
+  orfandad como pasó con `mi-perfil-vendedor`.)*
 
 ## 5. Compuertas abiertas
 
