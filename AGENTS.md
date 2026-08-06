@@ -26,6 +26,30 @@ vendedor nunca dependen de que una fuente externa responda. Un dato oficial
 ausente se muestra como no disponible; jamás bloquea una publicación ni degrada
 la portada.
 
+**Invariante (completo desde 2026-08-06): ningún flujo del marketplace dispara
+scraping.** No basta con que un fallo no bloquee: el market **no debe provocar
+trabajo contra las fuentes**, ni siquiera en segundo plano.
+
+| Consumidor | Cómo lee | ¿Puede scrapear? |
+|---|---|---|
+| Detalle del anuncio (`DatosOficialesMini`) | `GET /consultar/{placa}/perfil?solo_cache=true` | **no** |
+| Feed, `/buscar`, publicar, contactar | no tocan la caché de consultas | **no** |
+| `/consultar/[placa]` y `PerfilVehiculo` | `consultarPerfil` sin `solo_cache` | **sí, y está bien**: el usuario la pidió |
+
+Se llegó acá en dos pasos y cada uno costó una auditoría: el detalle público
+scrapeaba en *cache miss* (cerrado con `solo_cache=true`) y el wizard de
+publicación lo disparaba en *fire & forget* al crear el anuncio (cerrado
+quitando la llamada). Los dos eran silenciosos y ninguno bloqueaba nada — por eso
+§1.0.1 a secas no los detectaba: **cumplían "no bloquea" y aun así generaban
+carga contra ANT, AMT y EPMTSD desde páginas públicas e indexables**, que choca
+con el skill [scraping-respetuoso](.claude/skills/scraping-respetuoso/SKILL.md).
+
+**Que no se reintroduzca.** Si un anuncio necesita datos oficiales precargados,
+la salida es precalentar la caché desde el worker o un proceso propio, **nunca**
+acoplar una acción del market al pipeline de scraping. Al revisar un diff del
+market: buscar llamadas a `consultarPerfil` sin `soloCache: true` fuera de esos
+dos lugares.
+
 ### 1.0.2 Alcance del ciclo vigente
 
 Definido el 2026-08-04. Todo lo que no esté aquí está fuera de alcance.

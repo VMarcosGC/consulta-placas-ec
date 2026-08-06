@@ -37,6 +37,51 @@ rutas y la suite completa pasó. La spec suma explícitamente la prueba desde su
 
 ---
 
+## 2026-08-06 — Publicar deja de disparar scraping de la placa
+
+**Repos:** frontend (el cambio) y backend (solo `AGENTS.md` y esta bitácora).
+
+**Qué se quitó.** El wizard de publicación disparaba `GET /consultar/{placa}` en
+*fire & forget* al crear el anuncio (M2.6, "enriquecimiento oficial automático"), para
+dejar la caché caliente y que el detalle mostrara datos oficiales sin espera. Se eliminó
+esa llamada y, con ella, `consultarPlaca()` de `lib/api.ts`, que se quedaba sin ningún
+llamador en todo `src/`.
+
+**El motivo NO es §1.0.1, y conviene que quede escrito bien.** §1.0.1 exige que un fallo
+de consulta no bloquee el flujo del market, y **eso ya se cumplía**: era
+`void consultarPlaca(...).catch(() => {})`, sin `await`, sin spinner y con los errores
+tragados, así que una fuente caída jamás impidió publicar. El motivo real es que
+**`GET /consultar/{placa}` dispara scraping**: Playwright contra ANT más encolado de
+AMT/EPMTSD. Cada publicación generaba trabajo contra las fuentes oficiales. Es la misma
+familia que la deuda de M2.6/M2.7 —el detalle público scrapeando en *cache miss*— vista
+desde el lado del vendedor, y choca igual con el skill `scraping-respetuoso`.
+
+**Efecto que hay que asumir a conciencia.** Los anuncios nuevos **ya no traen datos
+oficiales precargados**. `DatosOficialesMini` lee con `solo_cache=true`, así que ante una
+caché vacía muestra *"Aún no hay datos oficiales disponibles para esta placa"* y ofrece
+"Ver detalle completo →". Es decir: los datos oficiales pasan a depender de que **un
+visitante los pida**. No se rompe nada y el camino de recuperación existe, pero la
+propuesta de valor del producto (§1) es la ficha del vendedor **junto a** datos oficiales,
+y ahora esa segunda mitad ya no aparece sola. **Si se quiere recuperar, la salida es
+precalentar la caché desde el worker o un proceso propio — no volver a acoplar una acción
+del market al pipeline de scraping.**
+
+**Invariante registrado en AGENTS §1.0.1.** Con esto queda completo: *ningún flujo del
+marketplace dispara scraping*. El detalle lee con `solo_cache`; las llamadas que sí
+consultan viven solo en `/consultar/[placa]` y `PerfilVehiculo`, donde el usuario lo pidió
+explícitamente. Se anotó con la tabla de consumidores y con qué buscar al revisar un diff,
+porque los dos incidentes fueron **silenciosos**: cumplían "no bloquea" y aun así
+generaban carga desde páginas públicas e indexables.
+
+**Verificación.** Diff de un solo archivo funcional; se comprobó contra `HEAD` que **no se
+tocaron** los CTA del detalle, `DatosOficialesMini`, `Header`, `MenuCuenta` ni
+`BarraNavegacionMovil`. `tsc --noEmit` limpio, lint 4 preexistentes, sin llamadores
+huérfanos (se quitó también el import de `ConsultaPlacaRespuesta`, que quedaba sin uso).
+Revisión: **APTO**, sin bloqueantes; los tres hallazgos fueron observaciones y los tres
+se aplicaron.
+
+---
+
 ## 2026-08-05 — Un solo planificador: el eje M pasa a historia y la serie TASK se unifica
 
 **Solo documentación.** Ningún archivo de `src/`, `alembic/` ni `tests/`.
