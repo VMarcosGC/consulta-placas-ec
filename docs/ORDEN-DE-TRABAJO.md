@@ -136,6 +136,24 @@ El orden importa más que el calendario.
 8. **TASK-005 — `compartidos.py:58` → 402.** Latente mientras el costo sea 0; se activa
    el día que se cobre.
 
+### Anotado sin número todavía
+
+Sale de ejecutar TASK-011. No se les asigna `TASK-NNN` hasta que tengan spec: numerar sin
+spec es lo que produjo la doble serie que hubo que reconciliar.
+
+- **Navegación principal inexistente en celular.** La barra del Header es `hidden md:flex`:
+  **bajo 768px no hay forma de llegar a Marketplace, Publicar, Consulta ni Precios** salvo
+  por el logo o enlaces dentro del contenido. Los accesos de admin (Moderar / Verificar)
+  viven en esa misma barra, así que un admin en celular tampoco los alcanza. Y a 768px
+  exactos la barra desborda el viewport. Es grave para un producto cuyo público declarado
+  navega en **celulares de gama baja** (§1). El menú de cuenta de TASK-011 resolvió el
+  acceso a *la cuenta*, no esto. Pide su propia tarea: hamburguesa o barra inferior.
+- **Error de lint preexistente en `Header.tsx`** (`setState` síncrono dentro de un efecto,
+  hoy en `38:7`). Es uno de los 4 que arrastra el repo. **No se arregló a propósito** al
+  tocar la navegación: mezclado con un cambio funcional ensucia la auditoría. Va junto con
+  los otros 3 (`admin/moderacion`, `admin/verificaciones`, `mis-publicaciones`), que tienen
+  la misma causa y conviene resolver de una sola pasada.
+
 ## 5. Compuertas abiertas
 
 Hay **ocho** a la vez: **M2, M2.5, M2.6, M2.7, M2.8, M2.10, MC1 y MC2**, todas con la
