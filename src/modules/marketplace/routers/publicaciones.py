@@ -250,6 +250,11 @@ def crear_publicacion(
         placa=datos.placa,
         titulo=datos.titulo,
         descripcion=datos.descripcion,
+        # Ciudad donde está el auto en venta: se toma TAL CUAL del cliente. Aunque haya
+        # `vehiculo_id` vinculado, no se cae a `vehiculo.ciudad_registro`: eso es dónde se
+        # matriculó, no dónde se vende. El prellenado del formulario (para que el vendedor
+        # confirme) lo hace el frontend, que ya recibe `ciudad_registro` en VehiculoSalida.
+        ciudad=datos.ciudad,
         precio_usd=datos.precio_usd,
         plan=datos.plan.value,
         estado=EstadoPublicacion.BORRADOR.value,
@@ -314,7 +319,7 @@ def actualizar_publicacion(
     sesion: Session = Depends(obtener_sesion),
     usuario: Usuario = Depends(usuario_actual),
 ):
-    """Edita precio/descripción/estado, publica un borrador o asciende a premium.
+    """Edita precio/descripción/ciudad/estado, publica un borrador o asciende a premium.
 
     **Transición `borrador → activa` (M2.8):** exige que la ficha llegue a
     `UMBRAL_FICHA_PUBLICACION` (422 si no) y es el momento en que se **cobra el premium**.
@@ -330,6 +335,8 @@ def actualizar_publicacion(
         pub.titulo = datos.titulo
     if datos.descripcion is not None:
         pub.descripcion = datos.descripcion
+    if datos.ciudad is not None:
+        pub.ciudad = datos.ciudad
     if datos.precio_usd is not None:
         pub.precio_usd = datos.precio_usd
 

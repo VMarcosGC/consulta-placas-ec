@@ -37,6 +37,76 @@ rutas y la suite completa pasó. La spec suma explícitamente la prueba desde su
 
 ---
 
+## 2026-08-08 — TASK-012: ciudad en las publicaciones internas
+
+**Repo:** backend. Ejecutó el agente **dev-backend**. **Migración `0023` escrita pero NO
+aplicada** — Neon sigue en `0022` y sin la columna; aplicarla es tarea de Marcos.
+
+**El problema.** `PublicacionInterna` no tenía ciudad y `PublicacionReferenciada` sí, así
+que un comprador podía ver dónde está un auto **copiado de OLX** pero no uno publicado en
+la plataforma. En un market de autos la ciudad decide si vale la pena abrir el anuncio.
+
+**Qué se hizo.** Columna `ciudad` (String(80), nullable) en `publicaciones_internas`;
+catálogo cerrado `CiudadPublicacion` como `Literal` **en código** con 12 ciudades (Quito,
+Guayaquil, Cuenca, Ambato, Manta, Loja, Machala, Santo Domingo, Portoviejo, Ibarra,
+Riobamba, Esmeraldas); el campo entra en alta y edición y sale en feed, `/buscar`, `mias`
+y detalle. **El filtro por ciudad NO entra**: se construye cuando haya publicaciones
+suficientes para que filtrar tenga sentido.
+
+*Por qué el catálogo va en código y no en BD:* el repo tiene los dos precedentes. Los
+catálogos de la ficha son `Literal`; el de productos vive en BD porque §10.3 lo declara
+fuente de verdad de precios — ahí un cambio es decisión comercial, necesita auditoría y
+debe ocurrir sin desplegar. La lista de ciudades no cumple ninguna de las tres.
+
+**Tres decisiones de diseño, con su motivo**
+
+1. **No se hizo backfill; la ciudad queda NULL en las 3 publicaciones existentes.** El
+   dato del garage era mapeable —el único valor, `'QUITO'`, cae sin ambigüedad en el
+   catálogo—, pero **`ciudad_registro` es dónde se MATRICULÓ el auto, no dónde está en
+   venta**. Derivar una de otra es una inferencia disfrazada de dato: alguien que compró
+   en Quito y vive en Ambato habría aparecido en Quito sin haberlo dicho nunca. Además
+   cubría 1 de 3 filas. El formulario prellenará ese valor para que el vendedor lo
+   **confirme**, y un humano confirmando es estrictamente mejor que una migración
+   afirmando.
+2. **Los valores del catálogo van capitalizados** (`"Quito"`, `"Santo Domingo"`), no en
+   `snake_case` como `Combustible` o `Transmision`. `PublicacionReferenciada.ciudad` es
+   texto libre que el aportante copia tal cual del anuncio original; con un
+   `"santo_domingo"` interno, la tarjeta tendría que embellecer una rama y la otra no —
+   exactamente las dos ramas que el campo compartido existe para evitar.
+3. **La salida se tipa `str | None`, no `CiudadPublicacion`.** El catálogo se impone al
+   **escribir** (422 en alta y edición). Si mañana se retira una ciudad de la lista, las
+   filas viejas tienen que poder **leerse**: tipar la salida con el `Literal` convertiría
+   un GET público en **500** por un cambio de catálogo. Hay una prueba que fija la
+   decisión.
+
+**Dos decisiones aplazadas, deliberadamente**
+
+- **La ciudad no es requisito para publicar.** No entró al umbral de activación, así que
+  un anuncio sin ciudad llega al feed con `null`. Sumar fricción al alta reduce oferta, y
+  la oferta es lo que menos sobra hoy. Se revisa cuando haya volumen.
+- **Las referencias externas siguen con ciudad de texto libre**, sin catálogo. Una
+  referencia puede decir `"tulcán"` y una interna no. La asimetría no molesta hasta que
+  exista el filtro por ciudad; recién ahí habrá que decidir si se normalizan o si el
+  filtro simplemente no las alcanza (son "datos no verificados" por definición).
+
+**Verificación** (ejecutada de forma independiente al reporte del agente): `import main`
+→ **68 rutas** (sin cambio) · `alembic heads` → **`0023`, cabeza única**, cadena
+`0022→0023` con `downgrade` · **40 tests OK** (26 previos + 14 nuevos) · SQL offline en
+ambos sentidos (`ADD COLUMN ciudad VARCHAR(80)` / `DROP COLUMN`) sin conectar a ninguna
+BD · **Neon intacta**: `alembic_version` = `0022` y la columna no existe.
+
+**Pendientes**
+- **Marcos: `alembic upgrade head`** (0023) contra Neon.
+- **Frontend**: selector de ciudad en el wizard, prellenado desde `ciudad_registro` del
+  vehículo del garage (el backend ya lo entrega en `VehiculoSalida`; no hizo falta
+  agregarle nada), y mostrar la ciudad en la tarjeta.
+- Menor: `ciudad: null` en el PATCH significa "no la toques", no "bórrala" — el endpoint
+  usa `is not None` igual que `titulo`, `descripcion` y `precio_usd`. El vendedor puede
+  corregir Quito→Manta pero no volver a "sin ciudad". Si hace falta, conviene cambiarlo
+  para todo el schema a la vez, no solo para este campo.
+
+---
+
 ## 2026-08-06 — Publicar deja de disparar scraping de la placa
 
 **Repos:** frontend (el cambio) y backend (solo `AGENTS.md` y esta bitácora).

@@ -165,12 +165,44 @@ class VehiculoCompartidoSalida(VehiculoSalidaCompartida):
 # tres niveles. Privacidad §10.6: nunca VIN completo ni nombre del dueño.
 
 
+# Catálogo CERRADO de ciudades donde puede estar un auto en venta (migración 0023).
+#
+# Vive en el código y no en una tabla, igual que los catálogos de la ficha técnica
+# (`Combustible`, `Transmision`, …): cambia rara vez, lo decide quien despliega, no hay
+# nada que auditar y el `Literal` regala el 422 con la lista de opciones. Agregar una
+# ciudad después es una línea; limpiar texto libre ya escrito por los vendedores, no.
+#
+# Los valores van tal como se muestran (no `snake_case` como los catálogos de la ficha):
+# `PublicacionReferenciada.ciudad` es texto libre que el aportante copia del anuncio
+# original, así que la tarjeta del feed pinta el valor tal cual venga de cualquiera de
+# las dos entidades, sin embellecerlo en una rama y no en la otra.
+CiudadPublicacion = Literal[
+    "Quito",
+    "Guayaquil",
+    "Cuenca",
+    "Ambato",
+    "Manta",
+    "Loja",
+    "Machala",
+    "Santo Domingo",
+    "Portoviejo",
+    "Ibarra",
+    "Riobamba",
+    "Esmeraldas",
+]
+
+
 class PublicacionInternaCrear(BaseModel):
     """Alta de una publicación. El `plan` premium se cobra en el router (tokens)."""
 
     placa: str = Field(min_length=6, max_length=10)
     titulo: str | None = Field(default=None, max_length=160)
     descripcion: str | None = Field(default=None, max_length=2000)
+    # Dónde está el auto en venta. Opcional: un anuncio sin ciudad se publica igual (y
+    # queda en NULL). Se acepta del cliente y NO se deriva de `Vehiculo.ciudad_registro`,
+    # que es dónde se matriculó: prellenar el formulario con ese valor para que el
+    # vendedor lo CONFIRME es tarea del frontend, no una inferencia silenciosa del backend.
+    ciudad: CiudadPublicacion | None = None
     precio_usd: Decimal = Field(gt=0, description="Precio de venta; debe ser > 0")
     plan: PlanPublicacion = PlanPublicacion.LIGHT
     vehiculo_id: int | None = Field(
@@ -189,6 +221,11 @@ class PublicacionInternaActualizar(BaseModel):
 
     titulo: str | None = Field(default=None, max_length=160)
     descripcion: str | None = Field(default=None, max_length=2000)
+    # Cambiar la ciudad del anuncio (el auto se mudó, o el vendedor se equivocó al
+    # publicar). Igual que el resto de campos de este schema, `null`/omitido significa
+    # "no lo toques": el router usa `is not None`, así que desde aquí no se vacía una
+    # ciudad ya puesta, solo se reemplaza por otra del catálogo.
+    ciudad: CiudadPublicacion | None = None
     precio_usd: Decimal | None = Field(default=None, gt=0)
     plan: PlanPublicacion | None = None
     estado: EstadoPublicacion | None = None
@@ -211,6 +248,12 @@ class PublicacionInternaSalida(BaseModel):
     placa: str
     titulo: str | None
     descripcion: str | None
+    # Ciudad donde está el auto en venta. Se declara `str | None` y no `CiudadPublicacion`
+    # a propósito: el catálogo se impone al ESCRIBIR (422 en el alta y la edición); si
+    # algún día se retira una ciudad de la lista, las filas viejas deben poder LEERSE, no
+    # convertir un GET público en un 500. De paso queda del mismo tipo que
+    # `PublicacionReferenciadaSalida.ciudad`, que es texto libre.
+    ciudad: str | None = None
     precio_usd: Decimal
     plan: PlanPublicacion
     estado: EstadoPublicacion
@@ -255,6 +298,7 @@ class PublicacionInternaSalida(BaseModel):
             placa=p.placa,
             titulo=p.titulo,
             descripcion=p.descripcion,
+            ciudad=p.ciudad,
             precio_usd=p.precio_usd,
             plan=PlanPublicacion(p.plan),
             estado=EstadoPublicacion(p.estado),

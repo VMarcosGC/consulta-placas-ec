@@ -268,6 +268,15 @@ class PublicacionInterna(Base):
     placa: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     titulo: Mapped[str | None] = mapped_column(String(160), nullable=True)
     descripcion: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # Dónde está el auto EN VENTA (migración 0023). Mismo nombre y mismo String(80) que
+    # `PublicacionReferenciada.ciudad`, para que la tarjeta del feed lea un solo campo.
+    # No confundir con `Vehiculo.ciudad_registro`, que es dónde se MATRICULÓ: un auto
+    # matriculado en Quito puede estar vendiéndose en Manta, así que ni la migración ni
+    # el alta derivan una de la otra.
+    # El catálogo cerrado de ciudades lo valida Pydantic (`CiudadPublicacion` en
+    # schemas.py), no la BD: mismo criterio que la ficha técnica. NULL = el vendedor
+    # todavía no la indicó.
+    ciudad: Mapped[str | None] = mapped_column(String(80), nullable=True)
     precio_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     plan: Mapped[str] = mapped_column(
         String(16),
