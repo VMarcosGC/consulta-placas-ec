@@ -13,3 +13,4 @@ debug_*.html
 discover_*.png
 discover_*.txt
 logs/
+.env.local*
