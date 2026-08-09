@@ -37,6 +37,65 @@ rutas y la suite completa pasó. La spec suma explícitamente la prueba desde su
 
 ---
 
+## 2026-08-08 — TASK-012 (frontend): mostrar y capturar la ciudad
+
+**Repo:** `consulta-placas-web` (el backend solo recibe esta entrada). Ejecutó el agente
+**dev-frontend**; corregido tras la auditoría de **Codex**. **Migración `0023` ya aplicada
+en Neon** (verificado: columna `ciudad VARCHAR(80)` nullable, 3 filas en `null`).
+
+**Qué se hizo.** `ciudad` en el mirror de types; selector con el catálogo cerrado de 12 en
+el wizard; la ciudad en el detalle del anuncio junto a marca/modelo/año; y la línea de
+extras de la tarjeta **unificada**: se extrajo `LineaExtras` con ambos campos opcionales,
+que ahora usan tanto `ListingInternaCard` como `ListingReferenciadaCard`. Antes esa línea
+existía solo en la referenciada; como ambas entidades comparten el nombre `ciudad`, la
+tarjeta lee una sola forma y no dos ramas. Sin ciudad no se pinta nada: no deja hueco.
+
+**Prefill: se propone, no se hereda.** El wizard llega del garage con `?vehiculo=<id>`
+pero sin ciudad, así que se resuelve del vehículo ya cargado (la página ya pedía el
+garage) en vez de sumar un query param con texto libre — y así también funciona al elegir
+el auto en el `<select>`. El valor se **propone** con un aviso que dice de dónde salió y
+que es **dónde se matriculó**, no dónde está en venta. Si `ciudad_registro` no calza con
+el catálogo tras normalizar (sin tildes, minúsculas, espacios colapsados), el selector
+queda vacío: un prefill que adivina es peor que ninguno. Publicar sin ciudad sigue siendo
+válido; no se agregó ninguna validación que bloquee el alta.
+
+**Tres correcciones de la auditoría de Codex**
+
+1. **El prefill pisaba "Sin especificar" (la de fondo).** `setCiudad(actual => actual ||
+   sugerida)` usaba el VALOR para inferir intención, y `""` significa dos cosas distintas:
+   "todavía no eligió" y "eligió *Sin especificar*". Quien elegía "Sin especificar"
+   mientras `listarVehiculos()` seguía en vuelo se encontraba la ciudad del garage
+   impuesta — exactamente lo contrario de la intención declarada. Se corrigió con un
+   **flag de interacción** (`useRef`, no estado: solo se consulta, no debe re-renderizar
+   ni entrar en dependencias) que se marca en el `onChange` del selector. La misma regla
+   se aplicó a `elegirVehiculo`, que tenía el mismo patrón.
+   **Verificado simulando la carrera** con Playwright, retrasando `/vehiculos` 3 s y
+   tocando el selector durante la ventana: elegir "Sin especificar" queda en `""`, elegir
+   "Ambato" queda en `"Ambato"`, y no tocar nada sigue prellenando `"Quito"` (sin
+   regresión del caso feliz).
+2. **El mirror no reflejaba la opcionalidad real.** El OpenAPI declara `ciudad` nullable
+   **y no requerida** en la salida, y el input admite `null` (`anyOf: [enum, null]`).
+   Quedó `ciudad?: string | null` en la salida y `ciudad?: CiudadPublicacion | null` en el
+   input. Nota: la convención del archivo ya era `?: X | null` —y el hermano
+   `PublicacionReferenciada.ciudad` ya la seguía—, así que el interno era el desalineado.
+3. **Faltaba esta entrada de bitácora** (§5 del checklist).
+
+**Verificación:** `npx tsc --noEmit` limpio · `npm run lint` → 4 errores, los 4
+preexistentes, 0 nuevos · `npm run build` OK · a 360px la línea de extras no desborda
+(tarjeta `scrollWidth == clientWidth`; el `truncate` recorta con elipsis en el peor caso
+`"Santo Domingo · 128.450 km"`) y sin ciudad simplemente no se renderiza (−18 px de alto).
+
+**Pendientes**
+- **No se puede corregir la ciudad de una publicación ya creada.** El backend acepta
+  `ciudad` en el PATCH, pero el frontend no tiene formulario de edición de datos básicos
+  en `mis-publicaciones` (solo ficha, fotos y estado). Si el vendedor se equivoca, hoy no
+  tiene cómo arreglarlo desde la web. Se suma al detalle heredado del backend: `ciudad:
+  null` en el PATCH significa "no la toques", no "bórrala".
+- El **filtro por ciudad** sigue fuera de alcance, por decisión: se construye cuando haya
+  publicaciones suficientes para que filtrar tenga sentido.
+
+---
+
 ## 2026-08-08 — TASK-012: ciudad en las publicaciones internas
 
 **Repo:** backend. Ejecutó el agente **dev-backend**. **Migración `0023` escrita pero NO
