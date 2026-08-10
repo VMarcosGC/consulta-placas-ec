@@ -37,10 +37,77 @@ rutas y la suite completa pasó. La spec suma explícitamente la prueba desde su
 
 ---
 
+## 2026-08-10 — TASK-013 (frontend): mostrar y capturar el kilometraje
+
+**Repo:** `consulta-placas-web` (el backend solo recibe esta entrada). Ejecutó el agente
+**dev-frontend**. **La migración `0024` ya está aplicada en Neon** y el backend está
+mergeado en `main` (`066c9cd`): código y base alineados.
+
+**Qué se hizo.** `kilometraje?: number | null` en el mirror —siguiendo la convención
+`?: X | null`, que fue un hallazgo de la auditoría de TASK-012—, campo numérico opcional en
+el wizard, el kilometraje en el detalle junto a marca/modelo/año/ciudad, y en la tarjeta
+del feed **una sola prop**: `LineaExtras` ya lo formateaba para la referenciada, así que
+`ListingInternaCard` solo tuvo que pasarle el campo. Queda `Quito · 85.000 km`, igual que
+en los portales conocidos.
+
+**El retorno de haber unificado en TASK-012.** Las dos tarjetas ahora hacen la llamada
+**idéntica** `<LineaExtras ciudad={pub.ciudad} kilometraje={pub.kilometraje} />`. Agregar
+el kilometraje fue una prop, sin markup ni formateo nuevo: eso es lo que se compró al
+extraer el helper en vez de duplicar la línea.
+
+### Por qué NO se hizo el prefill
+
+No es "hoy hay 0 filas y mañana se llena": es un **no-op estructural**. Se revisó todo
+`src/` y **no existe una sola llamada** a `GET /vehiculos/{id}/kilometraje` ni a
+`kilometros` — **mi-garage no registra lecturas de kilometraje**. La tabla no se puede
+llenar desde esta web, así que el prefill no tendría de dónde sugerir nada hasta que el
+garage gane esa función.
+
+Y no salía gratis: a diferencia de la ciudad —que viajaba en el `listarVehiculos()` que la
+página ya pedía—, esto exigía una función nueva en `api.ts`, un tipo nuevo en el mirror y
+una llamada **autenticada por vehículo**, re-disparada en cada cambio del `<select>`, con
+sus respuestas potencialmente fuera de orden y su flag de interacción. Todo eso para
+proponer `undefined`. Cuando el garage registre kilometraje, el prefill se hace ahí y
+**con `max(kilometros)`**, por la discrepancia registrada en la entrada del 2026-08-09
+(el endpoint ordena por `fecha_lectura desc` pero la validación monotónica usa el máximo).
+
+### `line-clamp-2` en la línea de extras, y solo ahí
+
+Con una ciudad larga, el `truncate` heredado partía la cifra a media: *"Santo Domingo ·
+1.25…"* donde el dato dice **1.250.000 km**. **Una cifra cortada cambia lo que dice**; un
+título cortado no — sigue significando lo mismo aunque se lea a medias. Por eso la regla de
+M2.7 (*una línea, truncada*) **se conserva para el título** y cambia solo para esta línea.
+En un producto cuya propuesta es la transparencia, un kilometraje mal leído es peor que
+ocupar un renglón más.
+
+**Medido a 360px** con el peor caso inyectado en el feed: el texto se ve **completo** en 2
+líneas, sin desborde horizontal (`scrollWidth` 360 = `innerWidth`), y **la grilla no
+baila** — en la fila que mezcla una tarjeta de 2 líneas con una de 1, **ambas miden 289px**
+porque el grid las estira a la más alta. La diferencia de 16px se da *entre* filas, que es
+lo esperado. (Nota de la medición: se capturaron 3 de las 5 tarjetas inyectadas; las dos
+que faltan son los casos triviales —solo ciudad y sin extras— que el selector no tomó.)
+
+**Verificación:** `npx tsc --noEmit` limpio · `npm run lint` → 4 errores, los 4
+preexistentes, 0 nuevos · `npm run build` OK.
+
+**Pendientes**
+- **No se puede editar el kilometraje de una publicación ya creada**, igual que la ciudad:
+  `mis-publicaciones` no tiene formulario de campos básicos y `api.ts` no expone el
+  `PATCH /marketplace/publicaciones/{id}`. Ya van **dos** campos que solo se pueden fijar
+  al crear; el tercero heredará el problema. Es su propia tarea.
+- `/marketplace/buscar` no filtra ni ordena por kilometraje (tocaría el keyset).
+- El prefill queda para cuando **mi-garage registre lecturas** — con `max(kilometros)`.
+
+---
+
 ## 2026-08-09 — TASK-013: kilometraje declarado en las publicaciones internas
 
 **Rama:** `feat/TASK-013-kilometraje-publicacion`. Ejecutó el agente **dev-backend**.
 **Migración `0024` escrita pero NO aplicada** — Neon sigue en `0023` y sin la columna.
+> **Actualización 2026-08-10:** la `0024` **ya está aplicada** en Neon (`alembic_version`
+> = `0024`, columna `kilometraje bigint` nullable presente) y la rama está **mergeada en
+> `main`** (`066c9cd`, pusheado). Código y base quedaron alineados. Ver la entrada
+> *"TASK-013 (frontend)"*, arriba.
 
 **El problema.** `PublicacionInternaSalida` no traía kilometraje y `PublicacionReferenciada`
 sí, y la tarjeta ya lo pintaba vía `LineaExtras`. La misma asimetría que cerró TASK-012 con
@@ -111,9 +178,10 @@ con `downgrade` · **59 tests OK** (40 previos + 19 nuevos) · SQL offline en am
 intacta**: `alembic_version` = `0023`, columna ausente.
 
 **Pendientes**
-- **Marcos: `alembic upgrade head`** (0024) contra Neon. Hasta entonces, cualquier
-  POST/PATCH real fallaría por columna inexistente; los tests no lo notan porque la sesión
-  está mockeada.
+- ~~**Marcos: `alembic upgrade head`** (0024) contra Neon.~~ **HECHO el 2026-08-10**, junto
+  con el merge a `main`. Se aplicó con la guarda habitual: apartar `.env.local`, verificar
+  que el destino fuera Neon, exigir que la versión de partida fuera `0023`, y restaurar
+  `.env.local` con `trap` pasara lo que pasara.
 - **Frontend**: el kilometraje en el formulario (con el prefill por `max(kilometros)`) y en
   la tarjeta — `LineaExtras` ya lo pinta para la referenciada, así que debería ser pasarle
   el campo.
