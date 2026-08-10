@@ -83,7 +83,8 @@ Hubo dos series en circulación con el mismo prefijo. Esta es la vigente:
 | TASK-009 | Tests de parser con fixtures | pendiente |
 | TASK-010 | Entorno local vs producción (`.env.local`) | spec lista |
 | TASK-011 | **Frontend del contacto** | ✅ hecho |
-| TASK-012 | Ciudad en publicaciones internas (backend) | ✅ falta aplicar `0023` + frontend |
+| TASK-012 | Ciudad en publicaciones internas | ✅ hecho (backend + frontend, `0023` aplicada) |
+| TASK-013 | Kilometraje declarado en publicaciones internas | ✅ backend · falta aplicar `0024` + frontend |
 
 > **⚠️ Renumeración (2026-08-05) — no busques el número viejo.**
 > La versión anterior de este archivo llamaba **TASK-002** al *frontend del contacto*,

@@ -37,6 +37,97 @@ rutas y la suite completa pasó. La spec suma explícitamente la prueba desde su
 
 ---
 
+## 2026-08-09 — TASK-013: kilometraje declarado en las publicaciones internas
+
+**Rama:** `feat/TASK-013-kilometraje-publicacion`. Ejecutó el agente **dev-backend**.
+**Migración `0024` escrita pero NO aplicada** — Neon sigue en `0023` y sin la columna.
+
+**El problema.** `PublicacionInternaSalida` no traía kilometraje y `PublicacionReferenciada`
+sí, y la tarjeta ya lo pintaba vía `LineaExtras`. La misma asimetría que cerró TASK-012 con
+la ciudad: el comprador veía el kilometraje de un auto copiado de OLX pero no el de uno
+publicado aquí. Después del precio, es el dato que más decide.
+
+**Qué se hizo.** Columna `kilometraje` (BigInteger, nullable) en `publicaciones_internas`,
+con **el mismo nombre y tipo** que en la referenciada para que `LineaExtras` siga leyendo
+un solo campo sin ramificar. Entra en alta y edición con `ge=0, le=2_000_000` (los mismos
+límites de la hermana) y sale en feed, `/buscar`, `mias` y detalle. **No es obligatorio
+para publicar**: no entra al umbral de activación ni a ninguna validación del alta. La
+salida va `int | None` **sin** los límites, mismo precedente que la ciudad: el rango se
+impone al escribir, y si mañana se baja el tope las filas viejas tienen que poder leerse
+en vez de convertir un GET público en 500.
+
+### Por qué NO se derivó del garage — y por qué este caso es distinto al de la ciudad
+
+El argumento fuerte no es semántico, es de **consentimiento**: `SCOPE_PERMITIDO =
+{"kilometraje", "mantenimientos", "duenos_historico"}`. El dominio **ya modela el
+kilometraje como opt-in**: es uno de los tres bloques que el dueño elige compartir, y solo
+a través del token de compra-venta con scope explícito. Derivarlo automáticamente a un
+anuncio **público** saltaría un consentimiento que el modelo ya tiene construido, y lo
+haría en silencio.
+
+Eso lo separa del caso de `ciudad_registro` en TASK-012, que era **solo semántico** —dónde
+se matriculó no es dónde está en venta, pero nadie había declarado la ciudad como privada—.
+Aquí el problema no es que el dato signifique otra cosa: es que **su exposición ya estaba
+decidida, y decidida en contra**.
+
+Se suman dos razones prácticas: la última lectura del garage es el odómetro de un momento
+cualquiera, no el que el vendedor quiere publicar; y **ambas fuentes están vacías en
+producción** (`kilometraje_lecturas` 0 filas, `mantenimientos` 0 filas), así que derivar
+habría dado `NULL` para el 100% de los anuncios. Por lo mismo, **no hay backfill**.
+
+### Discrepancia del endpoint de lecturas — importante para el prefill
+
+`GET /vehiculos/{vehiculo_id}/kilometraje` ordena por **`fecha_lectura desc`**, pero la
+validación monotónica del POST compara contra **`max(kilometros)`**. No son lo mismo: se
+puede insertar una lectura con fecha vieja y kilometraje más alto, y esa lectura sería la
+mayor sin ser la primera de la lista.
+
+**Consecuencia para quien haga el prefill del formulario: tomar `max(kilometros)`, no
+`lecturas[0]`.** Usar el primero devolvería un valor menor al real y propondría al vendedor
+un odómetro que su propio garage contradice. Otros dos avisos: es una **llamada extra**
+(`VehiculoSalidaCompleta` no expone kilometraje, a diferencia de la ciudad, que venía en el
+garage ya cargado), y hoy el prefill será un **no-op** porque no hay lecturas — el
+formulario tiene que verse bien sin sugerencia.
+
+### Los dos kilometrajes conviven, y está escrito por qué
+
+`PublicacionInternaSalida` ya exponía uno escondido: `ResumenMantenimientos.ultimo_kilometraje`,
+`max(kilometraje_relacionado)` de los mantenimientos, solo premium y hoy siempre `NULL`.
+**Conviven a propósito**, con la nota en ambos schemas apuntándose mutuamente para que
+nadie borre uno sin leer el otro: `kilometraje` es *"el odómetro **hoy**, según el
+vendedor"* (declarado, cualquier plan) y `ultimo_kilometraje` es *"el odómetro en el
+**último service**"* (derivado, verificable, solo premium). La redundancia **es** el valor:
+si el service de hace tres meses marcaba 78.000 y el anuncio dice 42.000, hay algo que
+explicar — borrar uno pierde justo esa comparación. Tres tests fijan la decisión.
+
+**Seguimiento:** hoy `ultimo_kilometraje` es siempre `NULL`. El día que deje de serlo, hay
+que revisar **cómo se presentan juntos en el detalle**: dos cifras de kilometraje sin
+explicación se leen como contradicción, no como información.
+
+**Verificación** (ejecutada de forma independiente al reporte del agente): `import main` →
+**68 rutas** (sin cambio) · `alembic heads` → **`0024`, cabeza única**, cadena `0023→0024`
+con `downgrade` · **59 tests OK** (40 previos + 19 nuevos) · SQL offline en ambos sentidos
+(`ADD COLUMN kilometraje BIGINT` / `DROP COLUMN`) sin conectar a ninguna BD · **Neon
+intacta**: `alembic_version` = `0023`, columna ausente.
+
+**Pendientes**
+- **Marcos: `alembic upgrade head`** (0024) contra Neon. Hasta entonces, cualquier
+  POST/PATCH real fallaría por columna inexistente; los tests no lo notan porque la sesión
+  está mockeada.
+- **Frontend**: el kilometraje en el formulario (con el prefill por `max(kilometros)`) y en
+  la tarjeta — `LineaExtras` ya lo pinta para la referenciada, así que debería ser pasarle
+  el campo.
+- **Nada valida el kilometraje declarado contra el garage.** Se puede publicar 42.000 con
+  un service de 78.000. Es coherente con "son hechos distintos", pero esa contradicción es
+  justo la señal que el sello premium debería mirar. Candidato a regla, no implementado.
+- **No se puede vaciar el kilometraje desde la edición** (`is not None` en el PATCH), igual
+  que la ciudad. Ya van **dos** campos con la misma limitación: cuando se resuelva, conviene
+  hacerlo para todo el schema de una vez y no campo por campo.
+- `/marketplace/buscar` no filtra ni ordena por kilometraje: tocaría el keyset y no estaba
+  pedido.
+
+---
+
 ## 2026-08-08 — TASK-012 (frontend): mostrar y capturar la ciudad
 
 **Repo:** `consulta-placas-web` (el backend solo recibe esta entrada). Ejecutó el agente

@@ -203,6 +203,14 @@ class PublicacionInternaCrear(BaseModel):
     # que es dónde se matriculó: prellenar el formulario con ese valor para que el
     # vendedor lo CONFIRME es tarea del frontend, no una inferencia silenciosa del backend.
     ciudad: CiudadPublicacion | None = None
+    # Recorrido declarado por el vendedor. Opcional: publicar sin kilometraje es válido y
+    # NO entra al umbral de activación. Mismos límites que
+    # `PublicacionReferenciadaCrear.kilometraje` (0 … 2 000 000 km), para que la tarjeta
+    # del feed lea un solo campo con un solo contrato. Fuera de rango → 422 vía `Field`
+    # (§10.2), nunca 500. Igual que la ciudad, NO se deriva del garage: prellenar el
+    # formulario con la última lectura para que el vendedor la CONFIRME es tarea del
+    # frontend; el kilometraje del garage es privado y opt-in (ver `SCOPE_PERMITIDO`).
+    kilometraje: int | None = Field(default=None, ge=0, le=2_000_000)
     precio_usd: Decimal = Field(gt=0, description="Precio de venta; debe ser > 0")
     plan: PlanPublicacion = PlanPublicacion.LIGHT
     vehiculo_id: int | None = Field(
@@ -226,6 +234,12 @@ class PublicacionInternaActualizar(BaseModel):
     # "no lo toques": el router usa `is not None`, así que desde aquí no se vacía una
     # ciudad ya puesta, solo se reemplaza por otra del catálogo.
     ciudad: CiudadPublicacion | None = None
+    # Actualizar el recorrido (el auto sigue rodando mientras está publicado, o el
+    # vendedor se equivocó al teclear). Misma semántica que el resto del schema:
+    # `null`/omitido = "no lo toques" (el router usa `is not None`), así que desde aquí
+    # se corrige un kilometraje, no se vacía. Mismos límites que el alta → 422 fuera de
+    # rango.
+    kilometraje: int | None = Field(default=None, ge=0, le=2_000_000)
     precio_usd: Decimal | None = Field(default=None, gt=0)
     plan: PlanPublicacion | None = None
     estado: EstadoPublicacion | None = None
@@ -236,6 +250,11 @@ class ResumenMantenimientos(BaseModel):
 
     total: int = 0
     ultima_fecha: date | None = None
+    # OJO: este NO es el mismo kilometraje que `PublicacionInternaSalida.kilometraje`, y
+    # la duplicación es deliberada (ver la nota de convivencia allá). Aquí:
+    # `max(kilometraje_relacionado)` de los mantenimientos del garage = **el odómetro en
+    # el último service**, un hecho verificable contra el historial y solo visible en
+    # premium. Allá: lo que el vendedor declara hoy para el anuncio. Ninguno sobra.
     ultimo_kilometraje: int | None = None
 
 
@@ -254,6 +273,21 @@ class PublicacionInternaSalida(BaseModel):
     # convertir un GET público en un 500. De paso queda del mismo tipo que
     # `PublicacionReferenciadaSalida.ciudad`, que es texto libre.
     ciudad: str | None = None
+    # Recorrido declarado por el vendedor para este anuncio (migración 0024).
+    #
+    # ── Por qué hay DOS kilometrajes en este schema y ninguno sobra ──
+    # Este campo es «el odómetro HOY, según el vendedor»: un dato declarado, presente en
+    # cualquier plan, que el comprador necesita para decidir si abre el anuncio.
+    # `mantenimientos.ultimo_kilometraje` (abajo) es «el odómetro en el ÚLTIMO SERVICE»:
+    # derivado del garage, verificable contra el historial y solo en premium.
+    # Son dos hechos distintos y ambos legítimos: el segundo respalda al primero (si el
+    # service de hace 3 meses marcaba 78 000 y el anuncio dice 42 000, hay algo que
+    # explicar). Borrar uno "porque se repite" perdería justo esa comparación.
+    # Mismo nombre y mismo tipo que `PublicacionReferenciadaSalida.kilometraje`, para que
+    # la tarjeta del feed pinte ambas entidades con un solo campo. Sin `ge`/`le` aquí a
+    # propósito (igual que la ciudad): el rango se impone al ESCRIBIR; si mañana se baja
+    # el tope, las filas viejas deben poder LEERSE, no volver 500 un GET público.
+    kilometraje: int | None = None
     precio_usd: Decimal
     plan: PlanPublicacion
     estado: EstadoPublicacion
@@ -299,6 +333,7 @@ class PublicacionInternaSalida(BaseModel):
             titulo=p.titulo,
             descripcion=p.descripcion,
             ciudad=p.ciudad,
+            kilometraje=p.kilometraje,
             precio_usd=p.precio_usd,
             plan=PlanPublicacion(p.plan),
             estado=EstadoPublicacion(p.estado),

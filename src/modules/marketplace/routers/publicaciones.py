@@ -255,6 +255,12 @@ def crear_publicacion(
         # matriculó, no dónde se vende. El prellenado del formulario (para que el vendedor
         # confirme) lo hace el frontend, que ya recibe `ciudad_registro` en VehiculoSalida.
         ciudad=datos.ciudad,
+        # Recorrido declarado: igual que la ciudad, se toma TAL CUAL del cliente. Aunque
+        # haya `vehiculo_id` vinculado, no se cae a la última lectura del garage: ese
+        # dato es privado y opt-in por scope (§9), y además es el odómetro de un momento
+        # cualquiera, no el que el vendedor publica. El prellenado (para que lo confirme)
+        # lo hace el frontend con GET /vehiculos/{id}/kilometraje.
+        kilometraje=datos.kilometraje,
         precio_usd=datos.precio_usd,
         plan=datos.plan.value,
         estado=EstadoPublicacion.BORRADOR.value,
@@ -319,7 +325,8 @@ def actualizar_publicacion(
     sesion: Session = Depends(obtener_sesion),
     usuario: Usuario = Depends(usuario_actual),
 ):
-    """Edita precio/descripción/ciudad/estado, publica un borrador o asciende a premium.
+    """Edita precio/descripción/ciudad/kilometraje/estado, publica un borrador o asciende
+    a premium.
 
     **Transición `borrador → activa` (M2.8):** exige que la ficha llegue a
     `UMBRAL_FICHA_PUBLICACION` (422 si no) y es el momento en que se **cobra el premium**.
@@ -337,6 +344,8 @@ def actualizar_publicacion(
         pub.descripcion = datos.descripcion
     if datos.ciudad is not None:
         pub.ciudad = datos.ciudad
+    if datos.kilometraje is not None:
+        pub.kilometraje = datos.kilometraje
     if datos.precio_usd is not None:
         pub.precio_usd = datos.precio_usd
 

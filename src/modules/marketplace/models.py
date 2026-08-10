@@ -277,6 +277,14 @@ class PublicacionInterna(Base):
     # schemas.py), no la BD: mismo criterio que la ficha técnica. NULL = el vendedor
     # todavía no la indicó.
     ciudad: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Recorrido declarado por el vendedor para ESTE anuncio (migración 0024). Mismo
+    # nombre y mismo BigInteger que `PublicacionReferenciada.kilometraje`, para que la
+    # tarjeta del feed lea un solo campo. NULL = no lo declaró (distinto de 0 km).
+    # No se deriva del garage (`kilometraje_lecturas` / `mantenimientos`): ese dato es
+    # privado y opt-in por scope del token de compra-venta, y además es "el odómetro en
+    # tal momento", no "el que el vendedor publica hoy". El rango (0 … 2 000 000) lo
+    # impone Pydantic, no la BD; ver la migración 0024 para el razonamiento completo.
+    kilometraje: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     precio_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     plan: Mapped[str] = mapped_column(
         String(16),
