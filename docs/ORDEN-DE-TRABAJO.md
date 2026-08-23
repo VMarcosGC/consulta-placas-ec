@@ -78,7 +78,7 @@ Hubo dos series en circulación con el mismo prefijo. Esta es la vigente:
 | TASK-004 | Proveedor nulo por defecto | pendiente |
 | TASK-005 | `compartidos.py:58` devuelve 402, no 422 | pendiente |
 | TASK-006 | Auditoría de créditos en el ledger | pendiente |
-| TASK-007 | `scripts/estado.py` | pendiente |
+| TASK-007 | `scripts/estado.py` | **spec lista** → [spec](specs/TASK-007-scripts-estado.md) |
 | TASK-008 | Recuperación de locks del worker | pendiente |
 | TASK-009 | Tests de parser con fixtures | pendiente |
 | TASK-010 | Entorno local vs producción (`.env.local`) | spec lista |
