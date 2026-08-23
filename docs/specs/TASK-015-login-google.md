@@ -6,14 +6,24 @@
 | **Motivo** | migración Alembic + contrato de auth + verificación criptográfica (§16) |
 | **Rama** | `feat/TASK-015-login-google` |
 | **Revisor** | Codex, contra este archivo, `AGENTS.md` y el checklist §5 de `docs/plan_market_autos.md` |
-| **Estado** | spec lista — **no implementada** · **revisión 2**, tras auditoría de Codex |
+| **Estado** | spec lista — **no implementada** · **revisión 3**, tras dos auditorías de Codex |
 
 > **Revisión 2 — qué cambió respecto de la revisión 1.** La auditoría encontró un fallo
 > crítico en la regla de vinculación por email y tres correcciones técnicas. Cambiaron:
 > la **decisión 1** (§0, ahora restringida a identidad autoritativa de Google), la
 > validación de **`azp`** (§5.2), la **selección de clave por `kid`** —que la revisión 1
-> afirmaba mal— (§5.3), el **pin de `python-jose`** (§5.1) y el **antirreplay con `nonce`**
-> (§5.6). Si estás leyendo esto para implementar, lee §0 completa antes que nada.
+> afirmaba mal— (§5.3) y el **pin de `python-jose`** (§5.1). Si estás leyendo esto para
+> implementar, lee §0 completa antes que nada.
+>
+> **Revisión 3 — el `nonce` se elimina del diseño.** La revisión 2 proponía un `nonce`
+> generado en el cliente como antirreplay, con el argumento de que "quien capture solo el
+> token no puede usarlo". **El argumento era falso y la mitigación no mitigaba nada:** un
+> JWT va **firmado, no cifrado**, y el `nonce` viaja en el payload en base64 dentro del
+> mismo token. Quien captura el token captura el `nonce`. No existía un secreto
+> independiente en ningún momento. §5.6 pasa a ser un **riesgo residual aceptado**, y
+> `GoogleLoginEntrada` vuelve a `{ id_token }` — **desaparece el acoplamiento con el
+> frontend** que la revisión 2 había introducido. También se resolvió una contradicción
+> sobre el `kid` ausente (§5.3).
 
 ## Objetivo
 
@@ -203,9 +213,8 @@ Manual, numerada, con `downgrade`, revisada a mano (§10.2). **Nunca `--autogene
 
 ## 3. `POST /auth/google` — resolución de la cuenta
 
-Entrada: `GoogleLoginEntrada { id_token: str, nonce: str }` (JSON) — el `nonce` es
-obligatorio, ver §5.6. Salida: el schema **`Token`** ya existente, idéntico al de
-`/auth/login`. El frontend no distingue de dónde salió el JWT.
+Entrada: `GoogleLoginEntrada { id_token: str }` (JSON). Salida: el schema **`Token`** ya
+existente, idéntico al de `/auth/login`. El frontend no distingue de dónde salió el JWT.
 
 **Orden de resolución — este orden es normativo:**
 
@@ -268,7 +277,7 @@ se vuelve un callejón sin salida. Por eso forma parte de esta tarea y no de una
 
 | Código | Cuándo |
 |---|---|
-| **401** | firma inválida · `aud` distinto de nuestro `client_id` · `aud` múltiple con `azp` que no es el nuestro (§5.2) · `iss` desconocido · token expirado · `kid` desconocido tras refrescar el JWKS (§5.3) · `nonce` que no coincide o token ya usado (§5.6) · `alg` fuera de `RS256`. Mensaje **genérico** ("Credenciales de Google inválidas"): no se detalla cuál claim falló. |
+| **401** | firma inválida · `aud` distinto de nuestro `client_id` · `aud` múltiple con `azp` que no es el nuestro (§5.2) · `iss` desconocido · token expirado · `kid` ausente, o presente y aún desconocido tras un refresco del JWKS (§5.3) · `alg` fuera de `RS256`. Mensaje **genérico** ("Credenciales de Google inválidas"): no se detalla cuál claim falló, y **nunca se registra el token** (§5.6). |
 | **422** | `email_verified` es `false`, o el token no trae `email`. El token es legítimo pero la cuenta no sirve para identificar a nadie: es validación de negocio, no credencial mala. |
 | **409** | **identidad no autoritativa (§0.1) sobre un correo que ya existe** — el caso más frecuente de los tres, y el único con copy propio: *"Ya tienes una cuenta con este correo. Entra con tu contraseña y vincula Google desde tu perfil."* · la cuenta hallada por email ya tiene un `id_google` **distinto** · la búsqueda insensible a mayúsculas devuelve **más de una** fila. Conflicto real que un humano debe resolver — nunca elegir una fila a dedo. |
 | **503** | `GOOGLE_CLIENT_ID` sin configurar, o el JWKS es inalcanzable y no hay caché válida. Es fallo de despliegue, no del usuario (mismo precedente que `POST /consultar-foto` sin `GOOGLE_VISION_API_KEY`). |
@@ -305,7 +314,7 @@ cuando existan saldos reales.
 ## 5. Verificación del ID token — el punto donde esto se rompe
 
 Vive en **`src/modules/auth/google.py`**, no en el router. Expone dos funciones públicas:
-`verificar_id_token_google(id_token: str, nonce_esperado: str) -> ClaimsGoogle` y
+`verificar_id_token_google(id_token: str) -> ClaimsGoogle` y
 `identidad_google_autoritativa(claims) -> bool` (§3).
 
 ### 5.1 Librería: `python-jose` **pineado a `==3.5.0`** — sin dependencias nuevas
@@ -397,11 +406,24 @@ justamente el dato que liga el token a una clave concreta y publicada.
    La cabecera no está autenticada todavía: se trata como entrada hostil y solo se usa
    para **seleccionar**, nunca para decidir cómo verificar.
 2. **`alg` de la cabecera debe ser `RS256`.** Si no, **401** sin tocar el JWKS.
-3. **`kid` debe venir y debe existir en el JWKS.** Si no está, se fuerza **un** refresco
-   (§5.5) y se reintenta; si sigue sin estar, **401**.
-4. **A `jwt.decode` se le pasa esa única JWK**, no el set. Así `jose` verifica contra la
+3. **`kid` ausente o vacío → `401` inmediato, SIN pedir el JWKS.** Un ID token de Google
+   siempre trae `kid`: si falta, el token está malformado y no hay nada que buscar.
+   **Refrescar el JWKS ante un `kid` ausente sería un vector de DoS** contra el endpoint de
+   claves de Google — un atacante manda tokens basura sin `kid` y cada uno nos empuja a
+   golpear a Google, justo lo que prohíbe el skill `scraping-respetuoso`. No hay excepción
+   ni "por si acaso".
+4. **`kid` presente pero desconocido en el JWKS cacheado → se fuerza UN refresco** (§5.5,
+   con su piso de 5 minutos entre refrescos forzados) y se reintenta; si sigue sin estar,
+   **401**. Este caso sí lo merece: es cómo se absorbe una rotación legítima de claves de
+   Google sin esperar al TTL.
+5. **A `jwt.decode` se le pasa esa única JWK**, no el set. Así `jose` verifica contra la
    clave que el emisor dijo haber usado, y un token cuyo `kid` miente falla en vez de
    colarse porque otra clave del set casualmente validó.
+
+> **Los puntos 3 y 4 son casos distintos y la revisión 2 los confundía en una sola regla.**
+> `kid` **ausente** = token malformado → 401 seco. `kid` **presente y desconocido** =
+> posible rotación → un refresco. Escribirlos juntos como "si no está, refresca" era la
+> contradicción con el criterio de aceptación, y la conducta correcta es la de arriba.
 
 ### 5.4 Llamada exacta y por qué cada opción está ahí
 
@@ -490,61 +512,84 @@ caen. Reglas:
 
 - Caché **en memoria del proceso**, TTL **1 hora**, honrando el `max-age` del header
   `Cache-Control` de la respuesta cuando sea parseable.
-- **Refresco forzado ante un `kid` desconocido** (así se absorbe una rotación sin esperar
-  al TTL), con un **piso de 5 minutos entre refrescos forzados**: sin ese piso, un token
-  basura con un `kid` inventado convierte cada request en un golpe a Google — justo lo que
-  el skill `scraping-respetuoso` prohíbe.
+- **Refresco forzado ante un `kid` presente pero desconocido** (así se absorbe una rotación
+  sin esperar al TTL), con un **piso de 5 minutos entre refrescos forzados**: sin ese piso,
+  un token basura con un `kid` inventado convierte cada request en un golpe a Google —
+  justo lo que el skill `scraping-respetuoso` prohíbe. **Un `kid` ausente no refresca
+  nunca** (§5.3 punto 3): se rechaza antes de llegar acá.
 - Cliente **`httpx.Client` síncrono**, timeout de 5 s. Los handlers de `auth/router.py`
   son `def` síncronos; meter `AsyncClient` ahí obligaría a cambiar el router.
 - JWKS inalcanzable **y** sin caché válida → **503**. Con caché aún válida, se sirve de
   caché y **no** se falla.
 
-### 5.6 Antirreplay — recomendación: **sí, `nonce` generado en el cliente + un solo uso**
+### 5.6 Replay del ID token — **riesgo residual aceptado**
 
-**El problema, concreto:** el ID token vale ~1 hora y `/auth/google` lo acepta cuantas
-veces se lo manden. Quien obtenga una copia dentro de esa ventana —de un log, de un proxy
-corporativo, de un backup, de un reporte de error que serializó el body— puede canjearla
-por un JWT **nuestro**, tantas veces como quiera, sin la cuenta de Google ni la contraseña.
-`exp` acota la ventana; no impide la reutilización dentro de ella.
+**No se implementa antirreplay en esta tarea.** Esta sección declara el riesgo en vez de
+esconderlo detrás de una mitigación que no mitiga.
 
-**Lo evaluado y descartado — `nonce` emitido por el servidor.** Es la variante fuerte
-(valor aleatorio de un solo uso que el backend guarda antes de mostrar el botón), pero
-**exige un GET al backend antes de que el botón funcione**. Eso reintroduce exactamente el
-problema que decidió §1: en Render free el usuario esperaría ~20-30 s de cold start
-**antes** de poder tocar "Entrar con Google", y sin nada que mirar. Además necesita estado
-compartido: en memoria se pierde en cada redeploy y se rompe en silencio el día que haya
-más de una instancia. Paga un costo de UX cierto y grande por un incremento de seguridad
-menor que el de la combinación de abajo.
+**El riesgo, sin adornos:** el ID token de Google vale **~1 hora** y `/auth/google` lo
+acepta **cuantas veces se lo manden**. Quien obtenga una copia dentro de esa ventana puede
+canjearla por un JWT **nuestro**, repetidamente, sin la cuenta de Google y sin la
+contraseña. `exp` acota la ventana; **no impide la reutilización dentro de ella**. Esto se
+acepta a conciencia, no por descuido.
 
-**Recomendación — dos mecanismos, ninguno con round-trip previo:**
+#### Lo evaluado y descartado
 
-1. **`nonce` generado en el cliente.** El frontend crea un valor aleatorio
-   (`crypto.randomUUID()`), lo guarda en `sessionStorage`, se lo pasa a GIS al inicializar
-   y lo manda junto al token. Google lo devuelve **dentro del ID token firmado**. El
-   backend exige `claims["nonce"] == nonce` del body, con comparación en tiempo constante
-   (`hmac.compare_digest`) → si no, **401**. Cuesta cero round-trips, cero estado servidor
-   y unas pocas líneas. **Qué compra:** el token deja de ser canjeable por sí solo — quien
-   capture solo el token (log, proxy, backup) ya no puede usarlo, porque el `nonce` va
-   firmado dentro y tiene que coincidir con el que el atacante no tiene.
-2. **Un solo uso por token.** Caché en memoria de `(sub, iat)` —o `jti` si el token lo
-   trae— con TTL igual al `exp` restante. Un segundo canje del **mismo** token → **401**.
-   Reutiliza el mismo patrón de caché con TTL de §5.5, sin schema nuevo. **Qué compra:**
-   cierra la reutilización incluso cuando el atacante capturó token **y** `nonce` juntos
-   (los dos viajan en el mismo body), que es justo el hueco que el punto 1 deja abierto.
+- **`nonce` generado en el cliente — descartado, no funcionaba.** La revisión 2 lo proponía
+  argumentando que "quien capture solo el token no puede usarlo". **Es falso: un JWT va
+  firmado, no cifrado.** El `nonce` viaja en el payload, en base64, **dentro del mismo
+  token**; cualquiera que lea el token lee el `nonce`. Nunca fue un secreto independiente
+  del token, así que no agregaba ninguna barrera — solo la apariencia de una, que es peor
+  que nada porque desalienta buscar la real. Queda escrito para que no se reproponga.
+- **`nonce` emitido por el servidor — descartado por costo de UX.** Es la variante que sí
+  funciona (valor de un solo uso que el backend guarda antes de mostrar el botón), pero
+  **exige un GET al backend antes de que el botón sirva**. Eso devuelve exactamente el
+  problema que hizo descartar el redirect OAuth en §1: en Render free el usuario esperaría
+  ~20-30 s de cold start **antes** de poder tocar "Entrar con Google". Se paga un costo de
+  entrada cierto y grande, en el flujo que §1 optimizó, por cerrar un riesgo que requiere
+  que el token ya se haya filtrado.
+- **Guard de un solo uso en memoria del proceso — descartado por no ser un cierre real.**
+  Dos motivos, ambos suficientes: **(a)** el registro vive en el proceso y **se pierde en
+  cada reinicio o redeploy** — en Render free, que además duerme, la ventana de "ya lo
+  usé" desaparece sola; **(b)** `(sub, iat)` **no identifica un token único**: `iat` tiene
+  resolución de segundo, así que dos tokens legítimos emitidos en el mismo segundo para el
+  mismo usuario colisionan, y el guard rechazaría un login válido. Un mecanismo que se
+  olvida solo y produce falsos positivos no es una defensa, es una fuente de bugs.
 
-**Lo que esto NO resuelve, dicho de frente:** un atacante con XSS vivo en nuestro frontend
-puede pedir un token nuevo cuando quiera, y ninguno de los dos mecanismos lo detiene. La
-defensa contra eso es no tener XSS, no el `nonce`. Y el guard de un solo uso es **por
-proceso**: hoy Render free corre una sola instancia y funciona; el día que haya dos, un
-token se podría canjear una vez por instancia y **degradaría en silencio**. Queda anotado
-aquí para que ese día no sorprenda a nadie: la salida sería mover el registro de usados a
-Postgres, no borrar el mecanismo.
+#### Mitigaciones exigidas — estas sí son obligatorias
 
-**Consecuencias de contrato:** `GoogleLoginEntrada` pasa a ser
-`{ id_token: str, nonce: str }`, con `nonce` **obligatorio** en `/auth/google` y en
-`/auth/google/vincular`. Un ID token sin claim `nonce` → **401**. Esto **acopla la tarea
-del frontend**: si el frontend no inicializa GIS con `nonce`, ningún login funciona. Debe
-quedar escrito en el hand-off de esa tarea, no descubrirse en integración.
+1. **HTTPS extremo a extremo.** Producción ya lo es en Vercel y Render; ningún entorno que
+   exponga este endpoint puede servirlo por HTTP.
+2. **El token viaja en el cuerpo del POST**, nunca en la query string ni en la URL. Una
+   query string queda en logs de acceso, en el `Referer` y en el historial del navegador;
+   un body, no.
+3. **El ID token NUNCA se registra.** Ni en logs de acceso, ni en logs de error, ni en
+   trazas, ni en un `print` de depuración, ni serializado dentro de un reporte de
+   excepción. Al capturar `JWTError` se registra **el tipo de fallo**, jamás el token que
+   lo causó. Es la mitigación que más importa: la vía realista de filtración de un ID token
+   no es la red, es **nuestro propio logging**. Tiene criterio de aceptación propio.
+4. **El JWT propio no hereda la vida del de Google.** Su `exp` lo fija
+   `JWT_EXPIRA_MINUTOS` como el de cualquier login. El ID token de Google se verifica, se
+   usa para resolver la cuenta y **se descarta** (decisión 3): no se guarda, no se
+   refresca, no se reenvía.
+
+#### El cierre real, para cuando haya Redis
+
+**Guard por `jti` con TTL en Redis.** Cuando exista Redis en producción —hoy no hay—, se
+registra el `jti` del ID token con TTL igual al `exp` restante y se rechaza el segundo
+canje del mismo token. `jti` **sí** identifica un token único, que es lo que `(sub, iat)`
+no hace, y Redis sobrevive al reinicio del proceso y se comparte entre instancias, que es
+lo que la memoria del proceso no hace. Las dos objeciones al guard en memoria caen a la
+vez, y por eso este es el cierre correcto y no una versión mejor del descartado.
+
+**Queda fuera de esta tarea** porque introducir Redis es una decisión de infraestructura
+con su propio costo y su propia tarea. Si el `jti` no viniera en los ID tokens de Google,
+la clave sería el hash del token completo — pero eso se verifica al implementarlo, no
+ahora.
+
+**Consecuencia de contrato:** `GoogleLoginEntrada` es **`{ id_token: str }`** y nada más.
+El frontend **no** inicializa GIS con `nonce` ni manda nada extra; el acoplamiento que la
+revisión 2 había creado con la tarea de frontend **desaparece**.
 
 ---
 
@@ -609,7 +654,7 @@ subdominio distinto en cada push y GIS los rechazará. Se prueba en local y en p
 **Permitido modificar:**
 
 - `src/modules/auth/models.py` — las 3 columnas nuevas + `password_hash` a `str | None`
-- `src/modules/auth/schemas.py` — `GoogleLoginEntrada` (`id_token` + `nonce`, §5.6)
+- `src/modules/auth/schemas.py` — `GoogleLoginEntrada` (**solo `id_token`**, §5.6)
 - `src/modules/auth/router.py` — los endpoints `/auth/google` y `/auth/google/vincular`
   (§3.1) **y** la guarda de `password_hash IS NULL` en `/auth/login` (§6)
 - **`requirements.txt` — SOLO** para cambiar `python-jose[cryptography]>=3.3.0` por
@@ -687,12 +732,14 @@ Cada punto se comprueba corriendo algo. Nada de "funciona bien".
   - [ ] **`kid` de la cabecera que apunta a una clave distinta de la que firmó** → **401**
         (§5.3). Con el set completo pasado a `jose` esto daría 200: es la prueba de que se
         selecciona **una** JWK por `kid` y no se prueban todas.
-  - [ ] **cabecera sin `kid`** → **401**, y **sin** pedir el JWKS.
+  - [ ] **cabecera sin `kid`** → **401**, y el doble de prueba del JWKS registra **cero**
+        llamadas (§5.3 punto 3: no refrescar ante `kid` ausente).
+  - [ ] **`kid` presente y desconocido** → se fuerza **un** refresco y, si sigue sin estar,
+        **401** (§5.3 punto 4). Distinguir este caso del anterior es el objetivo de las dos
+        pruebas: contar las llamadas al JWKS en cada una.
   - [ ] token con `alg: none` o `alg: HS256` → **401**, nunca 200.
-  - [ ] **`nonce` del body distinto del claim `nonce`** → **401**; token **sin** claim
-        `nonce` → **401** (§5.6).
-  - [ ] **el mismo token válido canjeado dos veces** → primera **200**, segunda **401**
-        (guard de un solo uso, §5.6).
+  - [ ] **`GoogleLoginEntrada` acepta solo `id_token`**: un body con un campo extra
+        (`nonce`, por ejemplo) no lo exige el schema ni lo usa el endpoint (§5.6).
   - [ ] `email_verified: false` → **422**, y **no** se crea ni se vincula ninguna cuenta.
   - [ ] cuenta con `id_google` distinto al del token → **409**.
   - [ ] `GOOGLE_CLIENT_ID` vacío → **503**.
@@ -705,19 +752,23 @@ Cada punto se comprueba corriendo algo. Nada de "funciona bien".
 - [ ] `git diff --stat` no toca ningún archivo fuera del alcance (`requirements.txt` sí
       aparece, con **una** línea cambiada: el pin de §5.1).
 - [ ] `grep -rn "client_secret" src/ .env.example render.yaml` no devuelve nada.
-- [ ] `grep -n "id_token" src/modules/auth/router.py` — el ID token de Google **no** se
-      persiste en la BD ni se escribe en ningún log.
+- [ ] **El ID token nunca se registra (§5.6, mitigación 3).** `grep -rn "id_token"
+      src/modules/auth/` — ninguna aparición dentro de un `print`, `logger.*`, f-string de
+      log o `detail` de excepción; no se persiste en la BD. El handler de `JWTError`
+      registra el **tipo** de fallo, no el token. Es la vía realista de filtración y por
+      eso tiene criterio propio.
 - [ ] Copy es-EC, tuteo, no agresivo, en todos los `detail` de error.
 
 ---
 
 ## Fuera de alcance
 
-Frontend (repo hermano, tarea aparte — **pero queda acoplado por el `nonce` de §5.6 y debe
-decirse en su hand-off**). Redirect OAuth / authorization code. `nonce` emitido por el
-servidor (evaluado y descartado en §5.6). Mover el registro de tokens usados a Postgres
-para soportar más de una instancia (§5.6). Login con Apple, Facebook o cualquier otro
-proveedor. Desvincular Google de una cuenta. Ponerle
+Frontend (repo hermano, tarea aparte — **sin acoplamientos**: solo manda `id_token`).
+Redirect OAuth / authorization code. **Todo antirreplay** (§5.6): el `nonce` de cliente
+(descartado por no funcionar), el `nonce` de servidor y el guard en memoria (descartados
+con motivo), y el **guard por `jti` en Redis**, que es el cierre correcto y espera a que
+haya Redis en producción. Login con Apple, Facebook o cualquier otro proveedor.
+Desvincular Google de una cuenta. Ponerle
 contraseña después a una cuenta creada por Google, y su inverso. Recuperación de
 contraseña. Verificación de email para cuentas locales. Normalizar a minúsculas los
 emails de `/auth/registro` (deuda preexistente). Migrar `email` a `citext` o a un índice
