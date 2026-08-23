@@ -6,7 +6,14 @@
 | **Motivo** | migración Alembic + contrato de auth + verificación criptográfica (§16) |
 | **Rama** | `feat/TASK-015-login-google` |
 | **Revisor** | Codex, contra este archivo, `AGENTS.md` y el checklist §5 de `docs/plan_market_autos.md` |
-| **Estado** | spec lista — **no implementada** |
+| **Estado** | spec lista — **no implementada** · **revisión 2**, tras auditoría de Codex |
+
+> **Revisión 2 — qué cambió respecto de la revisión 1.** La auditoría encontró un fallo
+> crítico en la regla de vinculación por email y tres correcciones técnicas. Cambiaron:
+> la **decisión 1** (§0, ahora restringida a identidad autoritativa de Google), la
+> validación de **`azp`** (§5.2), la **selección de clave por `kid`** —que la revisión 1
+> afirmaba mal— (§5.3), el **pin de `python-jose`** (§5.1) y el **antirreplay con `nonce`**
+> (§5.6). Si estás leyendo esto para implementar, lee §0 completa antes que nada.
 
 ## Objetivo
 
@@ -15,17 +22,71 @@ objetivo navega desde Android de gama baja y ya tiene sesión de Google iniciada
 teléfono: pedirle que invente y recuerde una contraseña es la fricción más cara del
 onboarding.
 
-## Decisiones ya tomadas — no se reabren
+## 0. Decisiones ya tomadas — no se reabren
 
-1. **Vinculación por email.** Si el correo que llega de Google coincide con un usuario
-   existente, es la **misma cuenta**. Google verifica el email; no se crea cuenta
-   duplicada ni se pide confirmación adicional.
+1. **Vinculación por email SOLO con identidad autoritativa de Google.** Ver §0.1: esta
+   regla **revierte** la decisión original y es el punto más delicado de la tarea.
 2. **`password_hash` pasa a nullable.** Un usuario de Google no tiene contraseña.
    Rellenarlo con un hash falso es peor: convierte "no puede entrar por contraseña" en
    "puede entrar si alguien adivina el placeholder".
 3. **El backend sigue emitiendo SU propio JWT con `sub=<email>`.** El ID token de Google
    se valida y **se descarta**: no se guarda, no se reenvía, no se refresca.
    `usuario_actual`, `usuario_actual_opcional` y el contrato del frontend **no cambian**.
+
+### 0.1 Vinculación por email — regla vigente, y por qué revierte a la anterior
+
+> **ESTO REVIERTE UNA DECISIÓN PREVIA. NO LO "SIMPLIFIQUES".**
+>
+> La revisión 1 de esta spec decía: *"si el correo que llega de Google coincide con un
+> usuario existente, es la misma cuenta; Google verifica el email"*. **Esa regla era una
+> toma de cuenta** y se elimina. Si en una revisión futura alguien propone volver a
+> vincular por email a secas porque "es más simple" o "Google ya verificó el correo", la
+> respuesta está escrita abajo: ya se intentó, y este párrafo existe porque el argumento
+> suena razonable y es falso.
+
+**Por qué `email_verified: true` NO alcanza para tomar posesión de una cuenta existente.**
+El claim afirma que *en algún momento* Google comprobó que quien creó esa cuenta de Google
+controlaba ese buzón. No afirma que **hoy** lo controle. Para un correo que no es de un
+dominio de Google, el dueño del buzón puede haber cambiado desde entonces: direcciones
+corporativas que se reasignan al rotar el personal, dominios que caducan y alguien más
+compra, proveedores que reciclan direcciones abandonadas. Quien reciba hoy ese correo
+puede crear una cuenta de Google con él, y `email_verified` llegaría en `true` describiendo
+una verificación vieja. Vincular por ese claim le entregaría la cuenta que otra persona
+tiene en nuestra plataforma — con sus vehículos, su saldo y su historial.
+
+**Regla vigente — auto-enlace solo con identidad autoritativa:**
+
+Se considera **autoritativa** una identidad de Google que cumpla `email_verified is True`
+**y además** alguna de estas dos:
+
+| Caso | Condición sobre los claims | Por qué es autoritativa |
+|---|---|---|
+| **Gmail** | el dominio del `email` es `gmail.com` o `googlemail.com` | Google **es** el dueño del dominio y el operador del buzón: la dirección no puede haber cambiado de manos fuera de Google. `googlemail.com` es el dominio alterno del mismo servicio (Alemania/Rusia históricamente) y se acepta a propósito — omitirlo crearía cuentas duplicadas para el mismo buzón real. |
+| **Workspace** | el claim **`hd`** viene presente y no vacío | `hd` significa que la cuenta pertenece a un dominio de Google Workspace: el control del buzón lo administra hoy ese dominio, y su administrador puede desactivarla. |
+
+**Cualquier otro caso NO auto-enlaza.** Esto incluye el caso frecuente de una cuenta de
+Google creada con un correo externo (`@hotmail.com`, `@yahoo.com`, un dominio propio sin
+Workspace) aunque llegue con `email_verified: true`. Las salidas son dos, y solo dos:
+
+- **El correo no existe en `usuarios` → alta normal.** Cuenta nueva, sin conflicto.
+- **El correo ya existe en `usuarios` → NO se enlaza y NO se crea otra cuenta → `409`.**
+  El usuario debe entrar con su contraseña y vincular Google **desde una sesión ya
+  autenticada** (§3.1). Autenticarse primero es la prueba de posesión que el claim no da.
+
+**Por qué no "crear una cuenta nueva" en ese caso**, aunque la instrucción original lo
+ofrezca como alternativa: `Usuario.email` es **`unique=True`**
+(`src/modules/auth/models.py:22-24`, verificado). Insertar una segunda fila con el mismo
+correo **viola el índice único** y termina en `IntegrityError` → 500. La alternativa
+"cuenta nueva" solo aplica cuando el correo **no** está tomado; cuando lo está, la única
+salida segura es el enlace explícito. Que quede escrito para que nadie intente resolverlo
+relajando el índice único: relajarlo rompería `sub=<email>` del JWT propio (decisión 3),
+que asume que el email identifica a **una** cuenta.
+
+**Lo que esta regla cuesta, dicho de frente:** un usuario con cuenta local
+`juan@hotmail.com` que toque "Entrar con Google" recibe un 409 en vez de entrar. Es
+fricción real y deliberada. El copy debe explicarle qué hacer, en es-EC y sin culparlo:
+*"Ya tienes una cuenta con este correo. Entra con tu contraseña y vincula Google desde tu
+perfil."*
 
 ## Contexto mínimo — verificado en el repo, no lo re-derives
 
@@ -41,8 +102,9 @@ onboarding.
 - **Última migración: `0024_kilometraje_publicacion.py`.** La siguiente es **`0025`** —
   coincide con lo previsto en el encargo.
 - **Ya están instaladas y en `requirements.txt`:** `python-jose[cryptography]` (3.5.0),
-  `cryptography` (48.0.0) y `httpx` (0.28.1). Ver §5 de esta spec: **no hace falta
-  ninguna dependencia nueva**.
+  `cryptography` (48.0.0) y `httpx` (0.28.1). Ver §5.1 de esta spec: **no hace falta ninguna
+  dependencia nueva**, pero `python-jose` **sí se pinea a `==3.5.0`** (§5.1) — es el único
+  cambio permitido en `requirements.txt`.
 - **El repo NO tiene pytest.** Las pruebas usan `unittest` de la stdlib y se corren con
   `python -m unittest tests.test_x -v` (ver el docstring de `tests/test_ciudad_publicacion.py`).
   La mención a `pytest` en la spec de TASK-001 quedó obsoleta; **no la copies**.
@@ -141,8 +203,9 @@ Manual, numerada, con `downgrade`, revisada a mano (§10.2). **Nunca `--autogene
 
 ## 3. `POST /auth/google` — resolución de la cuenta
 
-Entrada: `GoogleLoginEntrada { id_token: str }` (JSON). Salida: el schema **`Token`** ya
-existente, idéntico al de `/auth/login`. El frontend no distingue de dónde salió el JWT.
+Entrada: `GoogleLoginEntrada { id_token: str, nonce: str }` (JSON) — el `nonce` es
+obligatorio, ver §5.6. Salida: el schema **`Token`** ya existente, idéntico al de
+`/auth/login`. El frontend no distingue de dónde salió el JWT.
 
 **Orden de resolución — este orden es normativo:**
 
@@ -150,28 +213,64 @@ existente, idéntico al de `/auth/login`. El frontend no distingue de dónde sal
    coincida con el que manda Google hoy. **El `email` guardado NO se actualiza**: es el
    `sub` de nuestro propio JWT y la clave de negocio de toda la app; reescribirlo
    invalidaría las sesiones vivas y podría chocar contra el índice único de `email`.
-2. **Por `email` (comparación insensible a mayúsculas).** Si existe, se **vincula**:
-   `id_google = sub`, `email_verificado = True`. `proveedor_autenticacion` **no se toca**
-   (la cuenta se creó local y eso no cambia). **No se acreditan tokens** (§4).
+2. **Por `email` (comparación insensible a mayúsculas).** Si existe una cuenta con ese
+   correo y **no** tiene `id_google`, la salida depende de si la identidad es
+   **autoritativa** según §0.1:
+   - **Autoritativa** (`gmail.com` / `googlemail.com`, o `hd` presente) → se **vincula**:
+     `id_google = sub`, `email_verificado = True`. `proveedor_autenticacion` **no se toca**
+     (la cuenta se creó local y eso no cambia). **No se acreditan tokens** (§4).
+   - **No autoritativa** → **`409`**, sin escribir nada. Ni se vincula ni se crea una
+     segunda cuenta (el índice único de `email` lo impediría de todos modos, §0.1). El
+     camino del usuario es §3.1.
 3. **No existe → alta.** `Usuario(email=<email del claim>, password_hash=None,
    nombre=<claim name>, proveedor_autenticacion="google", id_google=sub,
-   email_verificado=True)` **+ el saldo de cortesía** (§4).
+   email_verificado=True)` **+ el saldo de cortesía** (§4). Esta rama **no** depende de si
+   la identidad es autoritativa: sin cuenta previa no hay nada que tomar, y el correo
+   queda asociado a quien lo controla hoy. La autoritatividad solo gobierna el **enlace a
+   una cuenta ajena preexistente**, que es donde está el riesgo.
+
+**La comprobación de autoritatividad vive en una función propia y testeable**,
+`identidad_google_autoritativa(claims) -> bool`, en `src/modules/auth/google.py`. No se
+escribe inline en el router: es la regla de seguridad de §0.1 y tiene que poder probarse
+sola, sin levantar el endpoint.
 
 > **La comparación por email debe ser insensible a mayúsculas y es un requisito, no un
 > detalle.** `/auth/registro` guarda el email tal como lo escribió el usuario y todas las
 > búsquedas actuales usan `==` exacto. Google devuelve el correo en minúsculas. Una cuenta
-> registrada como `Marcos@Gmail.com` **no** haría match y el flujo crearía una segunda
-> cuenta con el mismo correo real — violando la decisión 1 en silencio. Usar
-> `func.lower(Usuario.email) == email.lower()`. Que `/auth/registro` siga siendo sensible
-> a mayúsculas es deuda preexistente y **queda fuera de alcance**.
+> registrada como `Marcos@Gmail.com` **no** haría match: el flujo saltaría a la rama de
+> alta (paso 3) e intentaría insertar una segunda fila con el mismo correo real, chocando
+> contra el índice único de `email` → `IntegrityError` → **500**, justo lo que §10.2
+> prohíbe. Usar `func.lower(Usuario.email) == email.lower()`. Que `/auth/registro` siga
+> siendo sensible a mayúsculas es deuda preexistente y **queda fuera de alcance**.
+
+### 3.1 `POST /auth/google/vincular` — enlace explícito desde sesión autenticada
+
+Es la salida obligatoria del `409` de §0.1: sin este endpoint, un usuario con correo no
+autoritativo queda **permanentemente fuera** del login con Google, y la regla de seguridad
+se vuelve un callejón sin salida. Por eso forma parte de esta tarea y no de una posterior.
+
+- **Requiere `Depends(usuario_actual)`.** Ese JWT propio es la prueba de posesión de la
+  cuenta que el claim `email_verified` no da: quien pide el enlace ya demostró que sabe la
+  contraseña. Con eso, la autoritatividad **deja de importar** y no se comprueba.
+- Entrada: el mismo `GoogleLoginEntrada { id_token: str }`. Se verifica igual que en
+  `/auth/google` (§5, sin excepciones ni atajos).
+- **El `email` del token NO tiene que coincidir** con el de la cuenta. Vincular es
+  justamente decir "esta cuenta de Google, aunque use otro correo, soy yo".
+- Efecto: `id_google = sub`. **`email_verificado` NO se toca** — sigue describiendo el
+  correo *de la cuenta*, que Google no verificó. `proveedor_autenticacion` tampoco.
+- **No acredita tokens** en ningún caso (§4): la cuenta ya existía.
+- Errores: **`409`** si esa cuenta ya tiene un `id_google` distinto, o si ese `sub` ya está
+  vinculado a **otra** cuenta (lo garantiza el índice único, pero se comprueba antes para
+  devolver 409 y no un 500). **`401`** si el token de Google no valida. **`401`** si falta
+  o vence el JWT propio (lo da `usuario_actual`).
 
 ### Contrato de errores (§10.2 — nunca un 500)
 
 | Código | Cuándo |
 |---|---|
-| **401** | firma inválida · `aud` distinto de nuestro `client_id` · `iss` desconocido · token expirado · `alg` fuera de `RS256`. Mensaje **genérico** ("Credenciales de Google inválidas"): no se detalla cuál claim falló. |
+| **401** | firma inválida · `aud` distinto de nuestro `client_id` · `aud` múltiple con `azp` que no es el nuestro (§5.2) · `iss` desconocido · token expirado · `kid` desconocido tras refrescar el JWKS (§5.3) · `nonce` que no coincide o token ya usado (§5.6) · `alg` fuera de `RS256`. Mensaje **genérico** ("Credenciales de Google inválidas"): no se detalla cuál claim falló. |
 | **422** | `email_verified` es `false`, o el token no trae `email`. El token es legítimo pero la cuenta no sirve para identificar a nadie: es validación de negocio, no credencial mala. |
-| **409** | la cuenta hallada por email ya tiene un `id_google` **distinto**; o la búsqueda insensible a mayúsculas devuelve **más de una** fila. Conflicto real que un humano debe resolver — nunca elegir una fila a dedo. |
+| **409** | **identidad no autoritativa (§0.1) sobre un correo que ya existe** — el caso más frecuente de los tres, y el único con copy propio: *"Ya tienes una cuenta con este correo. Entra con tu contraseña y vincula Google desde tu perfil."* · la cuenta hallada por email ya tiene un `id_google` **distinto** · la búsqueda insensible a mayúsculas devuelve **más de una** fila. Conflicto real que un humano debe resolver — nunca elegir una fila a dedo. |
 | **503** | `GOOGLE_CLIENT_ID` sin configurar, o el JWKS es inalcanzable y no hay caché válida. Es fallo de despliegue, no del usuario (mismo precedente que `POST /consultar-foto` sin `GOOGLE_VISION_API_KEY`). |
 | **422** (FastAPI) | body sin `id_token`. Lo produce Pydantic solo; no hay que escribirlo. |
 
@@ -180,7 +279,8 @@ existente, idéntico al de `/auth/login`. El frontend no distingue de dónde sal
 ## 4. Saldo de cortesía: exactamente una vez
 
 `SALDO_INICIAL_TOKENS = 5` (§10.3) se acredita **solo en el caso 3** de §3 — la rama que
-construye un `Usuario` nuevo. **Los casos 1 y 2 no acreditan nada.**
+construye un `Usuario` nuevo. **Los casos 1 y 2 no acreditan nada, ni en su rama de
+vinculación ni en la de `409`, y `POST /auth/google/vincular` (§3.1) tampoco.**
 
 **El punto exacto del código:** dentro de la rama de alta de `/auth/google`, replicando
 `router.py:39-41` — se instancia el `Usuario` y, antes del `sesion.add`, se le agrega
@@ -204,29 +304,111 @@ cuando existan saldos reales.
 
 ## 5. Verificación del ID token — el punto donde esto se rompe
 
-Vive en **`src/modules/auth/google.py`**, no en el router. Expone una sola función
-pública: `verificar_id_token_google(id_token: str) -> ClaimsGoogle`.
+Vive en **`src/modules/auth/google.py`**, no en el router. Expone dos funciones públicas:
+`verificar_id_token_google(id_token: str, nonce_esperado: str) -> ClaimsGoogle` y
+`identidad_google_autoritativa(claims) -> bool` (§3).
 
-### Librería: `python-jose` — **sin dependencias nuevas**
+### 5.1 Librería: `python-jose` **pineado a `==3.5.0`** — sin dependencias nuevas
 
-`python-jose[cryptography]` **ya está en `requirements.txt`** (lo usa `security.py` para
-el JWT propio) y su `jose.jws._get_keys` acepta un **JWK Set completo** (`{"keys": [...]}`)
-seleccionando la clave por `kid` — verificado en `.venv/Lib/site-packages/jose/jws.py:221-233`.
-`httpx` ya está para traer el JWKS. **Cero dependencias nuevas** (§4).
+`python-jose[cryptography]` **ya está en `requirements.txt`** (lo usa `security.py` para el
+JWT propio) y `httpx` ya está para traer el JWKS. **Cero dependencias nuevas** (§4).
+
+**Pero la línea cambia de `python-jose[cryptography]>=3.3.0` a
+`python-jose[cryptography]==3.5.0`.** Es obligatorio y es el **único** cambio permitido en
+`requirements.txt`.
+
+**Por qué el pin, y por qué no es paranoia de versiones:** todo §5.2–§5.5 está escrito
+contra el comportamiento **interno** de esta versión — qué valida `_validate_aud` y qué
+deja pasar, qué opciones vienen en `False`, cómo `_get_keys` trata un JWK Set. Son
+detalles de implementación, no API pública documentada: pueden cambiar en un patch sin
+aviso, en cualquier dirección. Con `>=3.3.0`, un `pip install` en un build futuro de Render
+puede traer una versión cuyos defaults ya no coincidan con lo auditado aquí, y el resultado
+no sería un error visible sino **una validación que silenciosamente deja de hacerse**. Un
+agujero de autenticación no falla ruidosamente: sigue devolviendo 200. Versión fija,
+auditoría fija; para subirla, se repite la auditoría de §5.2–§5.5 y se actualizan los
+números de línea de esta spec.
 
 La alternativa canónica sería `google-auth` (`id_token.verify_oauth2_token`), que trae el
 JWKS y las validaciones empaquetadas. **Se descarta**: sumaría `google-auth` + `rsa` +
 `pyasn1` + `pyasn1-modules` + `cachetools` a una imagen Docker que ya arrastra Playwright
 y Chromium, para reemplazar unas 40 líneas que podemos escribir con lo instalado. La
-contrapartida honesta es que las validaciones quedan a nuestro cargo — y por eso el
-bloque siguiente es **normativo** y cada punto tiene una prueba negativa obligatoria.
+contrapartida honesta es que las validaciones quedan a nuestro cargo — y por eso lo que
+sigue es **normativo** y cada punto tiene una prueba negativa obligatoria.
 
-### Llamada exacta y por qué cada opción está ahí
+### 5.2 `aud` y `azp` — la audiencia debe ser exactamente la nuestra
+
+`jose` **no** exige que `aud` sea nuestro `client_id`: exige que **esté entre** los valores
+de `aud`. Verificado en `_validate_aud` (`jwt.py:368`):
+
+```python
+if isinstance(audience_claims, str):
+    audience_claims = [audience_claims]
+...
+if audience not in audience_claims:      # <-- pertenencia, no igualdad
+    raise JWTClaimsError("Invalid audience")
+```
+
+Un token con `aud: ["<nuestro_client_id>", "<otro_client_id>"]` **pasa**. Un ID token con
+audiencia múltiple no fue emitido para nosotros en exclusiva, y aceptarlo permite que otra
+aplicación reutilice contra nuestro backend un token que sus usuarios le entregaron a ella.
+
+**Regla normativa, comprobada a mano después de `jwt.decode`:**
+
+1. **`aud` debe ser exactamente `GOOGLE_CLIENT_ID`**: o el string, o una lista de **un solo
+   elemento** igual a él. Cualquier otra cosa se rechaza con **401**.
+2. **Si por alguna razón futura se decidiera aceptar `aud` con varios valores** —hoy no se
+   acepta—, entonces es **obligatorio** exigir `azp == GOOGLE_CLIENT_ID`. El claim `azp`
+   (*authorized party*) nombra a la aplicación **a la que Google entregó el token**, que es
+   la pregunta que importa. Sin `azp`, "nuestro id aparece en la lista" no distingue un
+   token emitido para nosotros de uno emitido para un tercero que nos incluyó.
+3. **Si `azp` viene presente, debe ser `GOOGLE_CLIENT_ID`** aunque `aud` ya sea exacto.
+   Presente-y-distinto es una contradicción: rechazar con **401**, nunca ignorarlo.
+
+Las tres comprobaciones son código nuestro. `jose` no mira `azp` en absoluto.
+
+### 5.3 Selección de clave por `kid` — hay que hacerla nosotros
+
+> **Corrección de la revisión 1.** Esta spec afirmaba que `jose.jws._get_keys` "selecciona
+> la clave por `kid`". **Es falso.** Verificado en `.venv/Lib/site-packages/jose/jws.py`:
+
+```python
+def _sig_matches_keys(keys, signing_input, signature, alg):
+    for key in keys:                      # <-- prueba TODAS, en orden
+        ...
+        if key.verify(signing_input, signature):
+            return True
+    return False
+
+def _get_keys(key):
+    ...
+    if "keys" in key:
+        return key["keys"]                # <-- devuelve el set entero, sin filtrar
+```
+
+Pasarle el JWK Set completo hace que `jose` **pruebe cada clave hasta que alguna valide**,
+ignorando el `kid` de la cabecera. Con el JWKS legítimo de Google el resultado final
+coincide, pero el comportamiento es el equivocado: gasta verificaciones RSA por token,
+depende del orden del set, y —lo que importa— **deja el `kid` sin validar**, que es
+justamente el dato que liga el token a una clave concreta y publicada.
+
+**Regla normativa:**
+
+1. **Leer y validar la cabecera ANTES de `jwt.decode`**, con `jwt.get_unverified_header`.
+   La cabecera no está autenticada todavía: se trata como entrada hostil y solo se usa
+   para **seleccionar**, nunca para decidir cómo verificar.
+2. **`alg` de la cabecera debe ser `RS256`.** Si no, **401** sin tocar el JWKS.
+3. **`kid` debe venir y debe existir en el JWKS.** Si no está, se fuerza **un** refresco
+   (§5.5) y se reintenta; si sigue sin estar, **401**.
+4. **A `jwt.decode` se le pasa esa única JWK**, no el set. Así `jose` verifica contra la
+   clave que el emisor dijo haber usado, y un token cuyo `kid` miente falla en vez de
+   colarse porque otra clave del set casualmente validó.
+
+### 5.4 Llamada exacta y por qué cada opción está ahí
 
 ```python
 jwt.decode(
     id_token,
-    jwks,                      # el JWK Set completo; jose elige por `kid`
+    jwk_elegida,               # UNA sola JWK, seleccionada por `kid` (§5.3)
     algorithms=["RS256"],
     audience=GOOGLE_CLIENT_ID,
     issuer=("https://accounts.google.com", "accounts.google.com"),
@@ -235,27 +417,47 @@ jwt.decode(
         "require_exp": True,
         "require_iat": True,
         "require_sub": True,
+        "require_iss": True,
         "verify_at_hash": False,
     },
 )
 ```
 
-Cada línea corrige un default de `python-jose` que, dejado como viene, **abre un agujero
-de autenticación**. Verificado leyendo `.venv/Lib/site-packages/jose/jwt.py`:
+Cada línea corrige un default de `python-jose` 3.5.0 que, dejado como viene, **abre un
+agujero de autenticación**. Verificado leyendo `.venv/Lib/site-packages/jose/jwt.py`:
 
 - **`require_aud: True` es obligatorio.** `_validate_aud` (línea 354) hace
-  `if "aud" not in claims: return` — **un token sin `aud` pasa en silencio**, porque
-  `require_aud` viene en `False` (línea 142). Sin esto, un ID token emitido por Google
-  para **cualquier otra aplicación** entraría a nuestra plataforma: es el fallo clásico
-  de este flujo y el motivo por el que `aud` se valida contra **nuestro** `client_id`.
-- **`issuer=` hay que pasarlo explícito.** `_validate_iss` (línea 384) hace
-  `if issuer is not None:` — si no se pasa, **no valida nada**. Google emite las **dos**
-  formas del issuer, con y sin esquema, así que se acepta la tupla de ambas y nada más.
-- **`require_exp: True` es obligatorio.** `verify_exp` viene en `True`, pero
-  `require_exp` en `False` (línea 143): un token **sin** `exp` no expira nunca y pasa.
+  `if "aud" not in claims: return` — y el `raise` está **comentado en el código fuente de
+  la librería**. Un token **sin** `aud` pasa en silencio, porque `require_aud` viene en
+  `False` (línea 142). Sin esto, un ID token emitido por Google para **cualquier otra
+  aplicación** entraría a nuestra plataforma: es el fallo clásico de este flujo. Y ojo:
+  esto solo garantiza que `aud` **exista y nos incluya** — que sea *exactamente* el nuestro
+  lo impone §5.2, no esta opción.
+- **`issuer=` hay que pasarlo explícito. Esta es la corrección principal del issuer.**
+  `_validate_iss` (línea 384) hace `if issuer is not None:` — si no se pasa el parámetro,
+  **no valida absolutamente nada**, haya o no `require_iss`. Google emite las **dos** formas
+  del issuer, con y sin esquema, así que se acepta la tupla de ambas y nada más.
+- **`require_iss: True` es defensa en profundidad, no la corrección principal.** Solo exige
+  que el claim **esté presente**; quien comprueba su **valor** es el parámetro `issuer=`
+  del punto anterior. Se incluye para que un token sin `iss` falle por sí mismo en vez de
+  depender de que el otro chequeo esté bien puesto, pero **no aporta seguridad si se olvida
+  `issuer=`**. No confundir uno con otro: son cosas distintas y solo una protege.
+- **`require_exp: True` es obligatorio.** `verify_exp` viene en `True`, pero `require_exp`
+  en `False` (línea 143): un token **sin** `exp` no expira nunca y pasa. Esta es la
+  **única** protección temporal real del token.
+- **`require_iat: True` NO es una protección temporal.** Exige que el claim `iat` exista y
+  nada más: **no limita la antigüedad del token**. Un token emitido hace 50 minutos con
+  `exp` todavía vigente lo satisface igual que uno recién emitido. Se incluye porque `iat`
+  es obligatorio en un ID token de OIDC y su ausencia indica un token mal formado — no
+  porque acote nada en el tiempo. Quien acota es `exp` (arriba) y, contra la reutilización
+  dentro de esa ventana, el antirreplay de §5.6. **Si alguna vez se quiere una ventana más
+  corta que la de Google, hay que comprobar `iat` a mano contra `now`; esta opción no lo
+  hace.**
+- **`require_sub: True`**, porque `sub` es lo que se escribe en `id_google` y una cuenta sin
+  identificador estable no sirve.
 - **`verify_at_hash: False` es obligatorio o el flujo no funciona.** `_validate_at_hash`
-  (línea 440) lanza `JWTClaimsError` si el claim `at_hash` está presente y no se le pasó
-  un `access_token`. En este flujo no existe access token que comparar. Desactivarlo no
+  (línea 440) lanza `JWTClaimsError` si el claim `at_hash` está presente y no se le pasó un
+  `access_token`. En este flujo no existe access token que comparar. Desactivarlo no
   debilita nada: `at_hash` solo liga el ID token a un access token que aquí no hay.
 - **`algorithms=["RS256"]` fija el algoritmo.** Nunca leer el `alg` de la cabecera del
   token para decidir con qué verificarlo: es la puerta de la confusión de algoritmos
@@ -265,18 +467,22 @@ Todas las excepciones de jose (`ExpiredSignatureError`, `JWTClaimsError`) deriva
 `JWTError`: capturar `JWTError` y traducir a **401**, sin dejar escapar el mensaje
 original al cliente.
 
-### Claims que jose no conoce y hay que revisar a mano
+### 5.4.1 Claims que jose no conoce y hay que revisar a mano
 
-- **`email_verified` debe ser exactamente `True`.** Es la única razón por la que la
-  decisión 1 (vincular por email) es segura. Sin esa comprobación, cualquiera que cree
-  una cuenta de Google Workspace con un correo ajeno sin verificar se apodera de la
-  cuenta existente de esa persona. `false`, ausente o cualquier valor que no sea `True`
-  → **422**.
+- **`aud` exacto y `azp`** → §5.2. `jose` no mira `azp` en absoluto.
+- **`email_verified` debe ser exactamente `True`.** Es condición **necesaria pero NO
+  suficiente** para vincular una cuenta existente: la suficiente la define §0.1
+  (`gmail.com`/`googlemail.com` o `hd` presente). No se debe presentar esta comprobación
+  como "la razón por la que vincular por email es seguro" — la revisión 1 lo hacía y es
+  precisamente el error que §0.1 corrige. `false`, ausente o cualquier valor que no sea
+  `True` → **422**.
+- **`hd`**, si viene, se usa **solo** para decidir autoritatividad (§0.1). No se persiste:
+  no hay columna para él y la etapa 1 no tiene nada que hacer con dominios de Workspace.
 - **`email` debe venir y no estar vacío** → si falta, **422**.
 - **`sub` debe venir** (lo cubre `require_sub`, pero el código igual lo verifica antes de
   escribirlo en la columna).
 
-### Caché de JWKS
+### 5.5 Caché de JWKS
 
 Google rota sus claves y publicarlas es su único canal, así que el JWKS se pide por red —
 pero **una vez por token sería abusivo y frágil**: si Google tarda, todos los logins se
@@ -292,6 +498,53 @@ caen. Reglas:
   son `def` síncronos; meter `AsyncClient` ahí obligaría a cambiar el router.
 - JWKS inalcanzable **y** sin caché válida → **503**. Con caché aún válida, se sirve de
   caché y **no** se falla.
+
+### 5.6 Antirreplay — recomendación: **sí, `nonce` generado en el cliente + un solo uso**
+
+**El problema, concreto:** el ID token vale ~1 hora y `/auth/google` lo acepta cuantas
+veces se lo manden. Quien obtenga una copia dentro de esa ventana —de un log, de un proxy
+corporativo, de un backup, de un reporte de error que serializó el body— puede canjearla
+por un JWT **nuestro**, tantas veces como quiera, sin la cuenta de Google ni la contraseña.
+`exp` acota la ventana; no impide la reutilización dentro de ella.
+
+**Lo evaluado y descartado — `nonce` emitido por el servidor.** Es la variante fuerte
+(valor aleatorio de un solo uso que el backend guarda antes de mostrar el botón), pero
+**exige un GET al backend antes de que el botón funcione**. Eso reintroduce exactamente el
+problema que decidió §1: en Render free el usuario esperaría ~20-30 s de cold start
+**antes** de poder tocar "Entrar con Google", y sin nada que mirar. Además necesita estado
+compartido: en memoria se pierde en cada redeploy y se rompe en silencio el día que haya
+más de una instancia. Paga un costo de UX cierto y grande por un incremento de seguridad
+menor que el de la combinación de abajo.
+
+**Recomendación — dos mecanismos, ninguno con round-trip previo:**
+
+1. **`nonce` generado en el cliente.** El frontend crea un valor aleatorio
+   (`crypto.randomUUID()`), lo guarda en `sessionStorage`, se lo pasa a GIS al inicializar
+   y lo manda junto al token. Google lo devuelve **dentro del ID token firmado**. El
+   backend exige `claims["nonce"] == nonce` del body, con comparación en tiempo constante
+   (`hmac.compare_digest`) → si no, **401**. Cuesta cero round-trips, cero estado servidor
+   y unas pocas líneas. **Qué compra:** el token deja de ser canjeable por sí solo — quien
+   capture solo el token (log, proxy, backup) ya no puede usarlo, porque el `nonce` va
+   firmado dentro y tiene que coincidir con el que el atacante no tiene.
+2. **Un solo uso por token.** Caché en memoria de `(sub, iat)` —o `jti` si el token lo
+   trae— con TTL igual al `exp` restante. Un segundo canje del **mismo** token → **401**.
+   Reutiliza el mismo patrón de caché con TTL de §5.5, sin schema nuevo. **Qué compra:**
+   cierra la reutilización incluso cuando el atacante capturó token **y** `nonce` juntos
+   (los dos viajan en el mismo body), que es justo el hueco que el punto 1 deja abierto.
+
+**Lo que esto NO resuelve, dicho de frente:** un atacante con XSS vivo en nuestro frontend
+puede pedir un token nuevo cuando quiera, y ninguno de los dos mecanismos lo detiene. La
+defensa contra eso es no tener XSS, no el `nonce`. Y el guard de un solo uso es **por
+proceso**: hoy Render free corre una sola instancia y funciona; el día que haya dos, un
+token se podría canjear una vez por instancia y **degradaría en silencio**. Queda anotado
+aquí para que ese día no sorprenda a nadie: la salida sería mover el registro de usados a
+Postgres, no borrar el mecanismo.
+
+**Consecuencias de contrato:** `GoogleLoginEntrada` pasa a ser
+`{ id_token: str, nonce: str }`, con `nonce` **obligatorio** en `/auth/google` y en
+`/auth/google/vincular`. Un ID token sin claim `nonce` → **401**. Esto **acopla la tarea
+del frontend**: si el frontend no inicializa GIS con `nonce`, ningún login funciona. Debe
+quedar escrito en el hand-off de esa tarea, no descubrirse en integración.
 
 ---
 
@@ -356,21 +609,25 @@ subdominio distinto en cada push y GIS los rechazará. Se prueba en local y en p
 **Permitido modificar:**
 
 - `src/modules/auth/models.py` — las 3 columnas nuevas + `password_hash` a `str | None`
-- `src/modules/auth/schemas.py` — `GoogleLoginEntrada`
-- `src/modules/auth/router.py` — el endpoint `/auth/google` **y** la guarda de
-  `password_hash IS NULL` en `/auth/login` (§6)
+- `src/modules/auth/schemas.py` — `GoogleLoginEntrada` (`id_token` + `nonce`, §5.6)
+- `src/modules/auth/router.py` — los endpoints `/auth/google` y `/auth/google/vincular`
+  (§3.1) **y** la guarda de `password_hash IS NULL` en `/auth/login` (§6)
+- **`requirements.txt` — SOLO** para cambiar `python-jose[cryptography]>=3.3.0` por
+  `python-jose[cryptography]==3.5.0` (§5.1). **Ninguna línea más**: agregar un paquete
+  sigue prohibido.
 - `.env.example`, `render.yaml`, `docs/despliegue.md` — la variable nueva
 - `docs/ORDEN-DE-TRABAJO.md`, `docs/bitacora.md`
 
 **Prohibido tocar:** `src/modules/auth/security.py` y `src/modules/auth/dependencies.py`
 (los fija la decisión 3), `src/core/database.py` (la config se lee en el módulo, como
 `GOOGLE_VISION_API_KEY`), `src/registry.py` (no hay modelo nuevo), `main.py` (el router
-de auth ya está incluido en la línea 48), cualquier otro módulo de `src/`, `Dockerfile`,
-`requirements.txt` y el repo frontend.
+de auth ya está incluido en la línea 48), cualquier otro módulo de `src/`, `Dockerfile`
+y el repo frontend.
 
 **Si crees necesitar algo fuera de esta lista, repórtalo en vez de agregarlo.** En
-particular: si te encuentras editando `requirements.txt`, detente — §5 de esta spec dice
-que no hace falta, y si hiciera falta es que el enfoque cambió y hay que acordarlo.
+particular: si te encuentras **agregando un paquete** a `requirements.txt`, detente — §5.1
+dice que no hace falta ninguno, y si hiciera falta es que el enfoque cambió y hay que
+acordarlo. El pin de `python-jose` es la única edición prevista de ese archivo.
 
 ---
 
@@ -379,8 +636,11 @@ que no hace falta, y si hiciera falta es que el enfoque cambió y hay que acorda
 Cada punto se comprueba corriendo algo. Nada de "funciona bien".
 
 - [ ] `python -c "import main"` termina sin error.
-- [ ] `python -c "import main; p=main.app.openapi()['paths']; print(len(p), sum(len(v) for v in p.values())); print('/auth/google' in p)"`
-      imprime **`52 65`** y **`True`** (hoy son 51/64, medido).
+- [ ] `python -c "import main; p=main.app.openapi()['paths']; print(len(p), sum(len(v) for v in p.values())); print('/auth/google' in p, '/auth/google/vincular' in p)"`
+      imprime **`53 66`** y **`True True`** (hoy son 51/64, medido; entran **dos**
+      endpoints, §3 y §3.1).
+- [ ] `grep -n "python-jose" requirements.txt` muestra **`python-jose[cryptography]==3.5.0`**
+      y `git diff requirements.txt` no toca ninguna otra línea (§5.1).
 - [ ] `alembic heads` resuelve a **una sola cabeza**, y es `0025`.
 - [ ] `alembic upgrade head` corre limpio contra Postgres real y
       `psql "$DATABASE_URL" -c "\d usuarios"` muestra `password_hash` **nullable**, las 3
@@ -394,17 +654,45 @@ Cada punto se comprueba corriendo algo. Nada de "funciona bien".
   - [ ] alta nueva → 200 con JWT propio válido (`decodificar_token` devuelve el email),
         `id_google` poblado, `password_hash IS NULL`, `saldo_tokens == 5` y **exactamente
         una** `TransaccionToken` con `motivo="saldo_inicial"`.
-  - [ ] usuario existente por email → 200, **`saldo_tokens` no cambia** y **no** se agrega
-        una segunda `TransaccionToken` (esta es la prueba de "solo una vez").
+  - [ ] usuario **de gmail.com** existente por email → 200, **`saldo_tokens` no cambia** y
+        **no** se agrega una segunda `TransaccionToken` (prueba de "solo una vez").
   - [ ] email con distinta capitalización (`Marcos@Gmail.com` en BD, `marcos@gmail.com`
         en el token) → **vincula la cuenta existente**, no crea una segunda.
+  - **Autoritatividad (§0.1) — el bloque crítico de esta revisión:**
+    - [ ] cuenta existente `juan@hotmail.com` + token `email_verified: true` **sin `hd`**
+          → **409**, y en la BD **no** cambia nada: `id_google` sigue `NULL`, no se creó
+          una segunda fila, `saldo_tokens` intacto. Es la prueba de que la toma de cuenta
+          quedó cerrada.
+    - [ ] la misma cuenta pero con token que **sí** trae `hd` → **200** y vincula.
+    - [ ] `googlemail.com` se trata igual que `gmail.com` → vincula.
+    - [ ] correo **no autoritativo que NO existe** en `usuarios` → **200 y alta normal**
+          (la autoritatividad no bloquea altas, solo enlaces).
+    - [ ] `identidad_google_autoritativa` probada **como función**, sin HTTP, con la matriz
+          de casos: gmail / googlemail / `hd` presente / `hd` vacío / sin `hd` /
+          `email_verified: false`.
+  - [ ] **`/auth/google/vincular` (§3.1):** con JWT propio válido, vincula un token **no
+        autoritativo** → **200** (autenticarse reemplaza la autoritatividad); sin JWT
+        propio → **401**; sobre una cuenta que ya tiene otro `id_google` → **409**; con un
+        `sub` ya vinculado a otra cuenta → **409, no 500**; y **no acredita tokens**.
   - [ ] `aud` de otro `client_id` → **401**.
   - [ ] **token sin claim `aud`** → **401** (prueba directa de `require_aud`).
+  - [ ] **`aud` como lista `[nuestro_client_id, otro_client_id]`** → **401** (§5.2). Sin
+        esta prueba, el bug pasa desapercibido: `jose` lo acepta.
+  - [ ] **`azp` presente y distinto de `GOOGLE_CLIENT_ID`**, con `aud` correcto → **401**.
   - [ ] **token sin claim `exp`** → **401** (prueba directa de `require_exp`).
-  - [ ] `iss` desconocido → **401**; y los **dos** issuers legítimos de Google → 200.
+  - [ ] `iss` desconocido → **401**; token **sin** `iss` → **401**; y los **dos** issuers
+        legítimos de Google → 200.
   - [ ] token con `exp` en el pasado → **401**.
   - [ ] firma hecha con otra clave RSA → **401**.
+  - [ ] **`kid` de la cabecera que apunta a una clave distinta de la que firmó** → **401**
+        (§5.3). Con el set completo pasado a `jose` esto daría 200: es la prueba de que se
+        selecciona **una** JWK por `kid` y no se prueban todas.
+  - [ ] **cabecera sin `kid`** → **401**, y **sin** pedir el JWKS.
   - [ ] token con `alg: none` o `alg: HS256` → **401**, nunca 200.
+  - [ ] **`nonce` del body distinto del claim `nonce`** → **401**; token **sin** claim
+        `nonce` → **401** (§5.6).
+  - [ ] **el mismo token válido canjeado dos veces** → primera **200**, segunda **401**
+        (guard de un solo uso, §5.6).
   - [ ] `email_verified: false` → **422**, y **no** se crea ni se vincula ninguna cuenta.
   - [ ] cuenta con `id_google` distinto al del token → **409**.
   - [ ] `GOOGLE_CLIENT_ID` vacío → **503**.
@@ -414,7 +702,8 @@ Cada punto se comprueba corriendo algo. Nada de "funciona bien".
         de los 5 min **no** vuelve a pedir el JWKS (contar las llamadas al doble de prueba).
   - [ ] Ningún caso devuelve 500.
 - [ ] `python -m unittest discover tests -v` — la suite completa sigue pasando.
-- [ ] `git diff --stat` no toca `requirements.txt` ni ningún archivo fuera del alcance.
+- [ ] `git diff --stat` no toca ningún archivo fuera del alcance (`requirements.txt` sí
+      aparece, con **una** línea cambiada: el pin de §5.1).
 - [ ] `grep -rn "client_secret" src/ .env.example render.yaml` no devuelve nada.
 - [ ] `grep -n "id_token" src/modules/auth/router.py` — el ID token de Google **no** se
       persiste en la BD ni se escribe en ningún log.
@@ -424,8 +713,11 @@ Cada punto se comprueba corriendo algo. Nada de "funciona bien".
 
 ## Fuera de alcance
 
-Frontend (repo hermano, tarea aparte). Redirect OAuth / authorization code. Login con
-Apple, Facebook o cualquier otro proveedor. Desvincular Google de una cuenta. Ponerle
+Frontend (repo hermano, tarea aparte — **pero queda acoplado por el `nonce` de §5.6 y debe
+decirse en su hand-off**). Redirect OAuth / authorization code. `nonce` emitido por el
+servidor (evaluado y descartado en §5.6). Mover el registro de tokens usados a Postgres
+para soportar más de una instancia (§5.6). Login con Apple, Facebook o cualquier otro
+proveedor. Desvincular Google de una cuenta. Ponerle
 contraseña después a una cuenta creada por Google, y su inverso. Recuperación de
 contraseña. Verificación de email para cuentas locales. Normalizar a minúsculas los
 emails de `/auth/registro` (deuda preexistente). Migrar `email` a `citext` o a un índice
@@ -447,9 +739,10 @@ emails de `/auth/registro` (deuda preexistente). Migrar `email` a `citext` o a u
   Si devuelve filas, la búsqueda insensible a mayúsculas de §3 encontrará más de una
   cuenta y el endpoint responderá 409 para esas personas. **No resolverlo por cuenta
   propia eligiendo una fila**: es una decisión de datos que toma un humano.
-- Si al implementar aparece que `python-jose` **no** selecciona la clave por `kid` dentro
-  de un JWK Set con las versiones instaladas, **detenerse y reportarlo** antes de agregar
-  `google-auth`: cambia la justificación de dependencias de §5 y hay que acordarlo.
+- ~~Si al implementar aparece que `python-jose` no selecciona la clave por `kid`…~~
+  **RESUELTO en la revisión 2: efectivamente no lo hace** (`jws.py`, verificado — prueba
+  todas las claves del set). No es un BLOCKED, es un requisito: la selección por `kid` la
+  hacemos nosotros según §5.3. **No** se agrega `google-auth` por esto.
 - Si `email_verified` llegara como string `"true"` en vez de booleano en alguna variante
   del token, reportarlo en vez de ampliar la comparación por cuenta propia. La regla
   escrita es `is True`, a propósito.
