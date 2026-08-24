@@ -6,7 +6,7 @@
 | **Motivo** | migración Alembic + contrato de auth + verificación criptográfica (§16) |
 | **Rama** | `feat/TASK-015-login-google` |
 | **Revisor** | Codex, contra este archivo, `AGENTS.md` y el checklist §5 de `docs/plan_market_autos.md` |
-| **Estado** | spec lista — **no implementada** · **revisión 3**, tras dos auditorías de Codex |
+| **Estado** | spec lista — **no implementada** · **revisión 4**, tras tres auditorías de Codex |
 
 > **Revisión 2 — qué cambió respecto de la revisión 1.** La auditoría encontró un fallo
 > crítico en la regla de vinculación por email y tres correcciones técnicas. Cambiaron:
@@ -24,6 +24,14 @@
 > `GoogleLoginEntrada` vuelve a `{ id_token }` — **desaparece el acoplamiento con el
 > frontend** que la revisión 2 había introducido. También se resolvió una contradicción
 > sobre el `kid` ausente (§5.3).
+>
+> **Revisión 4 — dos correcciones.** (a) La revisión 3 listaba "el JWT propio no hereda la
+> vida del de Google" como **mitigación**; es lo contrario: con `JWT_EXPIRA_MINUTOS` en
+> **1440**, canjear un ID token filtrado rinde **24 h de sesión propia**. Se elimina de la
+> lista, §5.6 declara el impacto real y se anota como **decisión pendiente** bajar ese valor
+> a 4-8 h (no se toca en esta tarea). (b) El "un refresco" del JWKS **debe ser atómico**:
+> sin single-flight, una ráfaga concurrente de `kid` desconocidos lo supera por carrera y el
+> piso de 5 minutos no protege — nueva §5.3.1, con prueba de ráfaga paralela obligatoria.
 
 ## Objetivo
 
@@ -415,7 +423,43 @@ justamente el dato que liga el token a una clave concreta y publicada.
 4. **`kid` presente pero desconocido en el JWKS cacheado → se fuerza UN refresco** (§5.5,
    con su piso de 5 minutos entre refrescos forzados) y se reintenta; si sigue sin estar,
    **401**. Este caso sí lo merece: es cómo se absorbe una rotación legítima de claves de
-   Google sin esperar al TTL.
+   Google sin esperar al TTL. **Ese "un refresco" debe ser atómico — ver §5.3.1.**
+
+### 5.3.1 El refresco forzado debe ser atómico (single-flight)
+
+**"Un refresco, con piso de 5 minutos" no es una regla, es una intención, hasta que se
+implementa de forma atómica.** Leer el último-refresco, decidir, y escribirlo son tres
+pasos; sin exclusión mutua, N peticiones concurrentes con `kid` desconocido leen todas el
+mismo valor viejo, todas concluyen "puedo refrescar" y **todas golpean a Google a la vez**.
+El piso de 5 minutos no protege de nada, porque nadie llegó todavía a escribirlo cuando
+las demás decidieron. Es una carrera clásica, y el atacante no necesita saber nada del
+sistema: le basta mandar en paralelo tokens con `kid` inventados. Cada ráfaga se convierte
+en una ráfaga nuestra contra el endpoint de claves de Google — exactamente el DoS que §5.3
+punto 3 evita para el `kid` ausente, reintroducido por la puerta de al lado.
+
+**Regla normativa:**
+
+1. **El refresco se serializa con un `threading.Lock`** del módulo. Los handlers de
+   `auth/router.py` son `def` síncronos, así que FastAPI los corre en el threadpool: la
+   concurrencia es de **hilos**, y un `Lock` es la primitiva correcta. (Si alguna vez el
+   endpoint pasara a `async def`, esto debe revisarse: un `Lock` de `threading` bloquearía
+   el event loop.)
+2. **Patrón single-flight, con doble comprobación dentro del lock.** Quien toma el lock
+   vuelve a mirar si el `kid` ya apareció y si el piso de 5 min ya se cumplió, **después**
+   de adquirirlo. Las peticiones que esperaban encuentran el JWKS ya actualizado por la
+   primera y **no** refrescan: una ráfaga de N produce **una** llamada a Google, no N.
+3. **El piso de 5 minutos se lee y se escribe dentro del lock.** Fuera de él, el valor que
+   se lee ya puede ser obsoleto.
+4. **Nunca se sostiene el lock mientras se sirve el resto de la petición** — solo alrededor
+   del refresco. El `httpx.Client` tiene timeout de 5 s (§5.5), que acota cuánto puede
+   durar la sección crítica en el peor caso.
+
+**Prueba obligatoria — ráfaga paralela.** No es opcional y no se puede sustituir por una
+prueba secuencial: la carrera **solo** aparece con concurrencia real. Lanzar **N ≥ 20**
+peticiones **en paralelo** (`ThreadPoolExecutor`) con el mismo `kid` desconocido contra un
+doble del JWKS que **cuente sus invocaciones**, y afirmar que el contador quedó en
+**exactamente 1**. Con la implementación ingenua ese contador da un número cercano a N y la
+prueba falla, que es justo lo que tiene que hacer.
 5. **A `jwt.decode` se le pasa esa única JWK**, no el set. Así `jose` verifica contra la
    clave que el emisor dijo haber usado, y un token cuyo `kid` miente falla en vez de
    colarse porque otra clave del set casualmente validó.
@@ -516,7 +560,8 @@ caen. Reglas:
   sin esperar al TTL), con un **piso de 5 minutos entre refrescos forzados**: sin ese piso,
   un token basura con un `kid` inventado convierte cada request en un golpe a Google —
   justo lo que el skill `scraping-respetuoso` prohíbe. **Un `kid` ausente no refresca
-  nunca** (§5.3 punto 3): se rechaza antes de llegar acá.
+  nunca** (§5.3 punto 3): se rechaza antes de llegar acá. **El refresco y la lectura del
+  piso van dentro del lock de §5.3.1** — fuera de él, el piso no protege.
 - Cliente **`httpx.Client` síncrono**, timeout de 5 s. Los handlers de `auth/router.py`
   son `def` síncronos; meter `AsyncClient` ahí obligaría a cambiar el router.
 - JWKS inalcanzable **y** sin caché válida → **503**. Con caché aún válida, se sirve de
@@ -532,6 +577,21 @@ acepta **cuantas veces se lo manden**. Quien obtenga una copia dentro de esa ven
 canjearla por un JWT **nuestro**, repetidamente, sin la cuenta de Google y sin la
 contraseña. `exp` acota la ventana; **no impide la reutilización dentro de ella**. Esto se
 acepta a conciencia, no por descuido.
+
+> **Impacto real, medido en el repo: ~1 hora para canjear el token filtrado, hasta
+> 24 horas de sesión propia resultante.**
+>
+> `JWT_EXPIRA_MINUTOS` vale **1440** (`src/core/database.py:28` y `.env.example:16`,
+> verificado). El JWT que emitimos al canjear dura **24 horas** y **no hay revocación de
+> sesiones** en el producto (está en "Fuera de alcance"). O sea: el atacante tiene una
+> ventana de ~1 h para usar el ID token filtrado, y lo que obtiene con él es acceso durante
+> **un día entero**, que sobrevive a que Google expire su propio token y a que el usuario
+> legítimo cambie su contraseña.
+>
+> La revisión 3 listaba "el JWT propio no hereda la vida del de Google" como una
+> *mitigación*. **No lo es: es una amplificación.** No heredar la vida del token de Google
+> significa aquí durar **24× más**, no menos. Se elimina de la lista y queda escrito para
+> que no reaparezca con esa etiqueta.
 
 #### Lo evaluado y descartado
 
@@ -568,10 +628,28 @@ acepta a conciencia, no por descuido.
    excepción. Al capturar `JWTError` se registra **el tipo de fallo**, jamás el token que
    lo causó. Es la mitigación que más importa: la vía realista de filtración de un ID token
    no es la red, es **nuestro propio logging**. Tiene criterio de aceptación propio.
-4. **El JWT propio no hereda la vida del de Google.** Su `exp` lo fija
-   `JWT_EXPIRA_MINUTOS` como el de cualquier login. El ID token de Google se verifica, se
-   usa para resolver la cuenta y **se descarta** (decisión 3): no se guarda, no se
-   refresca, no se reenvía.
+
+**Son tres, no cuatro.** El ID token de Google se verifica, se usa para resolver la cuenta
+y se descarta (decisión 3) — eso es higiene, no una mitigación del replay: no acorta la
+ventana de canje ni la de la sesión resultante.
+
+#### Decisión pendiente (NO se toca en esta tarea): bajar `JWT_EXPIRA_MINUTOS`
+
+**Recomendación: bajar de 1440 a 4-8 horas.** No forma parte de TASK-015 y **no se cambia
+aquí** — afecta a todos los logins, no solo a los de Google, y merece decidirse aparte.
+Queda anotado con el argumento para que se decida, no para que se aplique de contrabando:
+
+- **Es lo que acota el impacto de esta sección.** Sin antirreplay (y sin Redis para el
+  guard por `jti`), la duración del JWT propio **es** la superficie del riesgo. Bajarla a
+  8 h la reduce 3×; a 4 h, 6×. Es la palanca disponible hoy, sin infraestructura nueva.
+- **Volver a entrar cuesta un clic.** Con login de Google el usuario ya tiene sesión activa
+  en el teléfono: reautenticarse es tocar el botón, no recordar una contraseña. El motivo
+  histórico de una sesión de 24 h —no querer que la gente reescriba su contraseña en un
+  teclado de celular— desaparece justamente con esta tarea.
+- **No hay refresh token** (está en "Fuera de alcance"), así que un `exp` largo es hoy el
+  único mecanismo de continuidad. Ese es el argumento real a favor de 1440, y por eso la
+  recomendación es **4-8 h y no 1 h**: hay que equilibrar, no minimizar.
+- Si se aplica, es un cambio de una línea en `.env` / Render, sin migración ni código.
 
 #### El cierre real, para cuando haya Redis
 
@@ -737,6 +815,12 @@ Cada punto se comprueba corriendo algo. Nada de "funciona bien".
   - [ ] **`kid` presente y desconocido** → se fuerza **un** refresco y, si sigue sin estar,
         **401** (§5.3 punto 4). Distinguir este caso del anterior es el objetivo de las dos
         pruebas: contar las llamadas al JWKS en cada una.
+  - [ ] **Ráfaga paralela (§5.3.1) — obligatoria, no sustituible por una secuencial.**
+        `ThreadPoolExecutor` con **N ≥ 20** peticiones simultáneas, mismo `kid` desconocido,
+        contra un doble del JWKS que cuente invocaciones → el contador vale **exactamente
+        1** y las 20 responden **401**. Sin el lock esto da ~N y la prueba debe fallar.
+  - [ ] Un segundo `kid` desconocido **dentro** de los 5 min → **cero** llamadas nuevas al
+        JWKS (el piso, leído dentro del lock).
   - [ ] token con `alg: none` o `alg: HS256` → **401**, nunca 200.
   - [ ] **`GoogleLoginEntrada` acepta solo `id_token`**: un body con un campo extra
         (`nonce`, por ejemplo) no lo exige el schema ni lo usa el endpoint (§5.6).
@@ -745,8 +829,6 @@ Cada punto se comprueba corriendo algo. Nada de "funciona bien".
   - [ ] `GOOGLE_CLIENT_ID` vacío → **503**.
   - [ ] **`/auth/login` con un usuario de `password_hash IS NULL` → 401**, con el mensaje
         genérico y **sin excepción** (§6).
-  - [ ] JWKS con `kid` desconocido → se fuerza **un** refresco; un segundo intento dentro
-        de los 5 min **no** vuelve a pedir el JWKS (contar las llamadas al doble de prueba).
   - [ ] Ningún caso devuelve 500.
 - [ ] `python -m unittest discover tests -v` — la suite completa sigue pasando.
 - [ ] `git diff --stat` no toca ningún archivo fuera del alcance (`requirements.txt` sí
