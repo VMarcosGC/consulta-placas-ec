@@ -912,18 +912,45 @@ emails de `/auth/registro` (deuda preexistente). Migrar `email` a `citext` o a u
 
 ## Condiciones de BLOCKED
 
-- `BLOCKED: ¿qué proyecto de Google Cloud se usa — el que ya tiene la GOOGLE_VISION_API_KEY o uno nuevo — y en qué estado de publicación está su pantalla de consentimiento OAuth?`
-  No es determinable leyendo el repo y **es bloqueante para producción**: una pantalla en
-  estado *Testing* solo admite hasta 100 usuarios de prueba listados explícitamente; con
-  cualquier otro, el login falla para usuarios reales aunque el código esté perfecto. Hay
-  que pasarla a *In production*. El código se puede escribir y probar sin esta respuesta;
-  **el despliegue no**.
-- `BLOCKED: ¿hay en producción emails que difieran solo en mayúsculas?`
-  Comprobarlo antes de exponer el endpoint, con
-  `SELECT lower(email), count(*) FROM usuarios GROUP BY 1 HAVING count(*) > 1;`.
-  Si devuelve filas, la búsqueda insensible a mayúsculas de §3 encontrará más de una
-  cuenta y el endpoint responderá 409 para esas personas. **No resolverlo por cuenta
-  propia eligiendo una fila**: es una decisión de datos que toma un humano.
+- ~~`BLOCKED: ¿qué proyecto de Google Cloud se usa y en qué estado está su pantalla de consentimiento?`~~
+  **DECIDIDO el 2026-08-24 — proyecto nuevo, separado del de Vision.** Configuración
+  acordada, a crear en `console.cloud.google.com` (paso manual del humano, no automatizable
+  desde el repo):
+
+  | Qué | Valor |
+  |---|---|
+  | Proyecto | **nuevo**, independiente del que tiene `GOOGLE_VISION_API_KEY` |
+  | Pantalla de consentimiento | tipo **Externo** |
+  | Scopes | **solo `email`, `profile`, `openid`** — ninguno más |
+  | Credencial | ID de cliente OAuth → **Aplicación web** |
+  | Orígenes de JavaScript autorizados | la URL de producción en Vercel + `http://localhost:3000` |
+  | `client_secret` | **no hace falta** con GIS (§1, §7) |
+
+  **Por qué proyecto separado:** aísla el radio de daño. Una credencial comprometida o una
+  cuota agotada en el proyecto de Vision no toca el login, y al revés. Son capacidades sin
+  relación entre sí y con ciclos de vida distintos.
+
+  **Lo que queda pendiente y NO bloquea implementar:** el `client_id` que salga de ahí es lo
+  único que la implementación necesita, y entra por env var (§7) — no se commitea.
+  **Mientras la pantalla siga en *Testing* se puede desarrollar y probar** con hasta 100
+  cuentas agregadas a mano, que sobra para el desarrollo.
+
+  **Lo que sí bloquea el lanzamiento: publicar la pantalla.** En *Testing*, cualquier cuenta
+  fuera de esa lista falla aunque el código esté perfecto. **Conviene iniciar la publicación
+  pronto porque la verificación de Google demora** — es tiempo de espera de un tercero, no
+  trabajo nuestro, y es el tipo de plazo que solo se descubre tarde. Arrancarlo temprano no
+  cuesta nada; descubrirlo el día del lanzamiento, sí.
+- ~~`BLOCKED: ¿hay en producción emails que difieran solo en mayúsculas?`~~
+  **RESUELTO el 2026-08-24 — no hay ninguno.** Consultado contra la BD de producción
+  (Neon): **6 usuarios en total, 0 grupos duplicados** con
+  `SELECT lower(email), count(*) FROM usuarios GROUP BY 1 HAVING count(*) > 1;` → `[]`.
+  La búsqueda insensible a mayúsculas de §3 no encontrará más de una fila y el 409 por esa
+  causa no se disparará con los datos actuales.
+  **Sigue haciendo falta el manejo del caso**, no se elimina del código: `/auth/registro`
+  continúa siendo sensible a mayúsculas (deuda preexistente, fuera de alcance), así que
+  **una colisión nueva se puede crear en cualquier momento** después de esta medición. El
+  409 se implementa igual y se prueba igual; lo que este chequeo descarta es tener que
+  arreglar datos existentes antes de desplegar.
 - ~~Si al implementar aparece que `python-jose` no selecciona la clave por `kid`…~~
   **RESUELTO en la revisión 2: efectivamente no lo hace** (`jws.py`, verificado — prueba
   todas las claves del set). No es un BLOCKED, es un requisito: la selección por `kid` la
