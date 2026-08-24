@@ -6,7 +6,7 @@
 | **Motivo** | migración Alembic + contrato de auth + verificación criptográfica (§16) |
 | **Rama** | `feat/TASK-015-login-google` |
 | **Revisor** | Codex, contra este archivo, `AGENTS.md` y el checklist §5 de `docs/plan_market_autos.md` |
-| **Estado** | spec lista — **no implementada** · **revisión 4**, tras tres auditorías de Codex |
+| **Estado** | ✅ **APROBADA — lista para implementar** · revisión 5, tras 5 revisiones cruzadas Claude Code ↔ Codex (§16.1) · **no implementada** |
 
 > **Revisión 2 — qué cambió respecto de la revisión 1.** La auditoría encontró un fallo
 > crítico en la regla de vinculación por email y tres correcciones técnicas. Cambiaron:
@@ -32,6 +32,29 @@
 > a 4-8 h (no se toca en esta tarea). (b) El "un refresco" del JWKS **debe ser atómico**:
 > sin single-flight, una ráfaga concurrente de `kid` desconocidos lo supera por carrera y el
 > piso de 5 minutos no protege — nueva §5.3.1, con prueba de ráfaga paralela obligatoria.
+>
+> **Revisión 5 — cierre.** Dos apuntes de alcance, sin cambios de diseño: los canjes
+> repetidos emiten **sesiones concurrentes** y la exposición total llega a **~25 h** (§5.6);
+> y el límite de un refresco del JWKS es **por proceso**, un techo conocido y no una carrera
+> (§5.3.1). **La spec queda aprobada.**
+>
+> ### Historial de aprobación
+>
+> Aprobada tras **5 revisiones cruzadas** entre Claude Code y Codex, según §16.1 de
+> `AGENTS.md` — la revisión la hace siempre la herramienta que **no** escribió el diff.
+> Cada ronda encontró algo real, y por eso vale registrar qué:
+>
+> | Rev | Hallazgo |
+> |---|---|
+> | 1 → 2 | Vinculación por email a secas: **toma de cuenta**. Más `azp` sin validar, el `kid` mal descrito y `python-jose` sin pinear. |
+> | 2 → 3 | El `nonce` de cliente **no protegía nada**: un JWT va firmado, no cifrado. |
+> | 3 → 4 | La "mitigación" del JWT propio era una **amplificación** (24 h). El refresco del JWKS no era atómico. |
+> | 4 → 5 | Sesiones concurrentes, exposición real de ~25 h, y el alcance por proceso del límite de refresco. |
+>
+> **Aprobada no significa cerrada a la evidencia.** Si al implementar aparece que algo de
+> acá no se sostiene contra el código real, se reporta y se corrige la spec — no se
+> implementa lo que dice el documento sabiendo que está mal. Lo que se cierra es la ronda
+> de auditoría sobre el papel.
 
 ## Objetivo
 
@@ -460,6 +483,20 @@ peticiones **en paralelo** (`ThreadPoolExecutor`) con el mismo `kid` desconocido
 doble del JWKS que **cuente sus invocaciones**, y afirmar que el contador quedó en
 **exactamente 1**. Con la implementación ingenua ese contador da un número cercano a N y la
 prueba falla, que es justo lo que tiene que hacer.
+
+**Alcance del límite: es por proceso, y eso es sabido y aceptado.** El lock y el piso de
+5 minutos viven en la memoria del proceso, así que garantizan **una llamada por proceso**,
+no una llamada en total. Varios workers de uvicorn, varias instancias de Render o un
+reinicio entre peticiones producen **una llamada cada uno**. Esto **no es la carrera que
+§5.3.1 corrige** —esa era ilimitada dentro de un mismo proceso, N peticiones → N llamadas—
+sino un techo conocido y acotado: el total queda en el número de procesos vivos, no en el
+número de peticiones. Hoy Render free corre **una** instancia y el orden de magnitud es
+irrelevante.
+
+Queda anotado para que nadie lo lea como un fallo pendiente ni lo "arregle" a medias: la
+coordinación distribuida (el mismo Redis de §5.6, o el JWKS cacheado en Postgres) es una
+**mejora para cuando se escale**, no un requisito de esta tarea. Si algún día hay varias
+instancias y las llamadas al JWKS molestan, ahí se decide — con datos, no ahora.
 5. **A `jwt.decode` se le pasa esa única JWK**, no el set. Así `jose` verifica contra la
    clave que el emisor dijo haber usado, y un token cuyo `kid` miente falla en vez de
    colarse porque otra clave del set casualmente validó.
@@ -592,6 +629,21 @@ acepta a conciencia, no por descuido.
 > *mitigación*. **No lo es: es una amplificación.** No heredar la vida del token de Google
 > significa aquí durar **24× más**, no menos. Se elimina de la lista y queda escrito para
 > que no reaparezca con esa etiqueta.
+>
+> **Los canjes repetidos emiten sesiones concurrentes, no una sola.** Cada POST a
+> `/auth/google` con el mismo ID token emite un JWT **nuevo e independiente**: no se
+> invalida el anterior, no hay registro de sesiones activas y no hay forma de contarlas ni
+> de cortarlas. Un atacante que canjee el token filtrado N veces se queda con **N sesiones
+> vivas a la vez**, cada una con sus propias 24 h. Revocar no es "más difícil": hoy es
+> **imposible**, porque el JWT es autocontenido y nadie lleva la cuenta de cuáles se
+> emitieron.
+>
+> **La exposición total no son 24 h, son hasta ~25 h.** Las dos ventanas se **suman**, no se
+> solapan: el atacante puede esperar hasta el filo del vencimiento del ID token (~1 h desde
+> la filtración) para hacer su último canje, y ese canje todavía le rinde 24 h completas.
+> **~1 h + 24 h ≈ 25 h desde el momento de la filtración**, en el peor caso — y el peor caso
+> es el que hay que asumir, porque esperar al final no le cuesta nada al atacante y le rinde
+> el máximo.
 
 #### Lo evaluado y descartado
 
