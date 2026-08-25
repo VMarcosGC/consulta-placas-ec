@@ -21,6 +21,208 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-25 — TASK-015 (3): un guard que compara subcadenas de una URL no es un guard
+
+**Repo:** backend, rama `feat/TASK-015-login-google`. **Sin commit.** Cierra el hallazgo
+de Codex sobre la barrera de `TEST_DATABASE_URL` que introdujo la entrada anterior.
+
+**El hallazgo.** La barrera decía esto:
+
+```python
+if "127.0.0.1:5433" not in URL_PG_DEV and "localhost:5433" not in URL_PG_DEV:
+    raise RuntimeError(...)
+```
+
+Busca una **subcadena en el texto completo de la URL**. Una URL a producción que lleve
+ese texto en cualquier parte que no sea el host —un parámetro
+(`?options=-c search_path=127.0.0.1:5433`), la contraseña— la pasa entera. Y lo que hay
+al otro lado del guard es `TRUNCATE usuarios RESTART IDENTITY CASCADE` en cada `setUp`.
+Es decir: la barrera que la entrada anterior presentó como la razón de que "Neon no se
+tocó" **no protegía Neon**.
+
+**Es el mismo error que el nonce de la revisión 3**: algo que *parece* una protección y
+tiene la forma de una protección, sin la propiedad que se le atribuye. Ahí era un nonce
+que no se verificaba contra nada; acá, una comparación de texto donde hacía falta una de
+identidad. Las dos pasaban su propia lectura porque el nombre de la variable ya afirmaba
+lo que el código no hacía.
+
+**Qué se hizo.** La comprobación se extrajo a `exigir_pg_dev(url)` en
+[tests/test_login_google_carreras.py](../tests/test_login_google_carreras.py), que parsea
+con `make_url` de SQLAlchemy y exige por separado, **sobre los componentes parseados y
+nunca sobre el texto**:
+
+| Componente | Valor exigido |
+|---|---|
+| `url.host` | exactamente `127.0.0.1` o `localhost` |
+| `url.port` | exactamente `5433` (sin puerto → `None` → aborta; el default sería 5432) |
+| `url.database` | exactamente `task015_carreras` |
+
+Los tres, o no se corre. Antes bastaba con el host+puerto: se agrega la base porque
+`pg-dev` hospeda varias (TASK-010) y solo la desechable puede truncarse. El mensaje de
+error se arma con `render_as_string(hide_password=True)` para no filtrar la clave al log.
+
+**7 pruebas nuevas, y son lo único del archivo que corre siempre** — no están bajo el
+`skipIf` de pg-dev, a propósito: el día que alguien "simplifique" el guard de vuelta a un
+`in` sobre el texto, fallan en CI sin necesidad de un Postgres levantado. La central es
+la negativa: una URL a `…aws.neon.tech` con el literal `127.0.0.1:5433` en `options`
+—verificado con `assertIn` dentro del propio test, para que se vea que el guard viejo la
+dejaba pasar— debe abortar. Las demás cubren la misma trampa en la contraseña, host bueno
+con puerto 5432, host y puerto buenos con otra base, sin puerto, y URL malformada.
+
+**Verificación.** Con `pg-dev` levantado, el archivo corre **13 pruebas, `OK`, sin un solo
+skip**: las 7 del guard más las 6 de carrera contra Postgres real. Sin Docker da
+`OK (skipped=6)` — las del guard corren igual, que es el punto. **Suite completa:**
+`python -m unittest discover tests` → **142 pruebas, OK** (135 + 7). Y se comprobó que las
+dos URL de la prueba negativa **pasaban el guard viejo**: `'127.0.0.1:5433' in url` da
+`True` en ambas.
+
+**Lección, que es la que importa más que el parche.** Un guard que compara subcadenas de
+una URL no es un guard: una URL es una estructura, y el único chequeo que vale es el que
+se hace sobre sus componentes parseados. Vale igual para hosts, orígenes de CORS,
+`redirect_uri` y cualquier allowlist — `"midominio.com" in origen` acepta
+`midominio.com.evil.tld`. Y en general: cuando una protección es lo único que separa un
+test de una tabla de producción, hay que escribirle la prueba negativa. Sin ella, el guard
+se degrada en el primer refactor que lo "limpie".
+
+**Documentación falsa, cerrada.** §2 de la spec decía que el `if not
+context.is_offline_mode():` del `downgrade` era *"el mismo cuidado que tomó `0021`"*.
+`grep is_offline_mode alembic/` da sólo `env.py` y la propia `0025`: **el precedente no
+existe**. `0021_vendedor.py` usa `op.execute`, que en modo `--sql` se emite como texto y
+nunca abre conexión, así que nunca tuvo el problema; `0025` es la primera migración del
+repo que necesita *leer* estado dentro de un `downgrade`. Corregido en la spec con la nota
+del porqué: una cita a un precedente inexistente hace que la próxima revisión dé por
+verificado algo que nadie verificó — el mismo mecanismo que el nonce y que el guard.
+
+**Commit.** `feat(auth): TASK-015 login con Google`. `ORDEN-DE-TRABAJO.md` marca el backend
+hecho y el frontend pendiente.
+
+**Pendiente:** aplicar `0025` en Neon, el frontend (botón en login y registro, con salida
+visible para el 409), y volver a pasar el diff por Codex.
+
+---
+
+## 2026-08-25 — TASK-015 (2): carreras de BD y verificación contra Postgres real
+
+**Repo:** backend, rama `feat/TASK-015-login-google`. **Sin commit.** Cierra el único
+hallazgo (severidad media) de la auditoría de Codex sobre el diff de la entrada anterior.
+
+**El hallazgo.** Las comprobaciones previas de `/auth/google` y `/auth/google/vincular`
+son `SELECT`, y entre el `SELECT` y el `COMMIT` cabe otra petición. Dos altas simultáneas
+—un **doble clic** en "Entrar con Google" basta— o dos vinculaciones concurrentes del
+mismo `sub` pasaban las dos comprobaciones y chocaban contra `ix_usuarios_email` /
+`ix_usuarios_id_google` recién al commitear. Eso escapaba como **500**, contra §10.2.
+
+**Qué se hizo.** Mismo patrón que `obtener_o_crear_vendedor` (TASK-001): capturar
+`IntegrityError`, `rollback`, releer la fila que ganó y responder según ella; **si la
+violación no es la esperada, se relanza** en vez de tragarla. Cubre las tres rutas: alta
+nueva, enlace autoritativo del paso 2, y el commit de `/auth/google/vincular`. La rama de
+alta distingue dos ganadores posibles: si ganó una petición con los mismos claims,
+responde 200 con la fila del rival; si en la carrera se registró ese correo **por
+contraseña**, aplica §0.1 igual que si la cuenta hubiera existido desde el principio
+(enlace si es autoritativa, 409 si no).
+
+**Verificación contra Postgres real — `pg-dev`, no simulada.** Una `SesionFalsa` no
+ejerce restricciones: un test con `Mock` afirmaría que el `except IntegrityError`
+funciona sin que ningún `IntegrityError` llegue a levantarse. Por eso las pruebas de
+carrera viven aparte, en `tests/test_login_google_carreras.py`, contra el contenedor
+`pg-dev` (base desechable `task015_carreras`). **Neon no se tocó**: la URL resuelta se
+verificó antes de migrar y el archivo aborta si `TEST_DATABASE_URL` no apunta a `5433`.
+
+- **La cadena completa `0001` → `0025` corre limpia** contra Postgres real. `\d usuarios`
+  confirma `password_hash` **nullable**, las tres columnas nuevas, el CHECK del proveedor
+  y el índice **único** `ix_usuarios_id_google`. Esto cierra criterios de aceptación que
+  la entrada anterior había declarado no verificables.
+- **6 pruebas nuevas**, y se comprobó que **fallan sin el fix**: neutralizando los dos
+  `except IntegrityError`, 5 de 6 dan error (la sexta es el control sin carrera). Una
+  prueba de concurrencia que no se ve fallar no prueba nada.
+- El rival se inserta en `before_flush`, no en `after_flush`: escribiendo después, se
+  bloquearía contra el índice único esperando nuestro `COMMIT` y la prueba se colgaría.
+- Sin `pg-dev` levantado las 6 se **saltan con motivo explícito** — la suite queda verde
+  (135 pruebas, `OK (skipped=6)`) sin silenciar nada.
+
+**Suite completa:** `python -m unittest discover tests` → **135 pruebas, OK** (129 + 6).
+
+**Pendiente:** volver a pasar el diff por Codex. Y la corrección de la spec pendiente de
+la entrada anterior (§2 cita un precedente de `0021` que no existe).
+
+---
+
+## 2026-08-25 — TASK-015: login con Google (sin contraseña)
+
+**Repo:** backend, rama `feat/TASK-015-login-google`. **Sin commit:** el diff queda para
+la revisión cruzada (§16.1 — revisa Codex, que no lo escribió).
+
+**Qué se hizo.** `POST /auth/google` canjea un ID token de Google Identity Services por
+el JWT propio del proyecto, y `POST /auth/google/vincular` enlaza una cuenta de Google
+desde una sesión ya autenticada. La verificación vive en
+[src/modules/auth/google.py](../src/modules/auth/google.py); el ID token se valida y **se
+descarta**: no se guarda, no se reenvía y no se refresca. Migración
+[0025](../alembic/versions/0025_login_google.py): `password_hash` pasa a NULL y
+`usuarios` suma `proveedor_autenticacion`, `id_google` (índice ÚNICO) y
+`email_verificado`. **La migración NO se aplicó a ninguna base.**
+
+**Las tres decisiones que no son obvias.**
+
+1. **Auto-enlace solo con identidad autoritativa.** `email_verified: true` NO alcanza
+   para tomar posesión de una cuenta existente: el claim dice que en *algún momento*
+   Google comprobó el buzón, no que hoy lo controle la misma persona — los correos
+   corporativos se reasignan, los dominios caducan. Solo enlazan automáticamente
+   `gmail.com`/`googlemail.com` (Google opera el buzón) y las cuentas con `hd` de
+   Workspace. Un `juan@hotmail.com` que ya existe recibe **409** y la salida es
+   `/auth/google/vincular` — autenticarse es la prueba de posesión que el claim no da.
+   Es fricción deliberada; el copy dice qué hacer.
+2. **`proveedor_autenticacion` es el origen de la cuenta, no una exclusividad.** Quién
+   puede entrar por dónde lo dicen las columnas de hecho (`password_hash IS NOT NULL` /
+   `id_google IS NOT NULL`) y una cuenta puede tener las dos. Como bandera exclusiva,
+   vincular Google le apagaría al usuario su propia contraseña en silencio.
+3. **`/auth/login` trata `password_hash IS NULL` como credencial inválida (401).** Con la
+   columna nullable, un usuario de Google que probara el formulario llegaba a `passlib`
+   con `None` → `TypeError` → 500 por una condición de negocio esperable. El mensaje es
+   el mismo que el de una contraseña equivocada: decir "esa cuenta usa Google" revelaría
+   qué correos están registrados y con qué proveedor.
+
+**Lo que jose NO hace y hubo que escribir.** `_validate_aud` valida **pertenencia, no
+igualdad** (`aud: [nuestro_id, otro_id]` pasa), `require_aud`/`require_exp` vienen en
+`False` (un token sin `aud` o sin `exp` pasa en silencio), `_validate_iss` no valida nada
+si no se le pasa `issuer=`, `azp` no lo mira en absoluto y `_get_keys` devuelve el JWK Set
+entero: `jose` prueba **todas** las claves hasta que alguna valide, ignorando el `kid`.
+Cada una tiene su prueba negativa, porque ninguna falla ruidosamente: un agujero de
+autenticación sigue devolviendo 200. Por eso `python-jose` queda **pineado a `==3.5.0`**
+(único cambio en `requirements.txt`, cero dependencias nuevas): todo esto está escrito
+contra el comportamiento interno de esa versión.
+
+**El refresco del JWKS es single-flight.** `kid` ausente → 401 **sin tocar el JWKS** (si
+no, mandar tokens basura sin `kid` sería un DoS contra el endpoint de claves de Google).
+`kid` presente y desconocido → **un** refresco con piso de 5 minutos, y el lock, la doble
+comprobación y la lectura del piso van **dentro** del `threading.Lock`: leer, decidir y
+escribir fuera de él es una carrera que convierte una ráfaga de N tokens inventados en N
+golpes a Google. El límite es **por proceso** y eso es sabido y aceptado; hoy Render free
+corre una instancia.
+
+**Riesgo residual declarado, no mitigado:** no hay antirreplay. El ID token vale ~1 h y
+`/auth/google` lo acepta cuantas veces se lo manden; con `JWT_EXPIRA_MINUTOS=1440`, cada
+canje rinde 24 h de sesión propia y los canjes repetidos emiten **sesiones concurrentes**
+que hoy no se pueden revocar. Exposición total: hasta ~25 h desde la filtración. El cierre
+correcto es un guard por `jti` en Redis y espera a que haya Redis. Queda anotada la
+recomendación de bajar `JWT_EXPIRA_MINUTOS` a 4-8 h — **no se tocó acá**, afecta a todos
+los logins y se decide aparte.
+
+**Verificación.** `import main` limpio; el OpenAPI pasa de 51/64 a **53/66** con
+`/auth/google` y `/auth/google/vincular` presentes. `alembic heads` → una sola cabeza,
+`0025`; el DDL se revisó con `--sql` (offline, sin conectar). `python -m unittest discover
+tests -v` → **129 pruebas OK** (59 previas + **70 nuevas**). La **ráfaga paralela** (20 peticiones
+simultáneas, mismo `kid` desconocido) deja el contador del doble del JWKS en **1**; se
+comprobó que **falla con 20 != 1 al quitar el lock**, que es lo que la hace útil.
+
+**Pendientes.** Aplicar la `0025` contra Postgres real y comprobar `\d usuarios`, el
+`downgrade` limpio y su aborto con cuentas de Google vivas (acá solo se probó la decisión
+del guard, con `op` y `context` mockeados). Crear el proyecto en Google Cloud Console
+—separado del de Vision— y cargar `GOOGLE_CLIENT_ID`; **publicar la pantalla de
+consentimiento pronto: la verificación de Google demora y es tiempo de espera de un
+tercero**. Frontend del botón GIS: tarea aparte, sin acoplamientos (solo manda `id_token`).
+
+---
+
 ## 2026-08-05 — TASK-010: entorno local anclado a la raíz del proyecto
 
 **Repo:** backend. **Sin commit:** el diff queda para la revisión cruzada.

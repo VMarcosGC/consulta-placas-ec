@@ -1,6 +1,7 @@
 from datetime import datetime
 from sqlalchemy import (
-    String, Integer, DateTime, BigInteger, ForeignKey, CheckConstraint, func,
+    String, Integer, Boolean, DateTime, BigInteger, ForeignKey, CheckConstraint,
+    func, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,14 +17,43 @@ class Usuario(Base):
     __tablename__ = "usuarios"
     __table_args__ = (
         CheckConstraint("saldo_tokens >= 0", name="ck_usuarios_saldo_tokens_no_negativo"),
+        CheckConstraint(
+            "proveedor_autenticacion IN ('local', 'google')",
+            name="ck_usuarios_proveedor_autenticacion",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False, index=True
     )
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # NULL = la cuenta no tiene contraseña (nació por Google). Rellenarlo con un hash
+    # falso sería peor: convertiría "no puede entrar por contraseña" en "puede entrar si
+    # alguien adivina el placeholder". `/auth/login` trata el NULL como credencial
+    # inválida y responde 401, no 500 (migración 0025).
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Con QUÉ proveedor se CREÓ la cuenta. Sirve para copy y métricas ("te registraste
+    # con Google"); NUNCA para decidir por qué vía puede entrar alguien. Eso lo dicen las
+    # columnas de hecho: `password_hash IS NOT NULL` habilita el login por contraseña e
+    # `id_google IS NOT NULL` el de Google, y una cuenta puede tener las dos. Si fuera
+    # una bandera exclusiva, vincular Google a una cuenta local le apagaría su propia
+    # contraseña en silencio.
+    proveedor_autenticacion: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="local", default="local"
+    )
+    # Claim `sub` del ID token: el identificador estable de la cuenta de Google, que no
+    # cambia aunque el usuario cambie su correo. El índice ÚNICO es la barrera contra el
+    # secuestro — impide que dos cuentas de la plataforma cuelguen del mismo Google.
+    # Postgres permite múltiples NULL bajo un índice único: las cuentas locales conviven.
+    id_google: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, unique=True, index=True
+    )
+    # Solo se pone en True cuando Google lo afirma. Las cuentas locales nacen y siguen en
+    # False: nunca verificamos su correo y afirmar lo contrario sería inventar un hecho.
+    email_verificado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
     saldo_tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="5", default=SALDO_INICIAL_TOKENS
     )

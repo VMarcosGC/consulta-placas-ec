@@ -42,3 +42,15 @@ class SaldoTokens(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class GoogleLoginEntrada(BaseModel):
+    """El `credential` que entrega Google Identity Services en el navegador.
+
+    Es **solo** `id_token` y nada más. No hay `nonce` ni ningún otro campo: un `nonce`
+    generado en el cliente no protegería de nada (un JWT va firmado, no cifrado — el
+    `nonce` viaja en el payload del mismo token que se quiere proteger) y acoplaría el
+    frontend a este contrato para nada. El antirreplay real espera a que haya Redis.
+    """
+
+    id_token: str

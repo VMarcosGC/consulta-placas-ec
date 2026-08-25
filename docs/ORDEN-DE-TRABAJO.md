@@ -85,6 +85,12 @@ Hubo dos series en circulación con el mismo prefijo. Esta es la vigente:
 | TASK-011 | **Frontend del contacto** | ✅ hecho |
 | TASK-012 | Ciudad en publicaciones internas | ✅ hecho (backend + frontend, `0023` aplicada) |
 | TASK-013 | Kilometraje declarado en publicaciones internas | ✅ hecho (backend + frontend, `0024` aplicada) |
+| TASK-015 | Login con Google (sin contraseña) | **backend ✅ hecho** (commiteado, 142 pruebas OK, carreras verificadas contra Postgres real) · `0025` **pendiente de aplicar en Neon** · **frontend pendiente** → [spec](specs/TASK-015-login-google.md) |
+
+> **TASK-014 no aparece en ningún documento** (comprobado con `grep -rn "TASK-014" docs/`
+> el 2026-08-25: cero coincidencias). Se deja el hueco en vez de renumerar la serie:
+> renumerar es exactamente lo que obligó a escribir la nota de más abajo. Si alguien sabe
+> qué era, que lo anote acá; si no, el número queda quemado.
 
 > **⚠️ Renumeración (2026-08-05) — no busques el número viejo.**
 > La versión anterior de este archivo llamaba **TASK-002** al *frontend del contacto*,

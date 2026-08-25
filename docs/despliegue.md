@@ -45,6 +45,12 @@ Para BD sin caducidad ver sección [Alternativa BD](#alternativa-bd-supabase--ne
      python -c "import secrets; print(secrets.token_urlsafe(64))"
      ```
    - `CORS_ORIGINS` — URL del frontend Next.js, ej: `https://mi-frontend.vercel.app,http://localhost:3000`.
+   - `GOOGLE_CLIENT_ID` — ID de cliente OAuth 2.0 ("Aplicación web") del proyecto de
+     Google Cloud. **El mismo valor** va en Vercel como `NEXT_PUBLIC_GOOGLE_CLIENT_ID`:
+     si difieren, **todos** los logins con Google dan 401, y es el primer sitio donde
+     mirar. No es un secreto (el frontend lo publica en su HTML), pero va como
+     `sync: false` para no commitearlo. Sin él, `POST /auth/google` responde 503.
+     No hace falta ningún secreto de cliente: el flujo de ID token no usa uno.
 5. Render hace `docker build` con [Dockerfile](../Dockerfile) (descarga la imagen base de Playwright ~1GB la primera vez, luego cachea) y corre el `CMD` definido: `alembic upgrade head && python run.py`.
 
 Si todo va bien: `https://consulta-placas-ec.onrender.com/health` devuelve `{"status":"ok"}`.
@@ -67,7 +73,19 @@ Si no querés usar `render.yaml`:
      - `JWT_EXPIRA_MINUTOS` = `1440`.
      - `CACHE_TTL_MINUTOS` = `30`.
      - `CORS_ORIGINS` = `https://<frontend>,http://localhost:3000`.
+     - `GOOGLE_CLIENT_ID` = `<id>.apps.googleusercontent.com` (login con Google; el mismo
+       valor que `NEXT_PUBLIC_GOOGLE_CLIENT_ID` en Vercel).
      - `HOST` = `0.0.0.0`.
+
+> **Del lado de Google Cloud Console** hay que registrar **"Orígenes de JavaScript
+> autorizados"** —no "URIs de redireccionamiento", que este flujo no usa— con la URL de
+> producción del frontend y `http://localhost:3000` para dev. Los *preview deploys* de
+> Vercel reciben un subdominio distinto en cada push y Google Identity Services los
+> rechaza: eso no es un bug, se prueba en local y en producción.
+>
+> Mientras la pantalla de consentimiento siga en **Testing**, solo entran las cuentas
+> agregadas a mano (hasta 100). **Publicarla es lo que bloquea el lanzamiento y la
+> verificación de Google demora**: es espera de un tercero, conviene arrancarla temprano.
 
 ---
 

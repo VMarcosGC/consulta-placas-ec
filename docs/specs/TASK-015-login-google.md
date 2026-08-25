@@ -238,7 +238,16 @@ Manual, numerada, con `downgrade`, revisada a mano (§10.2). **Nunca `--autogene
   con un error de Postgres ilegible, y la "solución" tentadora — rellenar con un hash
   placeholder — es exactamente lo que la decisión 2 prohíbe. Que se detenga y lo diga.
   Guardar ese chequeo tras `if not context.is_offline_mode():` para no romper el modo
-  `--sql` (mismo cuidado que tomó `0021`).
+  `--sql`.
+
+  > **Corrección (2026-08-25).** Una versión previa de este párrafo decía *"mismo cuidado
+  > que tomó `0021`"*. **No existe tal precedente**: `grep is_offline_mode alembic/` sólo
+  > da `env.py` y la propia `0025`. `0021_vendedor.py` usa `op.execute`, que en modo
+  > `--sql` se emite como texto y nunca abre una conexión, así que jamás tuvo el problema.
+  > `0025` es la **primera** migración del repo que necesita *leer* estado de la base
+  > dentro de un `downgrade`, y por eso la primera que necesita la guarda. Se deja
+  > anotado porque una cita a un precedente inexistente hace que la próxima revisión dé
+  > por verificado algo que nadie verificó.
 
 ---
 

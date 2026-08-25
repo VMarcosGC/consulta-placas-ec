@@ -49,6 +49,12 @@ services:
         sync: false   # configurar con la URL del frontend Next.js cuando exista
       - key: ADMIN_EMAILS
         sync: false   # lista separada por comas; modera referencias del marketplace
+      # Login con Google (GIS). El client_id NO es secreto —el frontend lo publica en su
+      # HTML— pero va como sync:false por consistencia con el resto y para no commitearlo
+      # en un repo público. Mismo valor que NEXT_PUBLIC_GOOGLE_CLIENT_ID en Vercel.
+      # No hace falta el secreto de cliente OAuth: el flujo de ID token no lo usa.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
       # Cloudinary (M2 fotos): subida firmada desde el navegador; el backend solo firma.
       # Los tres van en el dashboard (repo público → no se commitean, ni siquiera cloud/api_key).
       # Sin ellos, POST /marketplace/publicaciones/{id}/fotos/firma responde 503.
