@@ -96,8 +96,21 @@ verificado algo que nadie verificó — el mismo mecanismo que el nonce y que el
 **Commit.** `feat(auth): TASK-015 login con Google`. `ORDEN-DE-TRABAJO.md` marca el backend
 hecho y el frontend pendiente.
 
-**Pendiente:** aplicar `0025` en Neon, el frontend (botón en login y registro, con salida
-visible para el 409), y volver a pasar el diff por Codex.
+**`0025` aplicada en Neon.** `alembic current` decía `0024`, `upgrade head` la llevó a
+`0025 (head)`. Verificado sobre `information_schema` en la base real: `password_hash`
+**nullable**, las tres columnas nuevas (`proveedor_autenticacion` NOT NULL, `id_google`
+nullable, `email_verificado` NOT NULL), el índice **único** `ix_usuarios_id_google` y el
+CHECK `ck_usuarios_proveedor_autenticacion`. Neon no estaba suspendida y no hubo timeout.
+
+> **Cuidado del procedimiento.** `.env.local` apunta a `pg-dev` y **gana sobre `.env`**
+> (TASK-010), así que apuntar a Neon exige moverlo a un lado y volver a ponerlo después.
+> Se comprobó el host resuelto **antes** de migrar y **después** de restaurarlo: sale
+> `…aws.neon.tech` durante la migración y `127.0.0.1:5433` al terminar. Sin esa
+> comprobación, `alembic upgrade head` corre contra la base que uno cree, no contra la
+> que está configurada.
+
+**Pendiente:** el frontend (botón en login y registro, con salida visible para el 409), y
+volver a pasar el diff por Codex.
 
 ---
 
