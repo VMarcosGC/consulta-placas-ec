@@ -47,10 +47,41 @@ comprarlos.
 | `--accion` | `#CB4A16` | 018-57-34 oscurecido | **solo** la acción de conversión |
 | `--confirmado` | `#4B7A3E` | 050-61-19 | estado "al día". Nunca una acción |
 | `--declarado` | `#C08D7C` | 014-60-13 | superficie de lo declarado |
-| `--atencion` | `#B04A22` | derivado | "pendiente". Nunca una acción |
+| `--atencion` | `#B04A22` | derivado | "pendiente" del vehículo. Nunca una acción. **Hoy también carga metadatos de la publicación — ver abajo** |
+| `--critico` | `#8A2F43` | derivado | el peor estado del vehículo: "requiere atención" y **matrícula vencida**. Nunca una acción |
 | `--error` | `#A8332B` | derivado | **fallo de la interfaz**. Nunca un estado del vehículo |
 | `--lienzo` | `#FAF6F3` | — | fondo de página |
 | `--tinta` | `#22201F` | — | texto primario |
+| `--secundario` | `#706258` | — | texto secundario |
+| `--superficie` | `#FFFFFF` | — | fondo de tarjeta. El lienzo es el fondo de *página* |
+| `--superficie-tenue` | `#F2ECE8` | — | relleno sutil dentro de una superficie |
+| `--borde` | `#E4DAD4` | — | filete de tarjeta (decorativo) |
+| `--borde-suave` | `#EFE7E2` | — | divisor interno (decorativo) |
+| `--borde-fuerte` | `#A0918A` | — | borde de **control de formulario** |
+
+Las seis últimas filas —del `--secundario` para abajo— entraron a la tabla en
+**TASK-017**. Nacieron en 1A como "neutros cálidos derivados", un anexo local de
+`globals.css`, porque esta tabla definía texto y estados pero no bordes ni
+superficies, y `slate` es azulado y pelea con el lienzo cálido. Estaban en uso
+real en los cuatro primitivos compartidos, así que un anexo era exactamente el
+lugar equivocado: un token que la mitad de la interfaz usa es parte del sistema,
+no una nota al pie. Ahora si cambian acá, cambian allá.
+
+`--borde-fuerte` **no se mide con el criterio de los otros dos bordes.** Es el
+límite de un control de formulario, así que le aplica WCAG 1.4.11 (3:1 contra el
+fondo adyacente), no el criterio de texto. Da **3.04:1 sobre blanco**, que es el
+fondo real del `<input>` (`bg-superficie`). Los otros dos son decorativos y no
+tienen piso: si un borde decorativo tuviera que pasar 3:1 dejaría de ser un
+filete y sería un marco.
+
+> **Margen de 0.04, y el criterio no es el mismo que arriba.** Sobre `--lienzo`
+> ese borde da **2.83:1** y no pasaría; se salva porque el input es blanco. Y a
+> cuatro párrafos de acá este documento fija el piso del texto secundario en
+> 4.8:1 —por encima del 4.5:1 de la norma— con el argumento de que el mínimo
+> exacto no deja margen para el próximo retoque. Aceptar 3.04:1 acá usa el
+> criterio contrario. Se deja anotado, no resuelto: subir el borde a ~3.3:1
+> costaría oscurecerlo y pesa distinto en un control que en un texto. **Quien
+> retoque este hex tiene que decidir el criterio primero.**
 
 **Regla dura:** un color, un trabajo. Si `--accion` aparece dos veces en una
 pantalla, deja de significar "esto es lo que vas a tocar".
@@ -70,19 +101,68 @@ responsabilidad (§7). Reutilizarlo además violaría la regla dura de arriba.
 Contraste verificado: **6.62:1 sobre blanco** y **6.16:1 sobre lienzo**. Pasa AA
 para texto normal en ambos fondos sin necesidad de oscurecerlo.
 
-### El gradiente de marca CONVIVE con `--marca` (agregado 2026-08-11)
+### El tercer estado del vehículo tiene token propio (agregado 2026-08-26)
+
+El vehículo se describe con una escala de **tres** pasos —`tonoEstadoComponente()`
+devuelve `bueno → regular → requiere_atencion`— pero la tabla solo daba dos
+colores: `--confirmado` y `--atencion`. El tercero **prestaba** la familia de
+`--atencion` y se distinguía por un anillo.
+
+Prestar es lo que rompe la regla dura: `--atencion` significaba "pendiente" y
+"requiere atención" a la vez, o sea que había dejado de significar una cosa. Por
+eso el token propio, no por gusto estético.
+
+**Es vino, no rojo, y eso no es negociable.** El rojo ya es `--error`, que es un
+fallo *nuestro*. Un auto que requiere atención pintado del mismo rojo con el que
+decimos "no pudimos cargar" invierte exactamente el reparto de responsabilidad
+de §7.
+
+**La regla "un color, un trabajo" NO queda saldada con este token.** Sería cómodo
+escribirlo y seguir, así que se anota lo contrario:
+
+- `--atencion` sigue cargando **tres** trabajos, no uno. Además del estado
+  "pendiente" del vehículo, el tono `alerta` pinta *"Ficha incompleta"* y
+  *"Sin verificar"*, que son **metadatos de la publicación**, no hechos del auto.
+  Migrarlos no es alcance de la fase 1, pero la tabla no debe dar por cerrada una
+  regla que el código todavía incumple.
+- `--critico` cubre dos casos, no uno: el tercer estado de un componente
+  (`tonoEstadoComponente()`) y **la matrícula vencida** (`ResumenPlaca`). Son
+  coherentes entre sí —los dos son "lo peor que le pasa a este auto"— y por eso
+  comparten token, pero la celda de la tabla lo dice explícitamente en vez de
+  dejar que el lector lo descubra en el código.
+
+**Lo que este token NO resuelve, dicho de frente:** la separación con `--error`
+es de **17° de hue**. En una pantalla barata a pleno sol eso no alcanza, y sería
+deshonesto anotar el token y seguir. Lo que de verdad separa a los dos es el
+**anillo** del tono `peligro` y el lugar donde aparece cada uno — el mismo
+argumento de §1, donde la tipografía carga la distinción para que el sistema
+sobreviva al daltonismo y a la escala de grises. **No quitar el anillo** creyendo
+que el color nuevo ya alcanza.
+
+### El gradiente de marca CONVIVE con `--marca` (agregado 2026-08-11, corregido 2026-08-26)
 
 No se reemplaza uno por otro; tienen trabajos distintos:
 
 - **`--marca` (plano)** — acciones primarias y registro oficial. Es el que se usa
   al migrar utilidades.
-- **Gradiente `brand-from/via/to`** — **identidad**, y solo en dos lugares: el
-  **logo** y el **chip Premium**.
+- **Gradiente `brand-from/via/to`** — **identidad**, y **solo en el logo**.
+
+**Corrección de TASK-017.** Eran dos lugares: el logo y el chip Premium. El chip
+pasó a `--marca` plano. Un chip Premium es **metadato de una publicación**, no la
+identidad del producto, y mientras el gradiente estuviera en los dos no había
+forma de responder qué comunicaba: ¿marca o estado? Con un solo uso la respuesta
+es siempre la misma.
 
 **No se expande a ningún lugar nuevo.** §6 ya descartó los gradientes amplios por
-rendimiento en Android de gama baja; conservarlo en dos elementos puntuales no
-contradice eso, expandirlo sí. Si aparece un tercer uso, es una decisión nueva y
-hay que justificarla aquí.
+rendimiento en Android de gama baja. Un **segundo** uso vuelve a ser decisión
+nueva y hay que justificarla aquí.
+
+> Ojo al leer el código a mitad de la migración: el gradiente sigue apareciendo
+> en **63 lugares**, de los cuales solo **3 son el logo** — el monograma "RC" en
+> `Header.tsx:68` y `Footer.tsx:21`, y el wordmark "Carro" en `Header.tsx:79`.
+> Los otros **60** están sin migrar (1B/1C), y ahí entra
+> `Header.tsx:159` ("Crear cuenta"), que **está en la barra pero no es el logo**:
+> es un CTA y su destino es `--accion`. Eso es deuda de migración, no un permiso.
 
 ### Contraste verificado
 
@@ -92,7 +172,18 @@ hay que justificarla aquí.
 | `--accion` sobre blanco | 4.64:1 | AA texto normal |
 | `--confirmado` sobre blanco | 5.06:1 | AA texto normal |
 | tinta sobre lienzo | 15.10:1 | AA texto normal |
-| secundario `#77695F` sobre lienzo | 4.92:1 | AA texto normal |
+| `--critico` sobre blanco | 8.18:1 | AA texto normal |
+| secundario `#706258` sobre lienzo | 5.46:1 | AA texto normal |
+| secundario sobre blanco | 5.87:1 | AA texto normal |
+| secundario sobre `--superficie-tenue` | 5.02:1 | AA texto normal |
+| `--borde-fuerte` sobre blanco | 3.04:1 | AA **1.4.11**, no texto |
+
+El secundario era `#77695F` hasta TASK-017. Pasaba sobre lienzo (4.92:1) pero
+sobre `--superficie-tenue` daba **4.52:1**, y ahí es justo donde vive el tono
+`neutro` de las insignias. Se oscureció hasta que pasara **5:1 en las tres
+superficies** donde aparece. El piso de este sistema para texto secundario es
+4.8:1, no 4.5:1: 4.5 es el mínimo de la norma y no deja margen para que el
+siguiente ajuste de un tinte lo rompa en silencio.
 
 El Energy Orange original (`#F0562A`) da **3.46:1** con texto blanco y **no
 pasa AA** para texto normal. Por eso el token es la variante oscurecida. No se
@@ -109,6 +200,13 @@ ni gris genérico.
 | `#FBE9E2` | `#7A3316` | 7.72:1 |
 | `#E9EBF8` | `#2A3170` | 9.99:1 |
 | `#F3E9E4` | `#6B4A3D` | 6.58:1 |
+| `#F7E7EA` | `#7A2A3B` | 7.91:1 |
+| `#F9E7E5` | `#A8332B` | 5.54:1 |
+
+Las dos últimas filas entraron en TASK-017. La de `#F9E7E5` es el tinte de
+`--error`, que existía en el código desde que se agregó el token pero nunca llegó
+a esta tabla; su texto es el propio `--error` porque §2 nunca definió un segundo
+hex de esa familia y **inventarlo sería peor que reutilizarlo**.
 
 ---
 

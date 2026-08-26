@@ -21,6 +21,133 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-26 — TASK-017 fase 1: el mismo texto pasó a significar otra cosa
+
+**Repo:** frontend `consulta-placas-web` (código) + backend (`docs/DISENO.md`, esta
+bitácora). Cierra la fase 1A del sistema de diseño "dos registros".
+
+### La etiqueta de referencia externa cambió de significado sin cambiar una letra
+
+El copy es **exacto y obligatorio desde M2.5** y sigue siendo idéntico:
+
+> Referencia externa · datos no verificados
+
+Lo que cambió es el tono de la insignia: de `alerta` (ámbar) a `declarado` (cálido).
+Parece cosmético y no lo es, porque el color era la mitad del mensaje.
+
+| | Antes (ámbar) | Ahora (cálido) |
+|---|---|---|
+| Qué comunicaba | *cuidado con este auto* | *este dato lo aporta un usuario* |
+| De qué habla | un estado del vehículo | la **procedencia** del dato |
+| A quién señala | al auto anunciado | a nuestra propia cadena de datos |
+
+El ámbar es el color de "el vehículo tiene algo pendiente". Puesto en esta etiqueta
+decía que el problema era del auto, cuando lo que la etiqueta declara es que
+**nosotros no verificamos ese dato** — no lo raspamos, lo pegó un usuario. Es
+exactamente el reparto de responsabilidad que §7 de `DISENO.md` marca como pendiente
+("el copy de ausencia de datos reparte mal la responsabilidad") y es la distinción
+declarado/oficial de §1, que hasta 1A era invisible porque los dos registros se
+pintaban igual.
+
+**Por qué se anota.** Un cambio de significado que no toca el texto **no aparece en un
+diff de copy**. Alguien que audite las cadenas visibles del producto va a ver la
+etiqueta idéntica en M2.5 y hoy, y va a concluir que no pasó nada. Pasó: cambió qué
+afirma la plataforma sobre un anuncio ajeno. Si mañana se revierte el tono a ámbar
+"porque se ve más visible", se revierte también la afirmación.
+
+**Queda una inconsistencia viva y es honesto decirlo.** La misma etiqueta aparece en
+tres lugares y solo uno se migró:
+
+| Lugar | Tono hoy |
+|---|---|
+| Feed (`ListingCard`) | `declarado` — cálido |
+| Detalle (`/marketplace/referencias/[id]`) | ámbar literal (`amber-50/200/900`) |
+| `mis-referencias` (vista del aportante) | ámbar literal |
+
+O sea que hoy el producto dice una cosa en el feed y otra al abrir el anuncio. Los dos
+ámbar son de páginas que se migran en la fase 3 (tandas 1B y 1C); hasta entonces la
+inconsistencia existe y **es deuda de esta fase, no un descuido de las otras**.
+
+### Lo demás de la fase 1
+
+- **Chip Premium a `--marca` plano.** El gradiente de marca queda **solo en el logo**.
+  Eran dos lugares permitidos; con el chip adentro no se podía responder si ese
+  gradiente decía "marca" o decía "estado". Se migraron los **cinco** chips Premium
+  (feed, detalle, mis-publicaciones, publicar, admin/verificaciones), no solo el del
+  feed: dejar cuatro con gradiente habría pintado el mismo chip distinto según la
+  pantalla.
+- **Token propio para el tercer estado del vehículo**, `--critico` `#8A2F43`. La escala
+  es de tres pasos (`bueno → regular → requiere_atencion`) y el tercero **prestaba** la
+  familia de `--atencion`, así que `--atencion` significaba dos cosas — contra la regla
+  dura de §2. Es vino y no rojo porque el rojo es `--error`, que es un fallo *nuestro*.
+  **Lo que el token no resuelve:** la separación con `--error` es de 17° de hue, que en
+  una pantalla barata a pleno sol no alcanza. Lo que separa de verdad es el anillo del
+  tono `peligro`, que por eso se queda.
+- **`--secundario` de `#77695F` a `#706258`.** Sobre lienzo pasaba (4.92:1) pero sobre
+  `--superficie-tenue` daba **4.52:1**, y ahí vive el tono `neutro` de las insignias.
+  Ahora pasa 5:1 en las tres superficies donde aparece. El piso se fija en 4.8:1 y no en
+  el 4.5:1 de la norma justamente para que el próximo ajuste de un tinte no lo rompa en
+  silencio.
+- **Los neutros cálidos entraron a la tabla de §2**: `--secundario`, `--superficie`,
+  `--superficie-tenue`, `--borde`, `--borde-suave`, `--borde-fuerte`. Nacieron en 1A
+  como anexo local de `globals.css` y ya estaban en uso en los cuatro primitivos
+  compartidos: un token que la mitad de la interfaz usa es parte del sistema, no una
+  nota al pie.
+
+**Verificación, y una afirmación mía que el revisor tumbó.** La primera versión de esta
+entrada decía *"los 16 ratios que 1A afirmaba se recalcularon uno por uno y los 16 daban
+exacto — el trabajo previo era honesto"*. **Era falso por alcance.** Lo que recalculé
+fueron las **tablas de `DISENO.md`**, y esas sí dan exacto. Los ratios también viven
+sueltos en comentarios —de tokens en `globals.css` y de componentes— y ahí no miré.
+Cuatro números estaban mal:
+
+| Dónde | Decía | Real |
+|---|---|---|
+| `BentoCard.tsx:25` — `slate-400` sobre blanco | 2.83:1 | **2.63:1** (Tailwind 4; 2.56:1 en la v3) |
+| `globals.css:42` — `--declarado` sobre blanco | 2.6:1 | **2.86:1** |
+| `ListingCard.tsx:86` — secundario sobre tarjeta | 5.29:1 | **5.87:1** |
+| `ListingCard.tsx:105` — secundario sobre relleno | 4.52:1 | **5.02:1** |
+
+Los dos primeros venían de 1A. **Los dos últimos los rompí yo en esta misma fase**: al
+oscurecer `--secundario` invalidé dos comentarios que lo citaban, y el peor de los dos
+—4.52:1— quedaba afirmando en presente justo el valor por debajo del piso de 4.8:1 que
+esta fase acababa de establecer. Un lector que auditara el código habría encontrado la
+violación viva en un comentario en vez del arreglo.
+
+Los cuatro están corregidos. Los ratios nuevos (`--critico` 8.18:1 sobre blanco, su par
+tinte/texto 7.91:1, el secundario en las tres superficies) se midieron, no se estimaron,
+y además se comprobaron **sobre el CSS compilado** —`.text-secundario{color:#706258}`,
+`.bg-critico-tinte{background-color:#f7e7ea}`— porque una clase de Tailwind que no se
+genera no rompe el build: simplemente no existe.
+
+**La lección, que es la misma de TASK-015 con otro disfraz:** cambiar el valor de un
+token invalida en silencio cada comentario que lo cita, y un comentario con un número
+viejo es documentación falsa igual que un `0021` que no existe. Al mover un token hay que
+hacer `grep` del número, no solo del nombre.
+
+### Nota de proceso: esta revisión NO fue independiente
+
+`AGENTS.md` §16.1 exige que `revisor-calidad` corra en la herramienta que **no** ejecutó
+el trabajo. Acá corrió en la misma sesión que lo implementó, y queda anotado porque una
+desviación de proceso sin registro es indistinguible de no haber tenido el proceso.
+
+**Por qué se aceptó:** el trabajo es una migración de tokens contra un documento de
+diseño ya cerrado por dos revisiones cruzadas, así que el criterio de aceptación es
+externo y verificable —los hex y los ratios están escritos en `DISENO.md`— y no depende
+de la interpretación de quien lo implementó. Además el ciclo es cerrado: cada fase se
+revisa hasta veredicto APTO, y al revisor se le entrega **el pedido original**, no solo
+el diff.
+
+**Qué NO mitiga, que es lo que importa:** §16.1 no existe para atrapar fallos de estilo
+—esos los atrapa cualquiera— sino para atrapar que se haya implementado algo
+**adyacente** a lo pedido. Ese error es invisible desde adentro por construcción: quien
+escribió el diff lo revisa con la misma lectura del requisito con la que lo escribió.
+Un contraste mal calculado se detecta en la misma sesión; haber resuelto el problema
+equivocado, no. Ese riesgo **queda abierto** en esta tarea y la forma de cerrarlo es
+pasar el diff por Codex.
+
+---
+
 ## 2026-08-25 — TASK-015 (3): un guard que compara subcadenas de una URL no es un guard
 
 **Repo:** backend, rama `feat/TASK-015-login-google`. **Sin commit.** Cierra el hallazgo
