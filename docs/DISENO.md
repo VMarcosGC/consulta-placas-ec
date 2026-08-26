@@ -47,9 +47,10 @@ comprarlos.
 | `--accion` | `#CB4A16` | 018-57-34 oscurecido | **solo** la acción de conversión |
 | `--confirmado` | `#4B7A3E` | 050-61-19 | estado "al día". Nunca una acción |
 | `--declarado` | `#C08D7C` | 014-60-13 | superficie de lo declarado |
-| `--atencion` | `#B04A22` | derivado | "pendiente" del vehículo. Nunca una acción. **Hoy también carga metadatos de la publicación — ver abajo** |
+| `--atencion` | `#B04A22` | derivado | "pendiente" del vehículo. Nunca una acción |
 | `--critico` | `#8A2F43` | derivado | el peor estado del vehículo: "requiere atención" y **matrícula vencida**. Nunca una acción |
-| `--error` | `#A8332B` | derivado | **fallo de la interfaz**. Nunca un estado del vehículo |
+| `--error` | `#A8332B` | derivado | **fallo de la interfaz** y el estado "rechazado" de una decisión nuestra. Nunca un estado del vehículo, **nunca una acción** |
+| `--destructivo` | `#7E2119` | derivado | **la acción de destruir**: borrar, rechazar, quitar. Nunca un estado, nunca un mensaje |
 | `--lienzo` | `#FAF6F3` | — | fondo de página |
 | `--tinta` | `#22201F` | — | texto primario |
 | `--secundario` | `#706258` | — | texto secundario |
@@ -101,6 +102,40 @@ responsabilidad (§7). Reutilizarlo además violaría la regla dura de arriba.
 Contraste verificado: **6.62:1 sobre blanco** y **6.16:1 sobre lienzo**. Pasa AA
 para texto normal en ambos fondos sin necesidad de oscurecerlo.
 
+### `--destructivo`: la acción, separada del mensaje (agregado 2026-08-26)
+
+`--error` estaba cargando **dos** trabajos y la fase 3 lo destapó: el mensaje
+*"no pudimos cargar"* y el botón *"Eliminar"*. Uno es algo que **nos pasó**; el
+otro es algo que **el usuario va a hacer**. Todos los demás tokens de estado
+llevan escrito "nunca una acción" —`--confirmado`, `--atencion`, `--critico`—;
+`--error` era el único sin esa línea, y por eso se le fue acumulando la acción
+encima. Ahora también la lleva, y la acción tiene token propio.
+
+**Qué es cada uno, para no volver a mezclarlos:**
+
+| | `--error` | `--destructivo` |
+|---|---|---|
+| Qué es | un hecho consumado nuestro | un control que el usuario toca |
+| Forma | relleno de tinte + texto | **contorno, nunca relleno** |
+| Ejemplos | "No pudimos cargar", "✕ Rechazada" | "Eliminar", "Rechazar", "Quitar" |
+
+**La separación es por PESO, no por tono, y hay que decirlo de frente.** La
+paleta ya tiene **cinco** tokens cálidos dentro de ~20° de hue (`--error` 3.8°,
+`--critico` 346.8°, `--atencion` 16.9°, `--accion` 17.2°). Un sexto rojo separado
+por 1–5° sería invisible, y repetiría exactamente el problema que este documento
+ya admite entre `--critico` y `--error`. Lo que separa a `--destructivo` es que
+es **más oscuro** —9.91:1 contra 6.62:1 sobre blanco— y que su forma es siempre
+la misma. Peso y forma cargan la distinción, igual que la tipografía en §1 y el
+anillo más arriba.
+
+**No lo aclares para "diferenciarlo" de `--error`**: perdería lo único que hoy lo
+distingue. Si alguna vez hace falta más separación, el camino es la forma o un
+paso de confirmación, no el hue.
+
+Contraste verificado: **9.91:1 sobre blanco**, **9.22:1 sobre lienzo**, **8.47:1
+sobre `--superficie-tenue`**. Como borde de control cumple WCAG 1.4.11 (3:1) con
+margen de sobra.
+
 ### El tercer estado del vehículo tiene token propio (agregado 2026-08-26)
 
 El vehículo se describe con una escala de **tres** pasos —`tonoEstadoComponente()`
@@ -120,11 +155,12 @@ de §7.
 **La regla "un color, un trabajo" NO queda saldada con este token.** Sería cómodo
 escribirlo y seguir, así que se anota lo contrario:
 
-- `--atencion` sigue cargando **tres** trabajos, no uno. Además del estado
-  "pendiente" del vehículo, el tono `alerta` pinta *"Ficha incompleta"* y
-  *"Sin verificar"*, que son **metadatos de la publicación**, no hechos del auto.
-  Migrarlos no es alcance de la fase 1, pero la tabla no debe dar por cerrada una
-  regla que el código todavía incumple.
+- ~~`--atencion` sigue cargando **tres** trabajos~~ **Saldado en la fase 3
+  (2026-08-26).** Las tandas 1B/1C pasaron *"Ficha incompleta"* y *"Sin
+  verificar"* al tono `neutro`, así que `--atencion` hoy solo pinta el estado
+  "pendiente" del vehículo. Verificado por grep: ninguna utilidad `atencion`
+  aparece fuera de `DatosOficialesMini`, `PerfilVehiculo` y `ResumenPlaca`, y en
+  las tres es una multa o un pendiente del auto.
 - `--critico` cubre dos casos, no uno: el tercer estado de un componente
   (`tonoEstadoComponente()`) y **la matrícula vencida** (`ResumenPlaca`). Son
   coherentes entre sí —los dos son "lo peor que le pasa a este auto"— y por eso
@@ -157,12 +193,11 @@ es siempre la misma.
 rendimiento en Android de gama baja. Un **segundo** uso vuelve a ser decisión
 nueva y hay que justificarla aquí.
 
-> Ojo al leer el código a mitad de la migración: el gradiente sigue apareciendo
-> en **63 lugares**, de los cuales solo **3 son el logo** — el monograma "RC" en
-> `Header.tsx:68` y `Footer.tsx:21`, y el wordmark "Carro" en `Header.tsx:79`.
-> Los otros **60** están sin migrar (1B/1C), y ahí entra
-> `Header.tsx:159` ("Crear cuenta"), que **está en la barra pero no es el logo**:
-> es un CTA y su destino es `--accion`. Eso es deuda de migración, no un permiso.
+> **Cerrado en la fase 3 (2026-08-26).** El gradiente aparece hoy en **3 lugares
+> y los 3 son el logo**: el monograma "RC" en `Header.tsx:68` y `Footer.tsx:21`,
+> y el wordmark "Carro" en `Header.tsx:79`. Los 60 restantes se migraron; el
+> "Crear cuenta" de la barra quedó en `--accion`, como correspondía a un CTA.
+> Si vuelve a aparecer un cuarto uso, es una decisión nueva y se justifica acá.
 
 ### Contraste verificado
 
@@ -173,6 +208,8 @@ nueva y hay que justificarla aquí.
 | `--confirmado` sobre blanco | 5.06:1 | AA texto normal |
 | tinta sobre lienzo | 15.10:1 | AA texto normal |
 | `--critico` sobre blanco | 8.18:1 | AA texto normal |
+| `--destructivo` sobre blanco | 9.91:1 | AA texto normal |
+| `--destructivo` sobre lienzo | 9.22:1 | AA texto normal |
 | secundario `#706258` sobre lienzo | 5.46:1 | AA texto normal |
 | secundario sobre blanco | 5.87:1 | AA texto normal |
 | secundario sobre `--superficie-tenue` | 5.02:1 | AA texto normal |
@@ -202,6 +239,7 @@ ni gris genérico.
 | `#F3E9E4` | `#6B4A3D` | 6.58:1 |
 | `#F7E7EA` | `#7A2A3B` | 7.91:1 |
 | `#F9E7E5` | `#A8332B` | 5.54:1 |
+| `#F7E7E4` | `#7E2119` | 8.26:1 |
 
 Las dos últimas filas entraron en TASK-017. La de `#F9E7E5` es el tinte de
 `--error`, que existía en el código desde que se agregó el token pero nunca llegó
