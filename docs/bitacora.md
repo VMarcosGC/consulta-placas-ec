@@ -21,6 +21,81 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-26 — TASK-017 fase 2: dos rutas que solo existían si sabías la URL
+
+**Repo:** frontend `consulta-placas-web`, commits `d7d5f6d`, `dc421c4`, `eef7498`.
+Recorrido funcional de las 18 rutas. **Parcial y declarado como tal.**
+
+### Navegación: la regla dura se estaba incumpliendo
+
+`/marketplace/mis-referencias` y `/marketplace/referenciar` **no tenían entrada en
+ninguna** de las cuatro navegaciones (Header, Footer, barra móvil, menú de cuenta). Solo
+se llegaba desde dentro del feed o escribiendo la URL. Van al **menú de cuenta** y no a
+la barra pública por dos razones concretas: las dos exigen sesión (redirigen a
+`/login?next=…`), y la barra ya tiene cinco entradas — una sexta para una acción
+secundaria le quita claridad a las primarias.
+
+Aparecieron además dos afirmaciones falsas en el propio menú:
+
+- *"Mis publicaciones — Tus anuncios y referencias"*: llevaba a una página **sin**
+  referencias y sin enlace hacia ellas.
+- *"Se mudaron acá enteras (no duplicadas)"* sobre las tareas de admin: siguen también
+  en `Header.tsx:103-112`, que sí lo documenta bien.
+
+Estado final: **15 rutas estáticas con entrada**; las 3 dinámicas son detalles y su
+entrada correcta es el clic en un ítem del listado.
+
+### La portada vendía lo que no se cobra
+
+El home tenía una sección *"Precios claros"* con un plan de **"$0.04 / token"**, y
+`/precios` ofrece paquetes comprables (`$1.00 → 25 tokens`, con etiqueta *"Más
+popular"*). Pero la monetización está **suspendida** (§1.0.3): los precios del catálogo
+están en 0 y no hay proveedor de pago activo. Eso constaba **solo en un comentario del
+código**; el usuario veía un catálogo de compra.
+
+Se consultó porque toca qué cree el usuario que puede hacer, y se decidió: **fuera el
+bloque del home** —además rompía la secuencia, porque después del hero la pregunta
+abierta es "muéstrame los autos", no "cuánto cuesta un token"— y **aviso visible en
+`/precios`** ("Todavía no cobramos nada"), con la palabra *referencial* pegada a cada
+paquete para quien llegue scrolleando sin leer la cabecera. `/precios` sigue en el menú:
+no se pierde ninguna capacidad.
+
+En un producto cuya propuesta es la transparencia, un catálogo de compra que no cobra se
+autodestruye solo.
+
+### `/consultar/[placa]`: sin encabezado y sin salida
+
+Era la **única de las 18 rutas sin `<h1>`** — y es la que se indexa por placa, según su
+propio `generateMetadata`. Para un lector de pantalla empezaba directo en un formulario.
+
+Y su copy de error le hablaba al usuario de *"la API"*, *"el backend"* y el *"cold start
+~30s"*. El público navega en gama baja; el detalle además no le sirve, porque la acción
+es la misma pase lo que pase. Reescrito desde el sistema —*"es un problema nuestro, no
+de la placa"*—, que es el pendiente que §7 de `DISENO.md` marca sobre repartir bien la
+responsabilidad. Se agregó salida al market: §1.0.1 dice que si una consulta falla el
+flujo del marketplace continúa, y sin ese enlace era un callejón sin salida.
+
+### Lo que se decidió NO tocar, y por qué
+
+En `/marketplace/[id]` el **contacto va antes** de la ficha técnica y de los datos
+oficiales. Por secuencia de decisión debería ir después: contactar es el paso final, no
+el primero, y ponerlo antes de la evidencia pide la decisión antes de dar la
+información. **No se movió**: el archivo documenta esa posición como decisión tomada en
+M2.7 (*"bloque de precio + título + acciones visible sin scroll en un celular"*).
+Revertir una decisión documentada sin evidencia nueva es exactamente el error que la
+revisión cruzada existe para atrapar. Queda para decidir con datos de uso.
+
+### Lo que la fase 2 NO alcanzó
+
+El recorrido de las cuatro preguntas —qué pregunta responde el usuario, qué sobra, qué
+falta, si el orden sigue la secuencia— se aplicó a fondo en `/`, `/precios`,
+`/consultar`, `/consultar/[placa]`, `/marketplace/[id]` y las cuatro navegaciones. Las
+demás rutas se auditaron **solo por estructura** (encabezados, orden de secciones,
+alcanzabilidad), no leyendo su copy completo. Está declarado acá para que nadie lo lea
+como un recorrido completo.
+
+---
+
 ## 2026-08-26 — TASK-017 fase 1: el mismo texto pasó a significar otra cosa
 
 **Repo:** frontend `consulta-placas-web` (código) + backend (`docs/DISENO.md`, esta
