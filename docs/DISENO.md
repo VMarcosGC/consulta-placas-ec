@@ -6,6 +6,73 @@
 
 ---
 
+## 0. Actualización 2026-08-27 — "Dirección C · App limpia"
+
+Marcos eligió evolucionar el *look* de **"confianza clara"** (lienzo cálido + CTA
+naranja) hacia una estética de **marketplace limpio y denso**: casi blanco,
+neutros **fríos**, píldoras oscuras para lo secundario, y el acento de conversión
+en **verde esmeralda** (en tendencia para marketplace/fintech, y distinto del
+azul de marca). Se decidió tras comparar tres direcciones —artefacto
+[Rediseño de Revisa tu Carro](https://claude.ai/code/artifact/14f77629-0379-4fe2-a5a9-878b64622017).
+
+**Fuente de verdad viva:** `consulta-placas-web/src/app/globals.css`. Los tokens
+conservan sus **nombres** (por eso los componentes heredaron el look sin tocarse
+uno por uno); cambiaron los **valores**.
+
+### Paleta vigente (reemplaza la tabla de §2)
+
+| Token | Hex nuevo | (era) | Único trabajo |
+|---|---|---|---|
+| `--marca` | `#2F3FC7` | = | identidad, registro oficial, **enlace y favorito**. NO es el CTA |
+| `--accion` | **`#047857`** | `#CB4A16` | **solo** la acción de conversión (publicar, contactar, entrar). Esmeralda, 5.3:1 con blanco |
+| `--oscuro` | **`#1C1D22`** | *(nuevo)* | píldora sólida para lo **secundario / navegación**: filtro activo, "cargar más", "buscar". Ni estado ni mensaje |
+| `--oscuro-suave` | `#2B2C33` | *(nuevo)* | hover de la píldora oscura |
+| `--confirmado` | `#2F7D5B` | `#4B7A3E` | estado "al día". Más apagado, para no competir con `--accion` |
+| `--declarado` | `#B08D7C` | `#C08D7C` | superficie de lo declarado (§1) |
+| `--atencion` | `#B5551F` | `#B04A22` | "pendiente" del vehículo. Nunca una acción |
+| `--critico` | `#8A2F43` | = | peor estado del vehículo + matrícula vencida. Nunca una acción |
+| `--error` | `#D23B30` | `#A8332B` | fallo de la interfaz. Nunca un estado del vehículo, nunca una acción |
+| `--destructivo` | `#A22820` | `#7E2119` | la acción de destruir (contorno, nunca relleno) |
+| `--lienzo` | **`#FBFBFC`** | `#FAF6F3` | fondo de página — casi blanco, sesgo frío mínimo |
+| `--tinta` | `#17181C` | `#22201F` | texto primario · 16.5:1 sobre lienzo |
+| `--secundario` | `#5C5E68` | `#706258` | texto secundario · 5.5:1 blanco · 5.0:1 tenue |
+| `--superficie` | `#FFFFFF` | = | fondo de tarjeta |
+| `--superficie-tenue` | `#F1F2F4` | `#F2ECE8` | relleno sutil, fondo de foto/placeholder — **frío** |
+| `--borde` | `#E9EAEE` | `#E4DAD4` | filete de tarjeta (decorativo) — frío |
+| `--borde-suave` | `#F0F1F4` | `#EFE7E2` | divisor interno |
+| `--borde-fuerte` | `#999CA6` | `#A0918A` | borde de control de formulario · 3.05:1 (WCAG 1.4.11) |
+
+`--brand-from/via/to` (gradiente azul→cian): **sin cambio**, y sigue **solo en el
+logo**.
+
+### Qué de §1–§7 sigue vigente
+
+- **§1 (dos registros)** — vigente y ahora más visible: lo declarado es
+  cálido/sans; lo oficial (ANT/AMT) es frío/**monoespaciado**. La placa y el dato
+  oficial siguen en `--marca` + `--font-mono`. En el detalle, `DatosOficialesMini`
+  ya pinta sus valores en mono (sección 3 de la iteración).
+- **§2 (rationale)** — "un color, un trabajo", `--error` ≠ `--atencion`,
+  `--destructivo` separado por peso y forma: **todo sigue**. Solo cambiaron los
+  hex y se agregó `--oscuro` como la familia "secundario sólido".
+- **§3 (tipografía)** — vigente. Se mantiene **Geist Sans / Geist Mono** (grotesk
+  apretada, encaja con "app limpia"); se suma el rol de **stats/labels en mono**
+  (la línea "N autos · M marcas · K verificados" de la portada).
+- **§4 (jerarquía de la tarjeta)** — vigente sin cambios (foto → precio bajo la
+  foto → título → ciudad·km → placa → chips). Grillas más densas (hasta 5 col en
+  desktop).
+- **§6 (descartado)** — vigente. Nota: los **chips de vidrio / glass** sobre la
+  foto y los **gradientes amplios** siguen descartados por rendimiento en gama
+  baja; la Dirección A los proponía y no se tomaron.
+- **§7** — la pregunta abierta del *lienzo cálido* queda **saldada**: se eligió a
+  conciencia un casi-blanco frío. Sigue siendo una preferencia a validar con
+  usuarios reales, pero ya no es "sin resolver". El punto del **copy de ausencia
+  de datos** ("todavía no consultamos esta placa") ya se aplicó (sección 3).
+
+Lo de abajo (§1–§7) se conserva como está por su valor de historia y de
+rationale; donde una tabla de hex contradiga a §0, **manda §0**.
+
+---
+
 ## 1. Concepto: dos registros
 
 El producto muestra **dos clases de dato en la misma pantalla**: lo que el

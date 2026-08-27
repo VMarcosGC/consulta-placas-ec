@@ -21,6 +21,48 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-27 — Dirección C: nuevo sistema visual "App limpia"
+
+**Repo:** frontend `consulta-placas-web`, rama `feat/diseno-c` (sobre `main`, que ya tiene
+las secciones 1–4a mergeadas). Backend: solo `docs/DISENO.md` y esta bitácora.
+
+**Decisión.** Tras el artefacto de 3 direcciones, Marcos eligió la **Dirección C** ("App
+limpia": casi blanco, denso, píldoras oscuras, cercano a la referencia ESTORE) **pero pidió
+cambiar el naranja por un verde en tendencia**. Se reemplazó `--accion` naranja `#CB4A16`
+por **verde esmeralda `#047857`** (AA con texto blanco; el acento de conversión que usan
+marketplaces y fintech; distinto del azul de marca que lleva enlaces/favoritos y del verde
+de estado "al día").
+
+**Cómo se aplicó — clave:** se reescribió `globals.css` conservando los **nombres** de los
+tokens y cambiando los **valores**, así que toda la app heredó el look sin tocar
+componentes uno por uno. Solo se hicieron a mano las piezas **estructurales**.
+
+- **`globals.css`** (`c4cd460`): lienzo `#FBFBFC` frío, neutros fríos (adiós cálidos),
+  `--accion` esmeralda, tokens nuevos **`--oscuro` / `--oscuro-suave`** (píldora oscura para
+  lo secundario), `--confirmado` más apagado, tintes recalculados, sombra de tarjeta más
+  nítida. Sobrevive: dos registros (mono para lo oficial), un-color-un-trabajo, gradiente
+  solo en el logo.
+- **Portada** (`/marketplace`, home): **línea de estadística** en mono ("N autos · M marcas
+  · K verificados o con ficha", derivada del feed en cliente, sin endpoint); chips de
+  filtro/precio activos y "Cargar más" / "Buscar" en **píldora oscura** (no `--accion`);
+  grillas más densas (hasta 5 col en desktop, 2 en móvil). Recuadros de ícono de la home y
+  avatar del menú de cuenta salidos de `--accion` (eran verdes decorativos / de identidad).
+- **Login / registro**: tarjeta mínima centrada (`max-w-sm`, radio 2xl, borde + sombra),
+  título centrado, enlace de cambio debajo.
+- **Header + detalle**: en curso (segunda pasada del agente `dev-frontend`) — cluster de
+  íconos en el Header, `bg-accion` del detalle auditado (esmeralda solo para "Ver teléfono"
+  / contacto; "Verificar esta placa" a píldora oscura).
+- **`DISENO.md`**: nueva **§0** con la paleta vigente y qué de §1–§7 sigue aplicando. §7
+  queda saldada (el lienzo cálido "sin resolver" se reemplazó a conciencia por un frío).
+
+**Verificación:** computed styles en la app viva (`bg-accion` = `rgb(4,120,87)`, `bg-oscuro`
+= `rgb(28,29,34)`, `body` = `rgb(251,251,252)`); `tsc --noEmit` limpio; `lint` 0; `build` OK
+(17 rutas). El dev server hay que **reiniciarlo** para que Turbopack recompile `@theme`.
+
+**Pendiente:** cerrar la pasada de Header + detalle; merge de `feat/diseno-c`.
+
+---
+
 ## 2026-08-27 — Iteración de diseño del frontend (secciones 1–4a)
 
 **Repo:** frontend `consulta-placas-web`, rama `feat/diseno-portada` (5 commits sobre
