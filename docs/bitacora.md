@@ -56,19 +56,38 @@ market cobraba 3–100 tokens y `/precios` vendía paquetes — contradicción d
 `GET /marketplace` exacto ya no existe (comprobado sobre `app.routes`); `alembic heads` →
 `0025`; `python -m unittest discover tests` → **142 tests OK**.
 
-### Frontend (en curso — agente `dev-frontend`)
+### Frontend (hecho — agente `dev-frontend`, rama `chore/cierre-market-sin-precios`, commit `0271c46`)
 
-Quitar `/precios` y sus entradas de nav; eliminar `TokenBadge` y todo "N tokens / recarga";
-plan premium y "solicitar verificación" presentados como gratis; retirar la sección de
-microdesbloqueos de la consulta por placa (la consulta sigue, gratis); limpiar los 4
-errores de lint `set-state-in-effect` preexistentes. Verificación pedida: `tsc --noEmit`
-limpio, `npm run lint` = 0, `npm run build` OK.
+19 archivos, +184 −736. Se eliminaron `precios/page.tsx`, `TokenBadge`, `UnlockCard`,
+`ProductoConsultaCard`, `ReporteCompraSeguraCard` y `desbloquearProducto`. `/precios` fuera
+del `Header`, `Footer` y la barra móvil. `PerfilVehiculo` pierde la sección "Completa tu
+revisión del vehículo" y el re-fetch con token; la consulta por placa queda como
+herramienta gratuita que pinta lo que el backend entrega. Wizard de publicar y
+`mis-publicaciones`: el plan `light`/`premium` se sigue eligiendo y enviando, presentado
+como gratis; fuera todo copy de "N tokens" y todo manejo de 402. `types/api.ts` conserva
+`saldo_tokens` y `ProductoEstado` en el mirror (el backend los sigue enviando) con nota de
+que la UI ya no los pinta. De paso se limpiaron los **4 errores de lint
+`react-hooks/set-state-in-effect`** preexistentes (`Header`, `mis-publicaciones`,
+`admin/moderacion`, `admin/verificaciones`) con el patrón nonce + setState-tras-await, sin
+`eslint-disable`.
+
+**Revisión:** diffs leídos uno por uno. Sin `eslint-disable`, sin referencias colgantes,
+los fixes de lint son reales. `npx tsc --noEmit` limpio · `npm run lint` → **0 errores**
+(antes 4) · `npm run build` OK (17 rutas, `/precios` ya no aparece).
+
+### Cierre de la ola
+
+- `proyecto-snapshot.md` **regenerado** (estaba de 2026-06-01, hablaba de 16 migraciones y
+  de "subir a Gemini"). Ahora es autocontenido: qué hay (verificado), qué se decidió y por
+  qué, qué está bloqueado vs pospuesto, qué sigue. No se movió a `docs/` — ese cambio es de
+  TASK-016.
+- `AGENTS.md §1.0.3` refleja el estado aplicado.
 
 **Pendientes de esta ola**
-- Merge de ambos repos tras revisar el frontend.
-- `AGENTS.md §1.0.3` ya refleja el estado aplicado; regenerar `proyecto-snapshot.md`
-  (está de 2026-06-01) queda para el cierre de la ola.
-- La deuda del catálogo `productos_consulta` (tokens > 0 en BD) queda anotada, no urgente.
+- **Merge** de `chore/cierre-market-sin-precios` en ambos repos (aprueba Marcos). Sin
+  migración.
+- La deuda del catálogo `productos_consulta` (tokens > 0 en BD) queda anotada, no urgente
+  (se pone en 0 al retomar la consulta por placa).
 
 ---
 

@@ -1,141 +1,162 @@
 # Proyecto Snapshot — Revisa tu Carro EC (consulta_placas_ec)
-**Generado:** 2026-06-01
-**Herramienta origen:** Claude Code / VS Code
-**Propósito de este archivo:** Subir a Gemini para continuar planificación TO-BE
+
+**Regenerado:** 2026-08-27 · **Estado del ciclo:** cierre, ola 1 en curso.
+
+Foto AS-IS **autocontenida**: si para entender algo hay que abrir la bitácora o el código,
+no está bien escrito acá. Complementa a [AGENTS.md](AGENTS.md) (reglas, fuente de verdad)
+y [docs/bitacora.md](docs/bitacora.md) (cronología). Reemplaza al snapshot de 2026-06-01,
+que hablaba de 16 migraciones y de "subir a Gemini".
 
 ---
 
-## 1. ¿Qué es este proyecto?
-Plataforma (web + futura móvil) para que cualquier persona en Ecuador conozca el **estado integral de un vehículo** a partir de su placa. Agrega información de fuentes oficiales (ANT, SRI, AMT, Fiscalía) en un **perfil consolidado** por temática, ofrece un **garage privado** (historial del dueño), un **marketplace de compra-venta** y un modelo de **microdesbloqueos por tokens**: consulta gratis con datos públicos + desbloqueo por tokens de los datos con costo/valor real. El usuario final es público general de clase media-baja; el tono visual es "confianza clara". Hoy el código cubre el MVP del Pilar 1 (consulta) + auth + garage + marketplace + billetera de tokens.
+## 1. Qué es
 
-## 2. Stack tecnológico
-**Backend** (`consulta_placas_ec`):
-- Python 3.11+ · FastAPI · Pydantic 2.
-- PostgreSQL 16 (Neon) · SQLAlchemy 2 · Alembic (migraciones manuales 0001–0016).
-- Playwright async (Chromium) para scraping; `httpx` donde aplica.
-- Auth: `passlib[bcrypt]` (`bcrypt<4.0` pineado) + `python-jose` (JWT HS256).
-- Deploy: Docker (imagen oficial Playwright) en **Render** free.
+**Marketplace de autos usados para Ecuador** cuya propuesta es la transparencia: el
+comprador ve la ficha que declara el vendedor junto a datos oficiales de fuentes públicas.
+Público: compradores y vendedores particulares de clase media-baja, en celulares de gama
+baja. **El marketplace es el producto**; la consulta por placa es un complemento
+enriquecedor y hoy está en segundo plano (§4).
 
-**Frontend** (`consulta-placas-web`, repo aparte):
-- Next.js 16 (App Router, RSC, Turbopack) · React 19 · Tailwind CSS 4 (`@theme` inline) · TypeScript estricto.
-- Tema **claro** "Confianza clara" (gradiente azul→cian). Deploy en **Vercel** free.
+Etapa vigente: **particulares** (persona natural vende su auto). Patios = etapa 2, fuera
+de alcance.
 
-## 3. Estado actual — AS-IS
+## 2. Stack y despliegue
 
-### ✅ Completado
-- **Consulta pública por placa** (`/consultar/{placa}` y `/consultar/{placa}/perfil`): ANT (matriculación + citaciones), SRI (valores; bloqueado por reCAPTCHA → enlace oficial), AMT/EPMTSD (infracciones municipales), FGE (consulta_externa por hCaptcha).
-- **Perfil Consolidado** server-side (`services/consolidador.py`): arma `VehiculoConsolidadoResponse` por temática (datos básicos, identificación, titular, multas, valores, novedades) + `estado_fuentes`.
-- **Caché en BD** (`consultas`) con TTL de doble velocidad (transaccional 12h / estático 90d).
-- **Arquitectura híbrida**: modo síncrono (IP residencial EC) o worker (encola AMT/EPMTSD) para sortear el bloqueo de IPs de datacenter.
-- **Auth**: registro, login, `/auth/me` (incluye `es_admin` según `ADMIN_EMAILS`).
-- **Billetera de tokens**: saldo inicial 5, débito real (`debitar_tokens`), auditoría inmutable (`transacciones_tokens`). Saldo insuficiente → **HTTP 402**.
-- **Microdesbloqueos por tokens (v2)**: catálogo en BD (`productos_consulta`) + `desbloqueos_consulta` (UK usuario+placa+producto → no doble cobro) + `costos_proveedor_consulta`. Router `routers/desbloqueos.py` (`GET /consultar/{placa}/productos`, `POST .../desbloquear/{codigo}` con 400/422/409/402 idempotente, `GET .../desbloqueos`).
-  - **Reajuste Fase 2.5** (migración 0016): ficha pública **gratis** (`consulta_publica_base`, 0 tokens); solo se cobra por costo/dificultad/valor real. **1 token ≈ USD 0.04**. Catálogo: `identificadores_tecnicos` (3), `titular_validado` (5), `alertas_legales` (8), `multas_con_montos` (10), `valores_matricula_sri` (12), `reporte_compra_segura` (40), `verificacion_marketplace` (100).
-- **Capa de proveedores vehiculares (Fase 3, `consulta/providers/`)**: contrato normalizado `ResultadoVehicular` + `MockProvider` funcional (default `PROVEEDOR_VEHICULAR_ACTIVO=mock`) + stubs `consultas_ec`/`placaapi_ec`/`webservices_ec` (sin API key → no ofrecen ni cobran). El proveedor entrega VIN/motor/chasis y validación de titular; se invoca **solo al desbloquear** (con caché en `consultas` fuente `PROVEEDOR`), nunca en el preview gratis; no se re-llama si hay caché. El **titular siempre sale ofuscado/validado, jamás el nombre crudo**. NO scraping, NO captcha.
-- **Experiencia progresiva (frontend)**: preview gratis + sección **"Completa tu revisión del vehículo"** con tarjetas de desbloqueo (`UnlockCard`/`ProductoConsultaCard`/`ReporteCompraSeguraCard`/`TokenBadge`). Flujo UX: sin sesión→login, 402→CTA recargar, 409 dato no disponible, éxito sin recargar, idempotente.
-- **Garage privado**: vehículos (con `ciudad_registro`), dueños históricos, kilometraje (monotónico), mantenimientos, favoritos.
-- **Marketplace**: publicaciones internas (light gratis / premium cobra tokens) con `GET /marketplace/feed`; referencias aportadas (link externo → moderación admin → **detalle local** `/marketplace/referencias/{id}`, con botón explícito al anuncio original; sin scraping); token de compra-venta (`enlaces_compartidos`, scope + expiración ≤7d).
-- **Frontend**: landing, consultar (perfil + desbloqueos), mi-garage, login/registro (sesión persistente), **precios por tokens** (paquetes $1=25 … $10=280), marketplace + publicar + referenciar + mis-referencias, admin/moderación + admin/verificaciones.
+**Backend** (`consulta_placas_ec`): Python 3.11+ · FastAPI · Pydantic 2 · SQLAlchemy 2 ·
+Alembic (migraciones manuales) · Playwright async (scraping) · JWT HS256 + bcrypt.
+Monolito modular DDD en `src/modules/` (`auth`, `tokens`, `consulta`, `vehiculos`,
+`marketplace`) + `src/core`. Entrypoints: `main.py` (solo orquesta routers), `run.py`,
+`worker.py`. Deploy: Docker en **Render** free.
 
-### 🔄 En progreso / parcial
-- **Proveedor real de datos vehiculares (POC `consultas_ec`)**: integración HTTP real implementada (httpx + mapeo defensivo + costo en `costos_proveedor_consulta`) + harness `scripts/evaluar_proveedor.py` + doc `docs/producto/evaluacion_proveedor_real.md`. **Medición real pendiente** de `CONSULTAS_EC_API_KEY`+`BASE_URL` y confirmación del contrato; hoy corre con `MockProvider` (dry-run 60 placas = 100% éxito). Decisión de activar según criterio del doc.
-- **Verificación "Verificado por la plataforma"**: el dueño solicita el sello (100 tokens) → `pendiente`; el flip a `verificado` es paso admin (`/admin/verificaciones`).
-- **OCR / foto (Pilar 5)**: `routers/ocr.py` + `services/vision.py` esbozados; sin flujo completo.
+**Frontend** (`consulta-placas-web`, repo aparte): Next.js 16 (App Router, Turbopack) ·
+React 19 · Tailwind 4 (tokens en `src/app/globals.css`, sin `tailwind.config`) · TS
+estricto. Tema claro "confianza clara". JWT en `localStorage`. Deploy: **Vercel** free.
 
-### ⚠️ Problemas o deuda técnica identificada
-- **SRI tras reCAPTCHA Enterprise**: no se puede leer el valor a pagar automáticamente → solo enlace al portal (`valores_matricula_sri` queda `disponible=false`). Vía definitiva: API oficial del SRI (trámite).
-- **Fiscalía (FGE)**: portal SIAF con hCaptcha → `consulta_externa`. `alertas_legales` se trata como enlace oficial / no producto de exposición de PII hasta tener fuente estructurada legalmente segura.
-- **ANT no informa montos** de citaciones (solo conteo) → pendientes de ANT sin valor.
-- **IPs de datacenter bloqueadas** (AMT/EPMTSD/FGE) desde Render → requieren worker residencial / proxy / modo síncrono. ANT y SRI no dependen de esto.
-- **FGE y EPMTSD-municipal desactivados en la UI** (`FUENTES_INACTIVAS` en el frontend) hasta tener datos accionables.
-- **Cold start** del free tier (~30s) tras inactividad.
-- **`consulta` depende de `auth`+`tokens`** (excepción documentada en AGENTS.md §1.1 por el desbloqueo).
-- **Excepción de contrato**: flujos de pago con tokens devuelven **402** (no 422), documentado en AGENTS.md §10.2.
-- **Lint frontend**: 4 errores pre-existentes `react-hooks/set-state-in-effect` en `Header.tsx` y `marketplace/mis-publicaciones`.
+**BD**: PostgreSQL 16 en **Neon** (externa). El Postgres de Render ya no se usa.
 
-## 4. Estructura de archivos actual
+**Worker**: proceso `worker.py` en una máquina con IP residencial ecuatoriana (Task
+Scheduler `ConsultaPlacasWorker`). Drena `cola_scraping` para AMT/EPMTSD, que bloquean IPs
+de datacenter. La API en Render solo lee la caché que el worker llena.
 
-### Backend (`consulta_placas_ec`)
-```
-main.py · run.py · worker.py · registry.py · render.yaml · requirements.txt · .env.example
-alembic/versions/0001..0016      (migraciones manuales)
-src/core/        database, validators, ofuscacion (+ofuscar_nombre), proxy_apify
-src/modules/
-  auth/          models (Usuario, TransaccionToken), router, security, dependencies, schemas
-  tokens/        service (debitar_tokens, SaldoInsuficiente), router
-  consulta/      routers/{consulta, ocr, desbloqueos}   schemas
-                 services/{ant, sri, amt, epmtsd, fiscalia, consultasecuador,
-                           ecuadorlegalonline, consolidador, catalogo_fuentes,
-                           catalogo_productos, desbloqueos, proveedor, cache, cola,
-                           captcha, vision, extractor_apify, _axiscloud}
-                 providers/{base, mock_provider, consultas_ec, placaapi_ec,
-                            webservices_ec, selector}      ← Fase 3
-                 models/{consulta, cola_scraping, desbloqueos}
-  vehiculos/     routers/{vehiculos, duenos, kilometraje, mantenimientos, favoritos}
-                 models/{vehiculo, dueno_historico, kilometraje, mantenimiento, favorito}  schemas
-  marketplace/   routers/{marketplace, compartidos, publicaciones}  models  schemas
-scripts/         discover.py · validar_desbloqueos.py · evaluar_proveedor.py
-docs/            AGENTS espejo, bitacora, despliegue, arquitectura, producto/*.md
-```
+URLs: backend `consulta-placas-ec.onrender.com` · frontend
+`consulta-placas-web.vercel.app` · repos en `github.com/VMarcosGC/{consulta-placas-ec,
+consulta-placas-web}`.
 
-### Frontend (`consulta-placas-web`)
-```
-src/app/         page (landing) · layout · globals.css · precios · consultar/[placa]
-                 login · registro · mi-garage · marketplace(+publicar/referenciar/mis-*)
-                 admin/{moderacion, verificaciones}
-src/components/  PerfilVehiculo · UnlockCard · ProductoConsultaCard · ReporteCompraSeguraCard
-                 TokenBadge · BentoCard · ConsultaForm · Header · Footer · ListingCard · CampoTexto
-src/lib/         api.ts · auth.ts · perfil.ts
-src/types/       api.ts  (mirror de los schemas Pydantic)
-```
+## 3. Qué hay (verificado 2026-08-27)
 
-## 5. Skills y herramientas configuradas
-- **AGENTS.md** (fuente de verdad; `CLAUDE.md` es shim `@AGENTS.md`). Backend y frontend con su CLAUDE.md.
-- Skills del proyecto en `.claude/skills/`: `agregar-fuente-consulta`, `scraping-respetuoso`, `respuesta-api-estandar`, `validacion-datos-ec`, `modelo-dominio-vehiculo`, `desplegar-mvp`, `project-snapshot`.
-- Bitácora viva en `docs/bitacora.md`; diagramas Mermaid en `docs/arquitectura.md`; producto en `docs/producto/*.md`.
+**Migración aplicada:** `alembic heads` = **0025** (local y Neon; `0025` = login con
+Google, verificada sobre `information_schema` el 2026-08-25). Cadena `0001`→`0025`, cabeza
+única.
 
-## 6. Decisiones técnicas tomadas
-- **Monolito modular (DDD)** por dominio en `src/modules/` + `src/core`; modelos registrados en `registry.py`; comunicación por interfaz pública.
-- **Idioma español (es-EC, tuteo)** en código, rutas, columnas y copy. Copy NO agresivo (nada de "paga para ver el dueño").
-- **Contrato de respuesta estándar**: 200 siempre por fuente; estados `consulta_realizada/error/consulta_externa/...`. Negocio: 422 validación, 404 "no es tuyo", 409 conflicto/sin dato, **402 pago con tokens**.
-- **Monetización**: datos públicos gratis; solo se cobra por costo de proveedor / dificultad / valor comercial. 1 token ≈ USD 0.04. Cobrar **solo lo entregado** (no se cobra si no hay dato). Idempotencia por UK.
-- **Privacidad/PII**: VIN/motor/chasis ofuscados salvo desbloqueo; **titular nunca crudo** (validación + iniciales). Sin evasión de captcha; SRI/Fiscalía como enlace oficial.
-- **Capa de proveedores** desacoplada (contrato normalizado + selector por env var); el proveedor se invoca solo al desbloquear y se cachea.
-- **Migraciones manuales** (sin autogenerate a ciegas). **Eager loading** (`selectinload`) en marketplace.
+**Backend:** `import main` → **69 rutas**. `python -m unittest discover tests` → **142
+tests OK** (concentrados en login-Google y unos pocos campos de market; sin CI).
 
-## 7. Últimos cambios (sesión 2026-05-30 / 06-01)
-- **POC proveedor real `consultas_ec`**: HTTP real (httpx + mapeo defensivo), costo en
-  `costos_proveedor_consulta`, harness `scripts/evaluar_proveedor.py` y doc de evaluación.
-  Sin credenciales degrada limpio; dry-run con mock OK. Medición real pendiente de API key.
-  Fix: la home mostraba el modelo de suscripción viejo (Pro $4.99/mes) → reescrita al modelo por tokens.
-- **Fase 3 — capa de proveedores + experiencia progresiva** (backend `4c4e3f8`, frontend `67f9429`):
-  `consulta/providers/` (contrato `ResultadoVehicular`, `MockProvider`, 3 stubs reales, `selector`),
-  `services/proveedor.py` (capacidades sin llamar, caché, "asegurar" solo al desbloquear), schema
-  `Titular` + `ofuscar_nombre`, consolidador alimentado por proveedor (gateado), `.env.example` con
-  `PROVEEDOR_VEHICULAR_ACTIVO`/`*_API_KEY`. Frontend: componentes de desbloqueo + sección "Completa
-  tu revisión del vehículo". Sin proveedores reales (mock por defecto). Sin migración nueva.
-- **Fase 2.5 — reajuste comercial** (migración 0016): datos públicos gratis; token USD 0.05→0.04;
-  renombres/reprecios de catálogo; verificación marketplace 80→100; precios reescritos en la web;
-  copy corregido ("Conoce"; no se promete SRI/Fiscalía automáticos).
-- **Microdesbloqueos v2** (migración 0015): catálogo en BD + auditoría comercial + router dedicado.
+- **Auth**: registro, login por contraseña, `POST /auth/google` + `/auth/google/vincular`
+  (canjea ID token de Google por el JWT propio; sin anti-replay — riesgo residual
+  declarado), `GET /auth/me` (incluye `es_admin` por `ADMIN_EMAILS`).
+- **Billetera de tokens**: saldo inicial 5, `debitar_tokens` (no-op si el monto es 0),
+  auditoría inmutable en `transacciones_tokens`. **Nada cobra hoy** (§4).
+- **Consulta por placa**: `GET /consultar/{placa}` y `/consultar/{placa}/perfil`
+  (consolidado por temática). Fuentes: ANT (matriculación + citaciones) y AMT/EPMTSD
+  (infracciones municipales, vía worker) activas; **SRI y FGE dormidas** por captcha
+  (quedan como enlace oficial, ocultas en la web por `NEXT_PUBLIC_FUENTES_INACTIVAS`).
+  Caché en `consultas` con TTL doble (transaccional 12h / estático 90d). `solo_cache=true`
+  en el consumo del detalle público (no dispara scraping).
+- **Garage privado**: vehículos (VIN/motor/chasis con 3 niveles de ofuscación), dueños
+  históricos, kilometraje monotónico, mantenimientos, favoritos (placa como String, no FK).
+- **Marketplace** (el producto):
+  - `PublicacionInterna` (la publica un usuario sobre su placa) con ciclo
+    `borrador → activa → pausada/vendida`. Activar exige ficha ≥ `UMBRAL_FICHA_PUBLICACION`
+    (30%, env). Plan `light`/`premium`: premium = `destacado` + elegible para el sello;
+    **hoy gratis**.
+  - `FichaPublicacion` 1:1: 3 bloques (`motor_suspension`, `carroceria`, `interiores`) +
+    `extras`, JSONB validado por Pydantic (`extra="forbid"`), con `completitud` derivada.
+    Registrar/editar es gratis.
+  - `FotoPublicacion`: sube el navegador a Cloudinary con firma del backend; la BD guarda
+    la URL. Máx. 12 por publicación.
+  - `PublicacionReferenciada`: el usuario pega un link externo (FB/OLX); NO se raspa; entra
+    `pendiente` y un admin la aprueba. Admite contenido rico (descripción, ciudad, km, ≤5
+    fotos). Detalle local `/marketplace/referencias/{id}` con botón al anuncio original.
+  - `GET /marketplace/feed` (portada curada: premium / estándar / referenciadas) y
+    `GET /marketplace/buscar` (lista plana filtrable, paginada por cursor keyset).
+  - **Contacto** (`POST /marketplace/publicaciones/{id}/contacto`): público y gratis;
+    devuelve teléfono + `whatsapp_url`. Registra `ContactoRevelado` anónimo (métrica de
+    demanda; sin IP/user-agent/usuario). El teléfono no viaja en feed ni detalle.
+  - Capa `Vendedor` (identidad comercial, 1:1 con la cuenta en etapa 1; `TipoVendedor.PATIO`
+    declarado para etapa 2). `nombre_publico` y `telefono` son opt-in explícito.
+  - Verificación "Verificado por la plataforma": el dueño la solicita (gratis) → `pendiente`
+    → un admin marca `verificado`/`rechazado` (`/marketplace/publicaciones/{id}/verificar`,
+    `ADMIN_EMAILS`). Solo premium.
+  - Token de compra-venta (`enlaces_compartidos`): enlace temporal (TTL ≤ 7 días) con
+    `scope` opt-in para mostrarle el historial a un comprador sin cuenta.
 
-**Git** — backend HEAD `4c4e3f8` · frontend HEAD `67f9429`. Ambos repos **limpios y pusheados**.
-**Prod**: Render (backend) + Vercel (frontend) · BD Neon en `alembic head` **0016** (`alembic upgrade head` ya aplicado para 0016; Fase 3 no agrega migración).
+**Frontend:** ~20 páginas, ~26 componentes. `tsc --noEmit` limpio · `npm run lint` **0
+errores** · `npm run build` OK (17 rutas). Portada market-first, feed curado (MC1) +
+búsqueda server-side (MC2), wizard de publicar de 3 pasos, ficha por bloques con
+completitud, favoritos con badge de baja de precio, contacto por WhatsApp, `mi-garage`,
+`mi-cuenta`, login/registro con Google, panel admin (moderación de referencias +
+verificaciones). Sistema de diseño "confianza clara" documentado en `docs/DISENO.md`
+(migración de tokens TASK-017 fases 1–3 aplicadas).
 
-## 8. Para continuar en Gemini — instrucciones
-> Eres un asistente de arquitectura y planificación de software.
-> Tienes el contexto completo del proyecto arriba.
-> El usuario quiere planificar el TO-BE: próximos pasos, mejoras, nuevas funcionalidades.
-> Cuando el usuario describa qué quiere hacer, responde con:
-> 1. Evaluación de impacto sobre lo existente
-> 2. Archivos a crear o modificar
-> 3. Skills de Claude Code a activar
-> 4. Estructura sugerida de la solución
-> 5. Posibles riesgos o dependencias
+## 4. Qué se decidió (decisiones vivas y su porqué)
 
-## 9. Próximos pasos sugeridos
-1. **Integrar un proveedor real** de datos vehiculares: implementar la llamada HTTP en uno de los stubs (`providers/consultas_ec.py` u otro), mapear su respuesta al contrato, cargar la `*_API_KEY` y poner `PROVEEDOR_VEHICULAR_ACTIVO=<x>` en Render. Validar costo/margen vs `costos_proveedor_consulta`.
-2. **Mostrar saldo de tokens y recarga** en el flujo de desbloqueo (ya hay CTA a /precios en 402); preparar el gateway de pago local (PlaceToPay/MercadoPago) para vender tokens reales.
-3. **Cerrar SRI**: gestionar API oficial del SRI o un proveedor confiable para activar `valores_matricula_sri` (hoy enlace oficial).
-4. **Pilar 5 (OCR/foto)**: completar el flujo `foto → placa → consulta` (`routers/ocr.py` + `services/vision.py`).
-5. **Limpieza de deuda**: resolver los 4 errores de lint `set-state-in-effect` del frontend y revisar la UI de FGE/EPMTSD desactivadas.
+- **El market es el producto; la consulta por placa es complemento y hoy va en segundo
+  plano** (§1.0.1–1.0.2 de AGENTS). Motivo: SRI/FGE tras captcha y AMT/EPMTSD dependen de
+  un worker residencial frágil. "Más adelante vemos placas y costos."
+- **Monetización suspendida en toda la superficie del producto** (Marcos, 2026-08-27).
+  Motivo: la doc decía "precios en 0" mientras el código de market cobraba 3–100 tokens y
+  `/precios` vendía paquetes — contradicción. Estado aplicado:
+  `TOKENS_PUBLICACION_PREMIUM`, `TOKENS_VERIFICACION_MARKETPLACE`, `COSTO_COMPARTIR_TOKENS`
+  → 0 (env-overridables, débito y ramas 402 cableados para reactivar). Frontend: `/precios`,
+  `TokenBadge`, microdesbloqueos de la consulta y todo copy de "N tokens" **retirados**.
+  El módulo `tokens` y `transacciones_tokens` quedan como plomería dormida (auditoría del
+  ledger sigue siendo obligatoria). Dónde y cuánto se cobra se decide con usuarios reales.
+- **Un solo modelo de marketplace.** El endpoint legacy `GET /marketplace` (sobre
+  `Vehiculo.en_venta`) se retiró: estaba huérfano. El market vive en `PublicacionInterna` /
+  `PublicacionReferenciada`. Las columnas `en_venta`/`precio_venta_usd`/`url_externa` de
+  `Vehiculo` quedan en el modelo sin uso (borrarlas = migración, no urgente).
+- **El proveedor `mock` no se usa en producción.** Un proveedor que fabrica datos no puede
+  alimentar un producto cuya propuesta es la transparencia. El default correcto de
+  `PROVEEDOR_VEHICULAR_ACTIVO` en prod es `consultas_ec` (sin API key → capacidades vacías,
+  no ofrece ni cobra). Que el default de código siga siendo `mock` es deuda (TASK-004).
+- **Contrato de errores**: 400 formato · 402 pago con tokens · 404 "no es tuyo"
+  (indistinto) · 409 conflicto / dato no disponible · 422 validación de negocio. Nunca 500.
+- **Privacidad**: VIN/motor/chasis ofuscados salvo dueño autenticado; titular nunca en
+  crudo. `Depends(usuario_actual)` / `vehiculo_propio` en todo lo privado. El CRUD del
+  market **nunca** invoca scraping (§10.2).
+- **Login con Google**: auto-enlace de una cuenta existente solo con identidad autoritativa
+  (`gmail.com` o `hd` de Workspace); el resto recibe 409 y debe vincular autenticándose.
+  `proveedor_autenticacion` es el origen, no una exclusividad (una cuenta puede tener
+  contraseña y Google).
+- **Migraciones manuales**, revisadas a mano, con `downgrade`. Sin `--autogenerate` a
+  ciegas. `selectinload` en todo listado del market (sin N+1).
+
+## 5. Qué está bloqueado o pospuesto
+
+Distinguir bloqueado por límite externo de pospuesto por decisión.
+
+| Tema | Tipo | Causa | Condición de desbloqueo |
+|---|---|---|---|
+| SRI y FGE (valores de matrícula, alertas legales) | bloqueado | reCAPTCHA Enterprise / hCaptcha; Playwright es detectable | API oficial o convenio; hoy quedan como enlace oficial y ocultas en la web |
+| AMT/EPMTSD y FGE desde la nube | bloqueado | los portales sirven challenge a IPs de datacenter | worker residencial (existe) o proxy residencial pago |
+| **Datos oficiales dentro de la tarjeta del feed** | bloqueado | el feed no lleva procedencia por campo y la caché del worker está fría (no drena desde ~20-jul; job colgado `en_proceso` desde 29-jul, sin recuperación de locks efectiva) | arreglar el worker (TASK-008) → llevar el estado oficial al schema del feed → pintar el "registro oficial" (`DISENO.md §5`, Fase 2) |
+| Cobro y pasarela de pago | pospuesto | decisión: nada de costos hasta operar con usuarios reales | tener una versión estable con uso real |
+| Cuentas de patio e ingesta masiva | pospuesto | etapa 2 | que el flujo de particulares funcione con usuarios reales |
+| Catálogo `productos_consulta` con tokens > 0 en BD | pospuesto | dormido y sin UI que lo alcance | se pone en 0 (migración) al retomar la consulta por placa |
+| App móvil / feed tipo reels | pospuesto | fuera de alcance del ciclo | web validada + fotos de calidad en volumen |
+| Anti-replay del login con Google | deuda declarada | necesita Redis (guard por `jti`) | mitigación provisional: bajar `JWT_EXPIRA_MINUTOS` a 4–8h |
+
+Sin CI en ninguno de los dos repos. Sin `tests/fixtures/` para los parsers de scraping
+(TASK-009). `scripts/estado.py` (TASK-007) todavía no existe: el estado se verifica a mano.
+
+## 6. Qué sigue (inmediato)
+
+1. **Merge** de la rama `chore/cierre-market-sin-precios` en ambos repos (aprueba Marcos).
+   No requiere migración.
+2. Cerrar la ola 1 en la bitácora con el estado de merge.
+3. Ola 2 (a priorizar con Marcos): pulir y cerrar de punta a punta los ciclos del vendedor
+   (publicar → borrador → activar → editar) y del comprador (portada → buscar → detalle →
+   favorito → contacto); correr el guión de prueba integrador; unificar planificadores
+   (`plan_market_autos.md` = historia, `ORDEN-DE-TRABAJO.md` = plan); `scripts/estado.py`.
+4. El worker (TASK-008) y todo lo de consulta por placa quedan pospuestos por decisión
+   hasta que el market opere con usuarios reales.
