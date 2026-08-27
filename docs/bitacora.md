@@ -21,6 +21,76 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-27 — Iteración de diseño del frontend (secciones 1–4a)
+
+**Repo:** frontend `consulta-placas-web`, rama `feat/diseno-portada` (5 commits sobre
+`main`, **sin merge**). Backend **no se tocó**. Marcos pidió iterar el diseño del frontend
+en orden de impacto: 1) portada, 2) tarjetas, 3) detalle, 4) sistema base. Se probó con la
+app corriendo (`npm run dev`, `.env.local` → backend de Render) en móvil 375 y desktop.
+
+**Marco de trabajo.** El sistema visual (`docs/DISENO.md` + `globals.css`) es el resultado
+de TASK-017 (3 fases, doble revisión cruzada) y cada token lleva su "no tocar sin
+evidencia". Por eso las secciones 1–3 son **corrección y robustez DENTRO del sistema** — no
+un cambio de *look*. Ninguna toca `globals.css`, la paleta ni las familias tipográficas.
+
+### Sección 1 — portada (`29e4d85`)
+- **Bug de precio**: el backend serializa `precio_usd` como string (`"22000.00"`);
+  `String.toLocaleString()` ignora las opciones → se veía `$22000.00`. Helper `precioNum()`
+  en el borde (`src/lib/precio.ts`), aplicado en `precioFmt`, `enBanda` y `bajaDePrecio`.
+  Ahora `$22.000`.
+- **Portada con poco stock**: con ~6 autos reales los 7 bloques MC1 se colapsaban a "★
+  Destacados" con 1 tarjeta + 400px de vacío. Bajo `UMBRAL_PORTADA_CURADA = 8`, una sola
+  grilla unificada (internas + referenciadas). Los bloques curados vuelven a partir del
+  umbral. El carrusel solo con ≥2 premium.
+- CTAs de vendedor bajan a después de la primera grilla ("¿Vendes tu auto?").
+- `.espacio-barra-movil` en `/marketplace` y `/`; hero de la home más bajo en móvil (asoma
+  "Autos en venta" sin scroll); placeholder del buscador acortado.
+
+### Sección 2 — tarjetas del feed (`c2325d8`)
+- **Una fila de chips** (§4): de hasta 3 `<Insignia>` que envolvían a máx. 2, prioridad
+  Verificado > Premium > Ficha, `flex-nowrap`.
+- **Paridad de altura** interna↔referenciada: de +45–73px a **+6px** (la grilla unificada
+  ya no baila). El chip "Referencia externa · datos no verificados" pasó de recuadro a
+  línea de texto (copy M2.5 intacto, tono `declarado` cálido).
+- Botón favorito: 36→40px, `ring-borde`→`ring-borde-fuerte` (se leía como un cuadrado
+  hasta que componía el blur), estado lleno `bg-error`→`bg-marca` (el rojo es para fallos
+  de interfaz, no para "guardado"), `focus-visible` agregado.
+- Padding `p-4`→`p-3 sm:p-4`.
+
+### Sección 3 — detalle + "dos registros" (`354d154`)
+- **Skeleton de carga** con la forma real del detalle, en vez de "Cargando publicación…".
+- Encabezado con ritmo vertical parejo; la meta pierde las etiquetas redundantes
+  ("Marca:", "Año:") — el título ya lo dice; queda "km · ciudad".
+- **`DISENO.md §1` materializado**: `DatosOficialesMini` se lee como **registro oficial** —
+  los valores de dato duro (veredicto de multas, monto, "Consultado el…") en `font-mono`;
+  la ficha declarada sigue sans/cálida con "declarado por el vendedor".
+- **`DISENO.md §7` (pendiente anotado)**: "Aún no hay datos oficiales… Consulta la placa"
+  (sonaba a falta del vendedor) → **"Todavía no consultamos las fuentes oficiales de esta
+  placa"** + acción "Consultar ahora" aparte. Enunciado desde el sistema.
+- "Total a pagar" con separador de miles; ficha vacía con copy más cálido.
+
+### Sección 4a — esqueletos de carga (`b24fa1a`)
+Parte **segura** de la sección 4 (sin tocar paleta/tipos). Componente `EsqueletoTarjetas`
+(N tarjetas fantasma con la forma de `ListingCard`), aplicado en `/marketplace` (grilla
+curada y de búsqueda) y en la home (`DestacadosMarket`). Sin salto de layout al llegar los
+datos.
+
+### Sección 4b — evolución estética del sistema base: **NO hecha, requiere dirección**
+Cambiar la paleta / el lienzo cálido / la tipografía es reabrir `DISENO.md` a propósito
+(su propio §7 admite que el lienzo cálido "es una preferencia, no un criterio"). No es una
+decisión que se tome sin un rumbo: queda a la espera de que Marcos diga qué sensación
+busca (referencia, más sobrio / más "app" / más cálido).
+
+**Verificación (cada commit):** `npx tsc --noEmit` limpio · `npm run lint` **0 errores** ·
+`npm run build` OK (17 rutas). Revisado visualmente en la app.
+
+**Pendiente:** merge de `feat/diseno-portada` (aprueba Marcos); decidir la sección 4b.
+Seguimiento menor: combos de chip `✓ Verificado` + `★ Premium` a la vez exceden el ancho a
+166px y quedan recortados por `overflow-hidden` — hoy ninguna publicación está verificada,
+así que no se ve; revisar cuando exista.
+
+---
+
 ## 2026-08-27 — Cierre, ola 2 (vendedor): editar y vaciar los datos de una publicación
 
 **Repo:** backend `consulta_placas_ec`, rama `chore/cierre-ola2`. Ola 1 ya mergeada a
