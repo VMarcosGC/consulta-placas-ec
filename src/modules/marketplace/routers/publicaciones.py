@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, and_, or_, cast, literal, union_all, Integer
+from sqlalchemy import select, and_, or_, cast, func, literal, union_all, Integer
 from sqlalchemy.orm import Session, selectinload
 
 from src.core.database import obtener_sesion
@@ -45,10 +45,12 @@ from src.modules.marketplace.models import (
     Vendedor,
 )
 from src.modules.marketplace.routers.vendedor import obtener_o_crear_vendedor
+from src.modules.marketplace import geografia
 from src.modules.marketplace.schemas import (
     armar_whatsapp_url,
     Combustible,
     ContactoVendedorSalida,
+    DistribucionGeograficaSalida,
     FeedMarketplaceSalida,
     FichaActualizar,
     FichaSalida,
@@ -58,11 +60,13 @@ from src.modules.marketplace.schemas import (
     FotoReordenar,
     FotoSalida,
     ItemBusqueda,
+    ProvinciaDistribucionSalida,
     PublicacionDetalleSalida,
     PublicacionInternaActualizar,
     PublicacionInternaCrear,
     PublicacionInternaSalida,
     PublicacionReferenciadaSalida,
+    RegionDistribucionSalida,
     ResultadoBusquedaSalida,
     SEMANAS_VIGENCIA_PUBLICACION,
     TipoCarroceria,
@@ -559,6 +563,71 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
     )
 
 
+@router.get("/distribucion", response_model=DistribucionGeograficaSalida)
+def distribucion_geografica(sesion: Session = Depends(obtener_sesion)):
+    """Conteo de publicaciones ACTIVAS por provincia y región (portada: "¿dónde
+    están los autos?"). Anónimo, solo lectura, solo BD propia (§10.2).
+
+    Cuenta internas `activa` + referencias `activa` + `aprobada`. Agrupa por
+    `ciudad` en SQL y pliega ciudad → provincia/región en Python vía `geografia`.
+    Una ciudad no reconocida cuenta en `total` pero no en ninguna provincia.
+    """
+    filas_internas = sesion.execute(
+        select(PublicacionInterna.ciudad, func.count())
+        .where(PublicacionInterna.estado == EstadoPublicacion.ACTIVA.value)
+        .group_by(PublicacionInterna.ciudad)
+    ).all()
+    filas_ref = sesion.execute(
+        select(PublicacionReferenciada.ciudad, func.count())
+        .where(
+            and_(
+                PublicacionReferenciada.activa.is_(True),
+                PublicacionReferenciada.estado_moderacion
+                == EstadoModeracion.APROBADA.value,
+            )
+        )
+        .group_by(PublicacionReferenciada.ciudad)
+    ).all()
+
+    total = 0
+    por_provincia: dict[str, int] = {}
+    provincia_region: dict[str, str] = {}
+    for ciudad, n in [*filas_internas, *filas_ref]:
+        total += n
+        canon = geografia.ciudad_canonica(ciudad)
+        if canon is None:
+            continue
+        provincia, region = geografia.CIUDAD_A_PROVINCIA[canon]
+        por_provincia[provincia] = por_provincia.get(provincia, 0) + n
+        provincia_region[provincia] = region
+
+    con_ubicacion = sum(por_provincia.values())
+
+    regiones: list[RegionDistribucionSalida] = []
+    for region in geografia.REGIONES:
+        provincias = sorted(
+            (
+                ProvinciaDistribucionSalida(provincia=p, total=c)
+                for p, c in por_provincia.items()
+                if provincia_region[p] == region
+            ),
+            key=lambda x: (-x.total, x.provincia),
+        )
+        if provincias:
+            regiones.append(
+                RegionDistribucionSalida(
+                    region=region,
+                    total=sum(p.total for p in provincias),
+                    provincias=provincias,
+                )
+            )
+    regiones.sort(key=lambda r: -r.total)
+
+    return DistribucionGeograficaSalida(
+        total=total, con_ubicacion=con_ubicacion, regiones=regiones
+    )
+
+
 # ──────────────── Búsqueda del comprador (MC2 — lista plana + cursor) ────────────────
 #
 # Endpoint NUEVO, independiente del feed (que sigue alimentando la portada curada MC1).
@@ -640,6 +709,8 @@ def buscar_publicaciones(
     precio_max: Decimal | None = Query(default=None, ge=0),
     anio_min: int | None = Query(default=None),
     anio_max: int | None = Query(default=None),
+    provincia: str | None = Query(default=None),
+    region: str | None = Query(default=None),
     cursor: str | None = Query(default=None),
     limite: int = Query(default=LIMITE_BUSQUEDA_DEFAULT, ge=1, le=LIMITE_BUSQUEDA_MAX),
 ):
@@ -650,11 +721,36 @@ def buscar_publicaciones(
       deuda —las marcas comunes no llevan tilde—; NO se agrega la extensión `unaccent`).
     - `tipo`/`combustible`/`transmision`: catálogos de la ficha técnica.
     - `precio_min`/`precio_max`, `anio_min`/`anio_max`: rangos.
+    - `provincia` / `region`: ubicación del auto en venta, derivada de `ciudad` vía
+      `geografia.py`. Si se dan ambos, se intersecan. Una referencia con `ciudad` de
+      texto libre que no casa exactamente con el catálogo NO entra por este filtro.
 
     Cursor opaco (base64); inválido → **400** (formato). `siguiente_cursor=null` cuando
     ya no hay más páginas. Anónimo (sin `Depends(usuario_actual)`). Solo BD propia (§10.2).
     """
     hay_filtro_ficha = tipo is not None or combustible is not None or transmision is not None
+
+    # ── Filtro geográfico → conjunto de ciudades del catálogo a casar ────────────
+    ciudades_geo: list[str] | None = None
+    if region is not None:
+        if region not in geografia.REGIONES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Región no válida. Opciones: {list(geografia.REGIONES)}.",
+            )
+        ciudades_geo = geografia.ciudades_de_region(region)
+    if provincia is not None:
+        if provincia not in geografia.PROVINCIAS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Provincia no válida. Opciones: {list(geografia.PROVINCIAS)}.",
+            )
+        de_provincia = geografia.ciudades_de_provincia(provincia)
+        ciudades_geo = (
+            de_provincia
+            if ciudades_geo is None
+            else [c for c in de_provincia if c in ciudades_geo]
+        )
 
     # Corte de vigencia: un timestamp fijo para todo el request (no `now()` por fila),
     # así el keyset entre páginas es estable. Un anuncio con `renovada_en` / `creado_en`
@@ -719,6 +815,8 @@ def buscar_publicaciones(
         sel_internas = sel_internas.where(PublicacionInterna.precio_usd >= precio_min)
     if precio_max is not None:
         sel_internas = sel_internas.where(PublicacionInterna.precio_usd <= precio_max)
+    if ciudades_geo is not None:
+        sel_internas = sel_internas.where(PublicacionInterna.ciudad.in_(ciudades_geo))
 
     ramas = [sel_internas]
 
@@ -753,6 +851,8 @@ def buscar_publicaciones(
                     PublicacionReferenciada.modelo.ilike(patron, escape="\\"),
                 )
             )
+        if ciudades_geo is not None:
+            sel_ref = sel_ref.where(PublicacionReferenciada.ciudad.in_(ciudades_geo))
         ramas.append(sel_ref)
 
     u = (union_all(*ramas) if len(ramas) > 1 else ramas[0]).subquery("u")

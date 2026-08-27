@@ -841,6 +841,37 @@ class FeedMarketplaceSalida(BaseModel):
     referenciadas: list[PublicacionReferenciadaSalida] = Field(default_factory=list)
 
 
+# ════════════ Distribución geográfica (portada: "¿dónde están los autos?") ════════════
+#
+# Conteo de publicaciones activas por provincia y región, para que la portada muestre
+# de un vistazo dónde hay stock y el comprador filtre desde ahí. Se deriva de `ciudad`
+# vía `geografia.py` (no hay columna provincia/región). Solo BD propia (§10.2).
+
+
+class ProvinciaDistribucionSalida(BaseModel):
+    provincia: str
+    total: int
+
+
+class RegionDistribucionSalida(BaseModel):
+    region: str
+    total: int
+    provincias: list[ProvinciaDistribucionSalida] = Field(default_factory=list)
+
+
+class DistribucionGeograficaSalida(BaseModel):
+    """`GET /marketplace/distribucion`.
+
+    `total` = todas las publicaciones activas (internas + referencias aprobadas).
+    `con_ubicacion` = las que caen en una provincia reconocida (`ciudad` del catálogo
+    o alias). `total - con_ubicacion` = sin ubicación clara (no se listan por
+    provincia, pero cuentan en el total)."""
+
+    total: int
+    con_ubicacion: int
+    regiones: list[RegionDistribucionSalida] = Field(default_factory=list)
+
+
 # ════════════════ Búsqueda del comprador (MC2 — lista plana paginada) ════════════════
 #
 # A diferencia del feed (3 cubos curados para la portada MC1), la búsqueda devuelve una
