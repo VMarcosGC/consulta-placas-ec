@@ -250,7 +250,7 @@ class EdicionCiudadTests(unittest.TestCase):
         sesion.commit.assert_not_called()
 
     def test_no_enviar_ciudad_deja_la_anterior_intacta(self):
-        """Semántica del resto del schema: omitir un campo = no tocarlo."""
+        """Omitir un campo = no tocarlo (se mira `model_fields_set` en el router)."""
         pub = _publicacion(ciudad="Ibarra", estado=EstadoPublicacion.ACTIVA.value)
         self._con_sesion(pub)
 
@@ -261,6 +261,21 @@ class EdicionCiudadTests(unittest.TestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(pub.ciudad, "Ibarra")
         self.assertEqual(respuesta.json()["ciudad"], "Ibarra")
+
+    def test_enviar_ciudad_null_la_vacia(self):
+        """`null` EXPLÍCITO borra la ciudad (M2.11): el vendedor la eligió por error y la
+        quiere dejar en blanco. Distinto de omitir el campo (test de arriba)."""
+        pub = _publicacion(ciudad="Ibarra", estado=EstadoPublicacion.ACTIVA.value)
+        sesion = self._con_sesion(pub)
+
+        respuesta = self.cliente.patch(
+            "/marketplace/publicaciones/10", json={"ciudad": None}
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIsNone(pub.ciudad)
+        self.assertIsNone(respuesta.json()["ciudad"])
+        sesion.commit.assert_called_once()
 
 
 class CiudadEnLasVistasPublicasTests(unittest.TestCase):

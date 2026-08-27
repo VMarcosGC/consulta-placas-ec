@@ -330,6 +330,12 @@ def actualizar_publicacion(
     """Edita precio/descripción/ciudad/kilometraje/estado, publica un borrador o asciende
     a premium.
 
+    **Semántica de campos (M2.11):** para los campos opcionales del auto (`titulo`,
+    `descripcion`, `ciudad`, `kilometraje`) se distingue *omitido* de *enviado en `null`*
+    con `model_fields_set` — mismo patrón que `actualizar_ficha`. Omitir = no lo toques;
+    `null` explícito = **bórralo** (el vendedor se equivocó al teclear). `precio_usd` no
+    es opcional (`gt=0`), así que solo se reemplaza, nunca se vacía.
+
     **Transición `borrador → activa` (M2.8):** exige que la ficha llegue a
     `UMBRAL_FICHA_PUBLICACION` (422 si no). No se puede volver a `borrador` desde otro
     estado: gracias a eso el punto de cobro es exactamente-una-vez y re-activar tras una
@@ -341,14 +347,11 @@ def actualizar_publicacion(
     """
     pub = _mi_publicacion(sesion, publicacion_id, usuario)
 
-    if datos.titulo is not None:
-        pub.titulo = datos.titulo
-    if datos.descripcion is not None:
-        pub.descripcion = datos.descripcion
-    if datos.ciudad is not None:
-        pub.ciudad = datos.ciudad
-    if datos.kilometraje is not None:
-        pub.kilometraje = datos.kilometraje
+    # Campos opcionales del auto: `null` explícito los vacía, omitirlos no los toca.
+    enviados = datos.model_fields_set
+    for campo in ("titulo", "descripcion", "ciudad", "kilometraje"):
+        if campo in enviados:
+            setattr(pub, campo, getattr(datos, campo))
     if datos.precio_usd is not None:
         pub.precio_usd = datos.precio_usd
 

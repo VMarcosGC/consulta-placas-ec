@@ -193,7 +193,8 @@ CiudadPublicacion = Literal[
 
 
 class PublicacionInternaCrear(BaseModel):
-    """Alta de una publicación. El `plan` premium se cobra en el router (tokens)."""
+    """Alta de una publicación. Monetización suspendida (§1.0.3): `premium` es gratis y
+    solo marca el anuncio como destacado."""
 
     placa: str = Field(min_length=6, max_length=10)
     titulo: str | None = Field(default=None, max_length=160)
@@ -225,20 +226,22 @@ class PublicacionInternaCrear(BaseModel):
 
 
 class PublicacionInternaActualizar(BaseModel):
-    """Edición parcial. `plan=premium` dispara el cobro de tokens en el router."""
+    """Edición parcial. Monetización suspendida (§1.0.3): cambiar el `plan` no cobra.
+
+    Para los campos opcionales del auto (`titulo`, `descripcion`, `ciudad`,
+    `kilometraje`) el router mira `model_fields_set`: **omitir** el campo = no lo toca;
+    enviarlo en **`null`** = lo borra (el vendedor se equivocó al teclear y quiere dejarlo
+    en blanco). `precio_usd` no es opcional (`gt=0`), solo se reemplaza.
+    """
 
     titulo: str | None = Field(default=None, max_length=160)
     descripcion: str | None = Field(default=None, max_length=2000)
-    # Cambiar la ciudad del anuncio (el auto se mudó, o el vendedor se equivocó al
-    # publicar). Igual que el resto de campos de este schema, `null`/omitido significa
-    # "no lo toques": el router usa `is not None`, así que desde aquí no se vacía una
-    # ciudad ya puesta, solo se reemplaza por otra del catálogo.
+    # Cambiar o vaciar la ciudad del anuncio (el auto se mudó, o el vendedor se equivocó).
+    # `null` explícito la borra; omitir el campo la deja intacta (ver el docstring y
+    # `model_fields_set` en el router).
     ciudad: CiudadPublicacion | None = None
-    # Actualizar el recorrido (el auto sigue rodando mientras está publicado, o el
-    # vendedor se equivocó al teclear). Misma semántica que el resto del schema:
-    # `null`/omitido = "no lo toques" (el router usa `is not None`), así que desde aquí
-    # se corrige un kilometraje, no se vacía. Mismos límites que el alta → 422 fuera de
-    # rango.
+    # Corregir o vaciar el recorrido declarado. Misma semántica que la ciudad. Mismos
+    # límites que el alta (0 … 2 000 000) → 422 fuera de rango, nunca 500.
     kilometraje: int | None = Field(default=None, ge=0, le=2_000_000)
     precio_usd: Decimal | None = Field(default=None, gt=0)
     plan: PlanPublicacion | None = None

@@ -291,7 +291,7 @@ class EdicionKilometrajeTests(unittest.TestCase):
         sesion.commit.assert_not_called()
 
     def test_no_enviar_kilometraje_deja_el_anterior_intacto(self):
-        """Semántica del resto del schema: omitir un campo = no tocarlo."""
+        """Omitir un campo = no tocarlo (el router mira `model_fields_set`)."""
         pub = _publicacion(kilometraje=87_500, estado=EstadoPublicacion.ACTIVA.value)
         self._con_sesion(pub)
 
@@ -302,6 +302,21 @@ class EdicionKilometrajeTests(unittest.TestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(pub.kilometraje, 87_500)
         self.assertEqual(respuesta.json()["kilometraje"], 87_500)
+
+    def test_enviar_kilometraje_null_lo_vacia(self):
+        """`null` EXPLÍCITO borra el recorrido (M2.11): el vendedor lo tecleó mal y lo
+        quiere dejar en blanco. Distinto de omitir el campo (test de arriba)."""
+        pub = _publicacion(kilometraje=87_500, estado=EstadoPublicacion.ACTIVA.value)
+        sesion = self._con_sesion(pub)
+
+        respuesta = self.cliente.patch(
+            "/marketplace/publicaciones/10", json={"kilometraje": None}
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIsNone(pub.kilometraje)
+        self.assertIsNone(respuesta.json()["kilometraje"])
+        sesion.commit.assert_called_once()
 
 
 class KilometrajeEnLasVistasPublicasTests(unittest.TestCase):

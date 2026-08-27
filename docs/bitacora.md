@@ -21,7 +21,42 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
-## 2026-08-27 — Cierre, ola 1: fuera todo precio y costo del market
+## 2026-08-27 — Cierre, ola 2 (vendedor): editar y vaciar los datos de una publicación
+
+**Repo:** backend `consulta_placas_ec`, rama `chore/cierre-ola2`. Ola 1 ya mergeada a
+`main` en ambos repos (fast-forward). Frontend en curso (agente `dev-frontend`).
+
+**El hueco.** `PATCH /marketplace/publicaciones/{id}` usaba `if datos.X is not None` para
+todos los campos, así que un `null` explícito **no vaciaba nada**: se podía cambiar el
+kilometraje 87 500 → 91 200 pero no dejarlo en blanco tras teclearlo mal. Dos entradas de
+bitácora (TASK-012 y TASK-013 frontend) ya lo anotaron como deuda: *"ya van dos campos con
+la misma limitación; cuando se resuelva, conviene hacerlo para todo el schema de una vez"*.
+
+**Qué se hizo (M2.11).** `actualizar_publicacion` ahora mira `datos.model_fields_set` para
+los cuatro campos opcionales del auto (`titulo`, `descripcion`, `ciudad`, `kilometraje`) —
+**el mismo patrón que `actualizar_ficha` ya usaba**:
+
+| Cliente envía | Efecto |
+|---|---|
+| omite el campo | no lo toca |
+| `"campo": null` | lo **vacía** |
+| `"campo": valor` | lo reemplaza (validado: ciudad del catálogo, km 0…2 000 000 → 422) |
+
+`precio_usd` sigue con `is not None`: no es opcional (`gt=0`), solo se reemplaza. `plan` y
+`estado` igual. Docstrings de `PublicacionInternaCrear`/`Actualizar` corregidos (ya no
+dicen "el plan premium se cobra": monetización suspendida, §1.0.3).
+
+**Verificación:** `import main` → 69 rutas; `python -m unittest discover tests` → **144
+tests OK** (142 + 2: `test_enviar_ciudad_null_la_vacia`, `test_enviar_kilometraje_null_lo_vacia`,
+ambos comprueban que el `null` explícito vacía **y** hace `commit`, distinto de omitir).
+Sin migración (`alembic heads` = `0025`).
+
+**Frontend (agente `dev-frontend`, en curso):** wrapper `actualizarPublicacion` en
+`api.ts`, tipo `PublicacionActualizar` en el mirror, y formulario "Editar datos" por
+publicación en `mis-publicaciones` (título, descripción, ciudad, kilometraje, precio) que
+envía solo los campos tocados y usa "Sin especificar" / vacío → `null` para borrar.
+
+**Pendiente de la ola:** frontend del formulario; después, el carril del comprador.
 
 **Repos:** backend `consulta_placas_ec` (rama `chore/cierre-market-sin-precios`) +
 frontend `consulta-placas-web` (agente `dev-frontend`). Primera tanda del plan de cierre
