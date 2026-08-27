@@ -329,6 +329,15 @@ class PublicacionInterna(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    # "Última vez que el anuncio se puso al frente" = publicación o última renovación
+    # (migración 0026). La antigüedad del anuncio = `now() - renovada_en`; a las N
+    # semanas sin renovar cae al final del feed y de la búsqueda y el dueño ve
+    # "Renovar". A propósito SIN `onupdate`: solo lo cambia el endpoint explícito
+    # `POST /marketplace/publicaciones/{id}/renovar`, nunca una edición de rebote
+    # (si dependiera de `actualizado_en`, tocar el precio renovaría el anuncio solo).
+    renovada_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
 
     # Vínculo opcional al vehículo del garage (one-directional: no toca el modelo
     # Vehiculo). El router usa selectinload sobre `vehiculo.mantenimientos` para
