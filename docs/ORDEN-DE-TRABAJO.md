@@ -72,14 +72,14 @@ Hubo dos series en circulación con el mismo prefijo. Esta es la vigente:
 
 | # | Tarea | Estado |
 |---|---|---|
-| TASK-001 | Contacto comprador-vendedor (backend) | ✅ falta merge |
-| TASK-002 | Coherencia del bundle `reporte_compra_segura` | pendiente |
-| TASK-003 | Precios a 0 y `/precios` honesto | pendiente |
-| TASK-004 | Proveedor nulo por defecto | pendiente |
-| TASK-005 | `compartidos.py:58` devuelve 402, no 422 | pendiente |
+| TASK-001 | Contacto comprador-vendedor (backend) | ✅ mergeado (`99e1fbf` en `main`) |
+| TASK-002 | Coherencia del bundle `reporte_compra_segura` | pendiente (dormido: la consulta por placa está pospuesta) |
+| TASK-003 | Precios a 0 y `/precios` honesto | ✅ hecho (cierre ola 1: costos de market a 0, `/precios` y UI de tokens retiradas; catálogo `productos_consulta` en BD queda dormido, se pone en 0 al retomar placas) |
+| TASK-004 | Proveedor nulo por defecto | pendiente (P0 ya cortó `mock` en prod por env var; falta el arreglo estructural del default) |
+| TASK-005 | `compartidos.py:58` devuelve 402, no 422 | ✅ hecho (cierre ola 1) |
 | TASK-006 | Auditoría de créditos en el ledger | pendiente |
-| TASK-007 | `scripts/estado.py` | **spec lista** → [spec](specs/TASK-007-scripts-estado.md) |
-| TASK-008 | Recuperación de locks del worker | pendiente |
+| TASK-007 | `scripts/estado.py` | ✅ hecho (cierre ola 2) — su salida **precede a cada entrada de bitácora**: se corre `python -m scripts.estado` y se mira antes de escribir "esto quedó hecho" |
+| TASK-008 | Recuperación de locks del worker | pendiente (worker sin drenar la cola desde ~26-jul; confirmado por `scripts.estado`: 12 pendientes de 38 d, 1 `en_proceso` colgado de 28 d) |
 | TASK-009 | Tests de parser con fixtures | pendiente |
 | TASK-010 | Entorno local vs producción (`.env.local`) | spec lista |
 | TASK-011 | **Frontend del contacto** | ✅ hecho |

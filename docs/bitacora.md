@@ -64,6 +64,54 @@ como `null`. Validación suave en cliente para dar copy es-EC en vez del 422 cru
 
 ---
 
+## 2026-08-27 — Cierre, ola 2: `scripts/estado.py` (TASK-007)
+
+**Repo:** backend `consulta_placas_ec`, rama `chore/cierre-ola2`. Spec:
+[`specs/TASK-007-scripts-estado.md`](specs/TASK-007-scripts-estado.md). Se ejecutó en Claude
+Code (no Codex) porque el usuario pidió avanzar el cierre completo en una sola sesión; la
+spec es autocontenida y no toca dominio.
+
+**Qué es.** `python -m scripts.estado` imprime **cinco bloques** mirando el sistema real, no
+la documentación. Su salida es **precondición de cada entrada de bitácora**.
+
+1. Migraciones — head del repo (leído de los archivos, sin conectar) vs `alembic_version`
+   de Neon; dice si faltan migraciones **o si la base va por delante del código**.
+2. Git — commits sin pushear y ramas sin mergear a `main`, en **ambos** repos (`git fetch`
+   sin `--prune` primero).
+3. Proveedor vehicular — capacidades observadas en `GET /consultar/{placa}/perfil?solo_cache=true`
+   **anónimo** (sin gastar tokens, sin nombrar cuál es): `identificadores_tecnicos` /
+   `titular_validado` en `disponible: true` → hay proveedor con capacidades (alerta: puede
+   ser `mock`); ambos `false` → estado correcto.
+4. Fuentes — consultas de los últimos 7 días por `fuente`, **incluidas las que no tienen**
+   (la ausencia es la señal).
+5. Cola del worker — `pendiente` y `en_proceso` con su antigüedad; un `en_proceso` de horas
+   es un lock colgado.
+
+**Restricciones (cumplidas):** solo lectura, nunca escribe; lee `DATABASE_URL` **directo de
+`.env`** con `dotenv_values` (no `src.core.database`, que resolvería la BD local); si una
+fuente no responde, ese bloque lo dice y los otros se imprimen igual; exit 0 siempre; sin
+dependencias nuevas. `stdout` se fuerza a UTF-8 para la consola legacy de Windows.
+
+**Verificación — los seis criterios de la spec, ejecutados:**
+
+- Corrida real contra Neon + producción: 5 bloques, exit 0. Detectó estado vivo — **AMT,
+  EPMTSD y FGE sin consultas hace 32/32/90 días; 12 trabajos `pendiente` (el más viejo de
+  38 d) y 1 `en_proceso` colgado hace 28 d** (esto es TASK-008, ahora con evidencia).
+- **Neon inalcanzable** (host inexistente en `.env`, restaurado con `trap`): bloques 1/4/5
+  reportan el fallo, 2 y 3 se imprimen completos, exit 0.
+- **Backend caído** (`ESTADO_BACKEND=http://127.0.0.1:59999`): bloque 3 reporta
+  `ConnectError`, el resto sigue.
+- **Repo hermano ausente** (renombrado y restaurado): bloque 2 dice "el repositorio no está
+  en esta máquina", el resto sigue.
+- **Prueba de no-escritura:** `alembic_version` de Neon (`0025` → `0025`) y `git rev-parse
+  main` de ambos repos, idénticos antes y después. Demostrado, no afirmado.
+- Copy es-EC, 72 columnas.
+
+**Archivos:** `scripts/estado.py` (nuevo) · `docs/ORDEN-DE-TRABAJO.md` (TASK-007 marcada +
+filas 001/003/005/008 actualizadas contra el estado real).
+
+---
+
 ## 2026-08-27 — Cierre, ola 2 (comprador): el ciclo no muere sin contacto
 
 **Repo:** frontend `consulta-placas-web`, rama `chore/cierre-ola2`, commits `abbbdea` y
