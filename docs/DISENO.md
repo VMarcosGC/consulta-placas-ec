@@ -6,67 +6,112 @@
 
 ---
 
-## 0. Actualización 2026-08-27 — "Dirección C · App limpia"
+## 0. Actualización 2026-08-27 — "Grafito" (casi monocromo + modo oscuro)
 
-Marcos eligió evolucionar el *look* de **"confianza clara"** (lienzo cálido + CTA
-naranja) hacia una estética de **marketplace limpio y denso**: casi blanco,
-neutros **fríos**, píldoras oscuras para lo secundario, y el acento de conversión
-en **verde esmeralda** (en tendencia para marketplace/fintech, y distinto del
-azul de marca). Se decidió tras comparar tres direcciones —artefacto
-[Rediseño de Revisa tu Carro](https://claude.ai/code/artifact/14f77629-0379-4fe2-a5a9-878b64622017).
+> Reemplaza a la sub-iteración previa de este mismo día ("Dirección C · App
+> limpia", CTA verde esmeralda + `--marca` azul). Marcos rechazó, en orden,
+> naranja → esmeralda → azul → teal→verde: **"usa otra paleta más masculina",
+> "quita el azul", "más relación con los tonos base", "no te vayas a los
+> extremos"**. Y pidió **modo oscuro con opción** en la web.
+
+El look pasa a un **marketplace casi MONOCROMO en grafito**: neutros fríos de
+casi-blanco a casi-negro, y **la acción es un sólido que INVIERTE con el tema**
+(casi-negro en claro, casi-blanco en oscuro). No hay color de marca cromático —
+la identidad la lleva el propio grafito. El único guiño cálido es `--marca` (un
+gris templado, leve calidez), que marca la placa, el dato oficial y el favorito
+sin ser un "color". Los estados del vehículo (verde/ámbar/vino) son los únicos
+tonos, desaturados, y cada uno con su variante oscura.
 
 **Fuente de verdad viva:** `consulta-placas-web/src/app/globals.css`. Los tokens
-conservan sus **nombres** (por eso los componentes heredaron el look sin tocarse
-uno por uno); cambiaron los **valores**.
+conservan sus **nombres**; cambiaron los **valores** y ahora hay un juego para
+cada tema.
+
+### Tematizado — tres estados
+
+`@theme` (NO `@theme inline`) para que las utilidades compilen a `var(--color-*)`
+y el tema se pueda cambiar en runtime. La paleta base de `@theme` es la **clara**;
+solo se redefinen los tokens que cambian, en tres bloques:
+
+1. `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])` — SO en
+   oscuro y sin elección explícita.
+2. `:root[data-theme="dark"]` — elección explícita de oscuro (gana sobre un SO en
+   claro).
+3. `:root[data-theme="light"]` — elección explícita de claro (gana sobre un SO en
+   oscuro); solo fija `color-scheme`.
+
+El **no-flash** vive en `layout.tsx` (script inline que aplica `data-theme` antes
+de pintar, leyendo `localStorage.tema`). El toggle es `ThemeToggle.tsx` (sol/luna
+en el Header, con o sin sesión); lee el tema con `useSyncExternalStore` (sin
+`setState` en efecto). No expone un "auto": alterna solo entre las dos elecciones
+explícitas.
 
 ### Paleta vigente (reemplaza la tabla de §2)
 
-| Token | Hex nuevo | (era) | Único trabajo |
+| Token | Claro | Oscuro | Único trabajo |
 |---|---|---|---|
-| `--marca` | `#2F3FC7` | = | identidad, registro oficial, **enlace y favorito**. NO es el CTA |
-| `--accion` | **`#047857`** | `#CB4A16` | **solo** la acción de conversión (publicar, contactar, entrar). Esmeralda, 5.3:1 con blanco |
-| `--oscuro` | **`#1C1D22`** | *(nuevo)* | píldora sólida para lo **secundario / navegación**: filtro activo, "cargar más", "buscar". Ni estado ni mensaje |
-| `--oscuro-suave` | `#2B2C33` | *(nuevo)* | hover de la píldora oscura |
-| `--confirmado` | `#2F7D5B` | `#4B7A3E` | estado "al día". Más apagado, para no competir con `--accion` |
-| `--declarado` | `#B08D7C` | `#C08D7C` | superficie de lo declarado (§1) |
-| `--atencion` | `#B5551F` | `#B04A22` | "pendiente" del vehículo. Nunca una acción |
-| `--critico` | `#8A2F43` | = | peor estado del vehículo + matrícula vencida. Nunca una acción |
-| `--error` | `#D23B30` | `#A8332B` | fallo de la interfaz. Nunca un estado del vehículo, nunca una acción |
-| `--destructivo` | `#A22820` | `#7E2119` | la acción de destruir (contorno, nunca relleno) |
-| `--lienzo` | **`#FBFBFC`** | `#FAF6F3` | fondo de página — casi blanco, sesgo frío mínimo |
-| `--tinta` | `#17181C` | `#22201F` | texto primario · 16.5:1 sobre lienzo |
-| `--secundario` | `#5C5E68` | `#706258` | texto secundario · 5.5:1 blanco · 5.0:1 tenue |
-| `--superficie` | `#FFFFFF` | = | fondo de tarjeta |
-| `--superficie-tenue` | `#F1F2F4` | `#F2ECE8` | relleno sutil, fondo de foto/placeholder — **frío** |
-| `--borde` | `#E9EAEE` | `#E4DAD4` | filete de tarjeta (decorativo) — frío |
-| `--borde-suave` | `#F0F1F4` | `#EFE7E2` | divisor interno |
-| `--borde-fuerte` | `#999CA6` | `#A0918A` | borde de control de formulario · 3.05:1 (WCAG 1.4.11) |
+| `--lienzo` | `#F7F7F8` | `#111214` | fondo de página |
+| `--superficie` | `#FFFFFF` | `#1A1B1E` | tarjetas. **Es también el "texto sobre la acción"**: como invierte, `bg-accion text-superficie` contrasta en los dos temas |
+| `--superficie-tenue` | `#EEEEF0` | `#26272B` | relleno sutil, fondo de foto/placeholder |
+| `--borde` | `#E5E6E9` | `#2C2E33` | filete de tarjeta (decorativo) |
+| `--borde-fuerte` | `#9A9CA3` | `#6C6E76` | borde de control de formulario · 3.1:1 (WCAG 1.4.11) |
+| `--tinta` | `#16171A` | `#F2F2F3` | texto primario |
+| `--secundario` | `#5A5C63` | `#A2A4AC` | texto secundario |
+| `--accion` **=** `--oscuro` | `#1C1D21` | `#ECECEE` | **la** acción de conversión Y la píldora secundaria: son el MISMO sólido inversor. Se distinguen por forma (relleno vs contorno), no por color |
+| `--accion-suave` / `--oscuro-suave` | `#34353B` | `#D5D5D9` | hover de ese sólido |
+| `--marca` | `#46423B` | `#B9B2A6` | identidad, placa, registro oficial, favorito. Gris templado, NO un color |
+| `--confirmado` | `#3A7D5C` | `#4FAF80` | estado "al día". Nunca una acción |
+| `--atencion` | `#9A5A2A` | `#C98A4E` | "pendiente" del vehículo (tabaco, baja saturación). Nunca una acción |
+| `--critico` | `#8A3346` | `#CC5C72` | peor estado del vehículo + matrícula vencida. Vino, nunca una acción |
+| `--declarado` | `#9A8570` | `#B09A82` | superficie de lo declarado (§1) |
+| `--error` | `#C23F33` | `#E05B4F` | fallo de la interfaz. El único rojo. Nunca un estado del vehículo, nunca una acción |
+| `--destructivo` | `#A5342B` | `#E06A5F` | la acción de destruir (contorno, nunca relleno) |
 
-`--brand-from/via/to` (gradiente azul→cian): **sin cambio**, y sigue **solo en el
-logo**.
+Cada color tiene su par `*-tinte` / `*-texto` con variante oscura (ver
+`globals.css`). Regla que se mantiene: **texto sobre un tinte usa el tono de SU
+familia**, nunca negro/gris genérico.
+
+`--brand-from/via/to` y `.text-brand-gradient` / `.bg-brand-gradient`: el
+**gradiente se RETIRÓ**. El wordmark "CarStore Ec" es texto plano en `--tinta`.
+Las variables quedan apuntando a grafito por si algo las referencia; **no
+reintroducir un barrido de color**.
+
+### Reglas nuevas del tema oscuro (no romper)
+
+- **Nada de `text-white` / `bg-white` / `bg-black` literales sobre superficies
+  del tema.** Se hizo el barrido `text-white → text-superficie`. Excepción única:
+  chips que van **sobre una FOTO** (ej. contador de fotos de `ListingCard`), que
+  usan `bg-black/55 text-white` fijo — ahí el fondo no es del tema.
+- Un badge/píldora **sobre `--oscuro`** (que invierte) usa el polo opuesto
+  (`bg-superficie` + `text-tinta`), no un literal.
+- `hero-glow`, `focus-glow` y `sombra-tarjeta` se derivan con `color-mix` de los
+  tokens y tienen variante oscura reforzada (una sombra casi no se ve sobre
+  negro).
 
 ### Qué de §1–§7 sigue vigente
 
-- **§1 (dos registros)** — vigente y ahora más visible: lo declarado es
-  cálido/sans; lo oficial (ANT/AMT) es frío/**monoespaciado**. La placa y el dato
-  oficial siguen en `--marca` + `--font-mono`. En el detalle, `DatosOficialesMini`
-  ya pinta sus valores en mono (sección 3 de la iteración).
+- **§1 (dos registros)** — vigente y CLAVE en un sistema casi sin color: lo
+  declarado es sans; lo oficial (ANT/AMT) es **monoespaciado**. La placa y el dato
+  oficial van en `--marca` (gris templado) + `--font-mono`; la distinción
+  sobrevive en escala de grises, que es casi todo el sistema. (La sección "Datos
+  oficiales" del detalle quedó en stand-by 2026-08-27 — pendiente de resolver de
+  dónde salen esos datos; cuando vuelva, va en mono.)
 - **§2 (rationale)** — "un color, un trabajo", `--error` ≠ `--atencion`,
-  `--destructivo` separado por peso y forma: **todo sigue**. Solo cambiaron los
-  hex y se agregó `--oscuro` como la familia "secundario sólido".
+  `--destructivo` separado por peso y forma: **todo sigue**. Cambio: `--accion` y
+  `--oscuro` colapsan en el mismo sólido inversor (CTA vs secundario se separan
+  por forma, no por color).
 - **§3 (tipografía)** — vigente. Se mantiene **Geist Sans / Geist Mono** (grotesk
-  apretada, encaja con "app limpia"); se suma el rol de **stats/labels en mono**
-  (la línea "N autos · M marcas · K verificados" de la portada).
+  apretada); se suma el rol de **stats/labels en mono** (la línea "N autos · M
+  marcas · K verificados" de la portada). En "Grafito" el mono carga aún más peso:
+  es una de las pocas cosas que distingue "registro oficial" de "declarado".
 - **§4 (jerarquía de la tarjeta)** — vigente sin cambios (foto → precio bajo la
   foto → título → ciudad·km → placa → chips). Grillas más densas (hasta 5 col en
   desktop).
 - **§6 (descartado)** — vigente. Nota: los **chips de vidrio / glass** sobre la
   foto y los **gradientes amplios** siguen descartados por rendimiento en gama
   baja; la Dirección A los proponía y no se tomaron.
-- **§7** — la pregunta abierta del *lienzo cálido* queda **saldada**: se eligió a
-  conciencia un casi-blanco frío. Sigue siendo una preferencia a validar con
-  usuarios reales, pero ya no es "sin resolver". El punto del **copy de ausencia
-  de datos** ("todavía no consultamos esta placa") ya se aplicó (sección 3).
+- **§7** — la pregunta abierta del *lienzo cálido* queda **saldada**: casi-blanco
+  frío en claro, casi-negro frío en oscuro. Sigue siendo una preferencia a validar
+  con usuarios reales.
 
 Lo de abajo (§1–§7) se conserva como está por su valor de historia y de
 rationale; donde una tabla de hex contradiga a §0, **manda §0**.

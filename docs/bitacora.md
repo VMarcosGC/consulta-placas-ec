@@ -21,6 +21,61 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-27 — "Grafito": paleta casi monocroma + modo oscuro, y antigüedad de publicaciones
+
+**Repos:** frontend `consulta-placas-web` (rama `main`, varios commits) · backend
+`consulta_placas_ec` (rama `main`: merges `feat/publicacion-renovacion` +
+`chore/seed-demo`).
+
+**Qué se hizo**
+
+1. **Inicio sin dobles CTA + consulta de placa fuera de la UI** (`e09ff9a`). El hero
+   del inicio ya no lleva botones; la navegación son 3 tarjetas de resumen, una por
+   destino, sin repetirse. Se retiró `CtaSection` y `DestacadosMarket`. "Consulta de
+   placa" salió de Header, Footer y barra móvil (stand-by; rutas `/consultar*` y
+   backend intactos); "Inicio" ocupa el hueco en la barra móvil. Footer a 2 columnas
+   (sin "Fuentes oficiales").
+2. **Antigüedad + renovación de publicaciones** (backend `be2a42d` + frontend
+   `8fd2b6e`). Migración `0026`: `publicaciones_internas.renovada_en` (columna propia,
+   sin `onupdate` — solo la mueve el endpoint de renovación, así una edición de precio
+   no "renueva" solo). Feed y `/buscar` mandan **al final** las publicaciones con 3+
+   semanas sin renovar (`vigente` es la clave keyset de más peso; el cursor gana la
+   clave `v`, con back-compat). `POST /marketplace/publicaciones/{id}/renovar` — dueño
+   (404), solo activa (422), solo si ya venció (422), no cobra. Frontend: "Publicado
+   hace N semanas" en tarjetas y detalle; botón "Renovar anuncio" en
+   `mis-publicaciones` cuando `puede_renovar`. `SEMANAS_VIGENCIA_PUBLICACION` = 3
+   (env `PUBLICACION_SEMANAS_VIGENCIA`). `tests/test_renovacion_publicacion.py` (15
+   casos). Suite: 159 OK.
+3. **Seed demo** (`scripts/seed_demo.py`, `4a2fc7d`). 100 publicaciones internas
+   (80 light / 20 premium), 65 fichas, 218 fotos, cuenta `demo-seed@carstore.local`,
+   sembradas contra Neon. Idempotente y reversible (`--borrar`). SQLAlchemy Core (no
+   ORM) para no depender de que modelo y migraciones estén sincronizados.
+4. **Sistema visual "Grafito"** (`2bffea9`). Marcos rechazó naranja → esmeralda →
+   azul → teal→verde. Paleta **casi monocroma en grafito**: sin color de marca
+   cromático, la acción es un sólido que **invierte con el tema** (`--accion` =
+   `--oscuro`), `--marca` = gris templado. `@theme` (no `inline`) + tres bloques de
+   override para los tres estados de tema. **Modo oscuro con toggle**
+   (`ThemeToggle.tsx` + no-flash en `layout.tsx`, `localStorage.tema`,
+   `useSyncExternalStore`). Barrido `text-white → text-superficie`. Gradiente de marca
+   retirado. Detalle en `DISENO.md §0` (reescrito). `AGENTS.md §4` actualizado.
+
+**Verificación**
+- Frontend: `tsc` + `next build` OK en cada commit. `npm run lint` limpio salvo ruido
+  de `.claude/worktrees/*/.next` (build generado de una tarea en background; los
+  archivos fuente tocados lintean limpio).
+- Backend: `python -m unittest discover tests` → 159 OK. `import main` OK, ruta
+  `/marketplace/publicaciones/{id}/renovar` registrada.
+- **Migración 0026 en Neon:** aplicada por el `CMD` de Render en el deploy
+  (`alembic upgrade head && python run.py`). En local: `alembic upgrade head`.
+
+**Pendientes**
+- Verificar "Grafito" en pantalla (claro + oscuro) — el navegador embebido no
+  respondió esta sesión; queda pendiente el visual real.
+- Legibilidad del detalle del anuncio ("resulta pesada de leer") — no abordada aún.
+- `precio_usd.toLocaleString` sobre string en `mis-publicaciones` (tarea en background).
+
+---
+
 ## 2026-08-27 — Dirección C: nuevo sistema visual "App limpia"
 
 **Repo:** frontend `consulta-placas-web`, rama `feat/diseno-c` (sobre `main`, que ya tiene

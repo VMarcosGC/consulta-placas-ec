@@ -218,7 +218,7 @@ Ver detalle de deploy en [docs/despliegue.md](docs/despliegue.md) y skill [despl
 - [src/core/validators.py](src/core/validators.py) — `validar_placa`, `validar_cedula`, `validar_vin` (ISO 3779/3780).
 - [src/core/ofuscacion.py](src/core/ofuscacion.py) — `ofuscar_vin`, `decodificar_origen_vin`, tabla `PAISES_VIN` (WMI).
 - **Deploy**: Docker (imagen oficial de Playwright) en Render + Vercel para el frontend.
-- **Frontend**: Next.js 16 App Router + Tailwind 4 + tema oscuro con gradient brand. Landing comercial + consulta pública + auth + mi-garage + precios. Vive en repo separado [consulta-placas-web](https://github.com/VMarcosGC/consulta-placas-web).
+- **Frontend**: Next.js 16 App Router + Tailwind 4, sistema visual "Grafito" (casi monocromo, claro + oscuro con toggle — ver §4 y `DISENO.md §0`). Marketplace + auth + mi-garage. Vive en repo separado [consulta-placas-web](https://github.com/VMarcosGC/consulta-placas-web).
 
 ### Fase 3 — Billetera + Favoritos + Mantenimientos ✅ cerrada
 - **BD en Neon** (PostgreSQL 16, externa). Migraciones `0004`–`0006`. El Postgres de Render ya no se usa.
@@ -257,17 +257,22 @@ No saltar fases. Cada una asume las anteriores estables. Las reglas de negocio i
 - **Deploy**: Docker (imagen `mcr.microsoft.com/playwright/python:v1.48.0-jammy`) en Render.
 
 ### Frontend (repo `consulta-placas-web`)
-- **Marca**: **"CarStore Ec"** (monograma **CS**; gradiente azul→cian solo en el logo,
-  aplicado a "Store"). Rebrand 2026-08-27, junto con el nuevo sistema visual "Dirección C"
-  (ver `DISENO.md §0`). Marcas anteriores: "ConsultaPlacas" (2026-05-29) → "Revisa tu Carro
+- **Marca**: **"CarStore Ec"** — **wordmark tipográfico, sin monograma y sin gradiente**
+  ("CarStore" + "Ec" en volado; debajo, la leyenda "Tu garage local para comprar y vender").
+  Rebrand 2026-08-27. Marcas anteriores: "ConsultaPlacas" (2026-05-29) → "Revisa tu Carro
   EC" → "CarStore Ec". El nombre del repo/paquete (`consulta-placas-web`) NO cambia.
 - **Framework**: Next.js 16 (App Router, Turbopack, RSC).
-- **UI**: React 19 + Tailwind CSS 4 (theme inline con `@theme`).
-- **Tono visual**: **"Confianza clara"** — **tema claro** (fondo `#f6f8fc`), gradiente de marca
-  **azul → cian** (`--color-brand-from #2563eb → via #0ea5e9 → to #06b6d4`, en `src/app/globals.css`),
-  estados verde="al día" / ámbar / rojo="pendiente", sombras suaves (`.sombra-tarjeta`), glow
-  azul del hero (`.hero-glow`). Objetivo: serio y confiable pero atractivo, legible en celulares de
-  gama baja, pensado para público de clase media-baja. (Antes era tema oscuro neón violeta-rosa-ámbar.)
+- **UI**: React 19 + Tailwind CSS 4 con `@theme` (NO `@theme inline`: las utilidades
+  compilan a `var(--color-*)` para poder cambiar el tema en runtime).
+- **Tono visual**: **"Grafito"** (2026-08-27, ver `DISENO.md §0`) — marketplace **casi
+  monocromo**: neutros fríos de casi-blanco a casi-negro, **sin color de marca cromático**
+  (fuera el azul, fuera el verde de CTA). La **acción** es un sólido que **invierte con el
+  tema** (`--accion` = `--oscuro`: casi-negro en claro, casi-blanco en oscuro); CTA y
+  secundario se separan por forma, no por color. Único guiño cálido: `--marca` = gris
+  templado (placa, dato oficial, favorito). Estados verde/ámbar/vino desaturados. **Modo
+  oscuro con toggle** (`ThemeToggle.tsx` en el Header + no-flash en `layout.tsx`;
+  `localStorage.tema`; respeta `prefers-color-scheme` sin elección). Legible en celulares
+  de gama baja, público de clase media-baja. Gradiente de marca **retirado**.
 - **Vista de resultados**: `PerfilVehiculo.tsx` consume el **perfil consolidado** del backend
   (`GET /consultar/{placa}/perfil` → `VehiculoConsolidadoResponse`) y lo pinta por secciones
   temáticas (Identificación, Valores, Multas, Legal). Las fuentes no oficiales se marcan con
