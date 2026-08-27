@@ -8,8 +8,8 @@ Este archivo es la fuente de verdad para cualquier agente o desarrollador que to
 
 ## 1. Propósito del proyecto
 
-`consulta_placas_ec` (Revisa tu Carro EC) es un **marketplace de autos usados
-para Ecuador** cuya propuesta de valor es la transparencia: el comprador ve la
+`consulta_placas_ec` (marca comercial **CarStore Ec**) es un **marketplace de autos
+usados para Ecuador** cuya propuesta de valor es la transparencia: el comprador ve la
 ficha declarada por el vendedor junto a datos oficiales de fuentes públicas.
 
 Público objetivo: compradores y vendedores particulares de clase media-baja,
@@ -257,8 +257,10 @@ No saltar fases. Cada una asume las anteriores estables. Las reglas de negocio i
 - **Deploy**: Docker (imagen `mcr.microsoft.com/playwright/python:v1.48.0-jammy`) en Render.
 
 ### Frontend (repo `consulta-placas-web`)
-- **Marca**: **"Revisa tu Carro EC"** (monograma RC). Rebranding desde "ConsultaPlacas" (2026-05-29).
-  Se descartó "Carro Seguro EC" por su ambigüedad con seguro/póliza.
+- **Marca**: **"CarStore Ec"** (monograma **CS**; gradiente azul→cian solo en el logo,
+  aplicado a "Store"). Rebrand 2026-08-27, junto con el nuevo sistema visual "Dirección C"
+  (ver `DISENO.md §0`). Marcas anteriores: "ConsultaPlacas" (2026-05-29) → "Revisa tu Carro
+  EC" → "CarStore Ec". El nombre del repo/paquete (`consulta-placas-web`) NO cambia.
 - **Framework**: Next.js 16 (App Router, Turbopack, RSC).
 - **UI**: React 19 + Tailwind CSS 4 (theme inline con `@theme`).
 - **Tono visual**: **"Confianza clara"** — **tema claro** (fondo `#f6f8fc`), gradiente de marca
