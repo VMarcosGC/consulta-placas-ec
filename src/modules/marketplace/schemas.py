@@ -6,12 +6,13 @@ defecto el portador solo ve las características del auto (ofuscadas, vía
 historial privado en la vista compartida (`VehiculoCompartidoSalida`).
 """
 
-from datetime import date, datetime
+import os
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
 from urllib.parse import quote, urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from src.core.ofuscacion import ofuscar_identificador
 from src.core.validators import validar_placa
@@ -28,6 +29,31 @@ from src.modules.marketplace.models import (
 
 # TTL máximo del enlace (regla 10.6 y skill modelo-dominio-vehiculo).
 DIAS_VALIDEZ_MAX = 7
+
+# Vigencia de un anuncio: a las N semanas sin renovar cae al final del feed y de la
+# búsqueda, y el dueño ve "Renovar" (si sigue activo). Empuja a depurar data vieja sin
+# borrar nada (decisión Marcos 2026-08-27). Env-overridable por si el umbral queda corto
+# o largo. Es la MISMA constante que usa el router (la importa de acá: una sola fuente).
+SEMANAS_VIGENCIA_PUBLICACION = int(os.getenv("PUBLICACION_SEMANAS_VIGENCIA", "3"))
+
+
+def semanas_desde_publicacion(momento: datetime) -> int:
+    """Semanas COMPLETAS desde `momento` hasta ahora (>= 0). 0 = esta semana.
+
+    Tolera `momento` naïve (se asume UTC): en pruebas se arman modelos a mano sin
+    pasar por la BD, así que la tz-awareness no está garantizada.
+    """
+    if momento.tzinfo is None:
+        momento = momento.replace(tzinfo=timezone.utc)
+    dias = (datetime.now(timezone.utc) - momento).days
+    return max(0, dias // 7)
+
+
+def publicacion_vigente(momento: datetime) -> bool:
+    """True mientras el anuncio no haya cumplido `SEMANAS_VIGENCIA_PUBLICACION`
+    semanas sin renovar. `momento` es `renovada_en` (internas) o `creado_en` (ref.)."""
+    return semanas_desde_publicacion(momento) < SEMANAS_VIGENCIA_PUBLICACION
+
 
 # Secciones del historial privado que el scope puede habilitar (opt-in).
 SCOPE_PERMITIDO = {"kilometraje", "mantenimientos", "duenos_historico"}
@@ -312,6 +338,16 @@ class PublicacionInternaSalida(BaseModel):
     # El router carga `fotos` con selectinload para evitar N+1.
     foto_portada: str | None = None
     creado_en: datetime
+    # Antigüedad del anuncio (migración 0026). `renovada_en` es publicación o última
+    # renovación; el frontend pinta "hace N semanas" desde ahí. `vigente=False` = ya
+    # cumplió `SEMANAS_VIGENCIA_PUBLICACION` semanas sin renovar → el feed y la
+    # búsqueda lo mandan al final. `puede_renovar` = el dueño puede volver a ponerlo
+    # al frente (solo si además está `activa`); es data derivada, no expone nada
+    # privado, pero el frontend solo muestra el botón en las vistas del dueño.
+    renovada_en: datetime
+    semanas_publicada: int = 0
+    vigente: bool = True
+    puede_renovar: bool = False
 
     @classmethod
     def desde_modelo(cls, p: PublicacionInterna) -> "PublicacionInternaSalida":
@@ -359,6 +395,15 @@ class PublicacionInternaSalida(BaseModel):
             # la primera es la portada. El router lo carga con selectinload (sin N+1).
             foto_portada=(p.fotos[0].url if p.fotos else None),
             creado_en=p.creado_en,
+            # `renovada_en` puede venir None en pruebas (modelos armados a mano sin
+            # pasar por la BD, donde el server_default no corre): se cae a `creado_en`.
+            renovada_en=(p.renovada_en or p.creado_en),
+            semanas_publicada=semanas_desde_publicacion(p.renovada_en or p.creado_en),
+            vigente=publicacion_vigente(p.renovada_en or p.creado_en),
+            puede_renovar=(
+                p.estado == EstadoPublicacion.ACTIVA.value
+                and not publicacion_vigente(p.renovada_en or p.creado_en)
+            ),
         )
 
 
@@ -506,6 +551,21 @@ class PublicacionReferenciadaSalida(BaseModel):
     estado_moderacion: EstadoModeracion
     activa: bool
     creado_en: datetime
+
+    # Antigüedad (migración 0026): una referencia externa también envejece. No se
+    # "renueva" (la trae un aportante, no el vendedor), pero SÍ cae al final del feed
+    # y de la búsqueda al perder vigencia. Se deriva de `creado_en` (no hay
+    # `renovada_en`). Mismo par de campos que `PublicacionInternaSalida`, para que la
+    # tarjeta del feed los lea igual en las dos entidades.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def semanas_publicada(self) -> int:
+        return semanas_desde_publicacion(self.creado_en)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def vigente(self) -> bool:
+        return publicacion_vigente(self.creado_en)
 
 
 class ModeracionReferencia(BaseModel):

@@ -16,7 +16,7 @@ Solo toca la BD propia (nunca invoca scraping, §10.2).
 import base64
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -64,9 +64,11 @@ from src.modules.marketplace.schemas import (
     PublicacionInternaSalida,
     PublicacionReferenciadaSalida,
     ResultadoBusquedaSalida,
+    SEMANAS_VIGENCIA_PUBLICACION,
     TipoCarroceria,
     Transmision,
     VerificacionPublicacion,
+    semanas_desde_publicacion,
 )
 from src.modules.marketplace.services import cloudinary
 
@@ -400,6 +402,52 @@ def eliminar_publicacion(
 
 
 @router.post(
+    "/publicaciones/{publicacion_id}/renovar",
+    response_model=PublicacionInternaSalida,
+)
+def renovar_publicacion(
+    publicacion_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: Usuario = Depends(usuario_actual),
+):
+    """El dueño RENUEVA su anuncio: lo vuelve a poner al frente del feed y de la búsqueda.
+
+    Efecto: `renovada_en = now()`. No toca `creado_en` ni cobra (§1.0.3).
+
+    - Solo el dueño (404 indistinto si no existe o no es suya).
+    - Solo si está `activa` (422 si borrador/pausada/vendida: renovar algo que nadie ve
+      no tiene sentido; primero se reactiva). Esto es el "siempre que el vehículo aún
+      esté activo" de la decisión de producto.
+    - Solo si YA perdió vigencia (`>= SEMANAS_VIGENCIA_PUBLICACION` semanas sin renovar).
+      422 si todavía está vigente: renovar no es un atajo para saltar la cola, es el
+      remedio de un anuncio que quedó viejo.
+    """
+    pub = _mi_publicacion(sesion, publicacion_id, usuario)
+
+    if pub.estado != EstadoPublicacion.ACTIVA.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Solo puedes renovar un anuncio activo. Reactívalo primero.",
+        )
+
+    referencia = pub.renovada_en or pub.creado_en
+    if semanas_desde_publicacion(referencia) < SEMANAS_VIGENCIA_PUBLICACION:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Tu anuncio sigue vigente. Podrás renovarlo cuando cumpla "
+                f"{SEMANAS_VIGENCIA_PUBLICACION} semanas sin cambios."
+            ),
+        )
+
+    pub.renovada_en = datetime.now(timezone.utc)
+    sesion.commit()
+    return PublicacionInternaSalida.desde_modelo(
+        _mi_publicacion(sesion, pub.id, usuario)
+    )
+
+
+@router.post(
     "/publicaciones/{publicacion_id}/solicitar-verificacion",
     response_model=PublicacionInternaSalida,
 )
@@ -451,6 +499,11 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
 
     Solo lista publicaciones internas `activa`. Eager-load del vehículo+mantenimientos
     (selectinload) para derivar los argumentos premium sin N+1.
+
+    Dentro de cada nivel, los anuncios que perdieron vigencia (`vigente=False`: N
+    semanas sin renovar) caen AL FINAL. El sort es estable, así que la recencia manda
+    dentro de cada grupo. No se ocultan: siguen visibles, solo dejan de competir por
+    la parte de arriba (decisión 2026-08-27, depuración de data vieja).
     """
     activas = (
         select(PublicacionInterna)
@@ -474,6 +527,9 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
         for p in internas
         if p.plan != PlanPublicacion.PREMIUM.value
     ]
+    # Rezagadas al final de su nivel (sort estable: no reordena dentro del grupo).
+    premium.sort(key=lambda s: not s.vigente)
+    estandar.sort(key=lambda s: not s.vigente)
 
     referenciadas = (
         sesion.execute(
@@ -491,11 +547,15 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
         .scalars()
         .all()
     )
+    referenciadas_salida = [
+        PublicacionReferenciadaSalida.model_validate(r) for r in referenciadas
+    ]
+    referenciadas_salida.sort(key=lambda s: not s.vigente)
 
     return FeedMarketplaceSalida(
         premium=premium,
         estandar=estandar,
-        referenciadas=[PublicacionReferenciadaSalida.model_validate(r) for r in referenciadas],
+        referenciadas=referenciadas_salida,
     )
 
 
@@ -506,8 +566,13 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
 # el offset se degrada con el volumen y el reel de la app —MC3— necesita paginación
 # estable). Público/anónimo: el comprador no necesita cuenta. Solo BD propia (§10.2).
 #
-# ORDEN de la lista (monetización + recencia):
-#     destacado DESC, creado_en DESC, fuente_orden ASC (internas=0, referenciadas=1), id DESC
+# ORDEN de la lista (vigencia + monetización + recencia):
+#     vigente DESC, destacado DESC, creado_en DESC, fuente_orden ASC (internas=0,
+#     referenciadas=1), id DESC
+# `vigente` es la clave NUEVA de más peso (2026-08-27): un anuncio con N semanas sin
+# renovar (`coalesce(renovada_en, creado_en)` para internas, `creado_en` para
+# referenciadas, contra `now() - N semanas`) cae por debajo de TODOS los vigentes,
+# premium incluidos. Dentro de cada mitad el orden anterior se mantiene igual.
 # Las referenciadas se tratan como destacado=False, así caen debajo de las premium pero
 # se intercalan con las light por fecha.
 
@@ -520,26 +585,34 @@ FUENTE_INTERNA = 0
 FUENTE_REFERENCIADA = 1
 
 
-def _codificar_cursor(destacado: bool, creado_en: datetime, fuente: int, id_: int) -> str:
+def _codificar_cursor(
+    vigente: bool, destacado: bool, creado_en: datetime, fuente: int, id_: int
+) -> str:
     """Serializa la posición de la ÚLTIMA fila de la página a un token opaco (base64).
 
-    Claves cortas para no inflar el token: d=destacado, c=creado_en ISO, f=fuente_orden,
-    i=id. El ISO preserva microsegundos y offset, así el `==` del keyset casa exacto.
+    Claves cortas para no inflar el token: v=vigente, d=destacado, c=creado_en ISO,
+    f=fuente_orden, i=id. El ISO preserva microsegundos y offset, así el `==` del keyset
+    casa exacto.
     """
     crudo = json.dumps(
-        {"d": destacado, "c": creado_en.isoformat(), "f": fuente, "i": id_},
+        {"v": vigente, "d": destacado, "c": creado_en.isoformat(), "f": fuente, "i": id_},
         separators=(",", ":"),
     )
     return base64.urlsafe_b64encode(crudo.encode("utf-8")).decode("ascii")
 
 
-def _decodificar_cursor(cursor: str) -> tuple[bool, datetime, int, int]:
+def _decodificar_cursor(cursor: str) -> tuple[bool, bool, datetime, int, int]:
     """Decodifica el cursor opaco. Cursor corrupto/ilegible → ValueError (el endpoint
-    lo traduce a 400: es un error de FORMATO, no de negocio)."""
+    lo traduce a 400: es un error de FORMATO, no de negocio).
+
+    Cursores emitidos antes de la clave `vigente` (migración 0026) no traen `v`: se
+    asumen `vigente=True` para no romper una paginación en curso — a lo sumo el
+    usuario ve una vez más algún anuncio que ya cruzó el umbral entre páginas."""
     try:
         crudo = base64.urlsafe_b64decode(cursor.encode("ascii"))
         datos = json.loads(crudo)
         return (
+            bool(datos.get("v", True)),
             bool(datos["d"]),
             datetime.fromisoformat(datos["c"]),
             int(datos["f"]),
@@ -583,8 +656,15 @@ def buscar_publicaciones(
     """
     hay_filtro_ficha = tipo is not None or combustible is not None or transmision is not None
 
+    # Corte de vigencia: un timestamp fijo para todo el request (no `now()` por fila),
+    # así el keyset entre páginas es estable. Un anuncio con `renovada_en` / `creado_en`
+    # ANTERIOR a este corte ya lleva N semanas sin renovar → `vigente=False`.
+    umbral_vigencia = datetime.now(timezone.utc) - timedelta(
+        weeks=SEMANAS_VIGENCIA_PUBLICACION
+    )
+
     # ── Paso 1: KEYSET sobre una proyección liviana ──────────────────────────────
-    # Se proyectan solo las 4 columnas de ordenamiento/keyset + el (fuente, id) que
+    # Se proyectan solo las columnas de ordenamiento/keyset + el (fuente, id) que
     # identifica la fila para hidratarla después. Los filtros se aplican DENTRO de cada
     # rama del UNION (antes de unir), así cada rama filtra por sus propias columnas.
 
@@ -592,6 +672,7 @@ def buscar_publicaciones(
     sel_internas = select(
         literal(FUENTE_INTERNA).label("fuente"),
         PublicacionInterna.id.label("id"),
+        (PublicacionInterna.renovada_en >= umbral_vigencia).label("vigente"),
         PublicacionInterna.destacado.label("destacado"),
         PublicacionInterna.creado_en.label("creado_en"),
     ).where(PublicacionInterna.estado == EstadoPublicacion.ACTIVA.value)
@@ -647,6 +728,7 @@ def buscar_publicaciones(
         sel_ref = select(
             literal(FUENTE_REFERENCIADA).label("fuente"),
             PublicacionReferenciada.id.label("id"),
+            (PublicacionReferenciada.creado_en >= umbral_vigencia).label("vigente"),
             literal(False).label("destacado"),
             PublicacionReferenciada.creado_en.label("creado_en"),
         ).where(
@@ -675,30 +757,42 @@ def buscar_publicaciones(
 
     u = (union_all(*ramas) if len(ramas) > 1 else ramas[0]).subquery("u")
 
-    consulta = select(u.c.fuente, u.c.id, u.c.destacado, u.c.creado_en)
+    consulta = select(u.c.fuente, u.c.id, u.c.vigente, u.c.destacado, u.c.creado_en)
 
     # Keyset: filas ESTRICTAMENTE después del cursor en el orden
-    # (destacado DESC, creado_en DESC, fuente ASC, id DESC). Como fuente ordena ASC
-    # mientras el resto DESC, NO cabe un row-value único: se expande por niveles.
+    # (vigente DESC, destacado DESC, creado_en DESC, fuente ASC, id DESC). `vigente` y
+    # `destacado` son Boolean y ordenan DESC mientras `fuente` ordena ASC, así que NO
+    # cabe un row-value único: se expande por niveles, cada nivel anclado en el/los
+    # anterior(es) por igualdad.
     if cursor is not None:
         try:
-            c_dest, c_creado, c_fuente, c_id = _decodificar_cursor(cursor)
+            c_vig, c_dest, c_creado, c_fuente, c_id = _decodificar_cursor(cursor)
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
             )
         consulta = consulta.where(
             or_(
-                # destacado es Boolean: SQLAlchemy no permite `<` con un literal bool, así
-                # que se compara como entero (false=0 < true=1) para el "viene después".
-                cast(u.c.destacado, Integer) < (1 if c_dest else 0),
-                and_(u.c.destacado == c_dest, u.c.creado_en < c_creado),
+                # Boolean: SQLAlchemy no permite `<` con un literal bool, así que se
+                # compara como entero (false=0 < true=1) para el "viene después".
+                cast(u.c.vigente, Integer) < (1 if c_vig else 0),
                 and_(
+                    u.c.vigente == c_vig,
+                    cast(u.c.destacado, Integer) < (1 if c_dest else 0),
+                ),
+                and_(
+                    u.c.vigente == c_vig,
+                    u.c.destacado == c_dest,
+                    u.c.creado_en < c_creado,
+                ),
+                and_(
+                    u.c.vigente == c_vig,
                     u.c.destacado == c_dest,
                     u.c.creado_en == c_creado,
                     u.c.fuente > c_fuente,
                 ),
                 and_(
+                    u.c.vigente == c_vig,
                     u.c.destacado == c_dest,
                     u.c.creado_en == c_creado,
                     u.c.fuente == c_fuente,
@@ -708,7 +802,11 @@ def buscar_publicaciones(
         )
 
     consulta = consulta.order_by(
-        u.c.destacado.desc(), u.c.creado_en.desc(), u.c.fuente.asc(), u.c.id.desc()
+        u.c.vigente.desc(),
+        u.c.destacado.desc(),
+        u.c.creado_en.desc(),
+        u.c.fuente.asc(),
+        u.c.id.desc(),
     ).limit(limite + 1)  # +1 detecta si hay página siguiente sin un COUNT aparte
 
     filas = sesion.execute(consulta).all()
@@ -779,7 +877,11 @@ def buscar_publicaciones(
     if hay_mas and filas_pagina:
         ultima = filas_pagina[-1]
         siguiente_cursor = _codificar_cursor(
-            bool(ultima.destacado), ultima.creado_en, int(ultima.fuente), int(ultima.id)
+            bool(ultima.vigente),
+            bool(ultima.destacado),
+            ultima.creado_en,
+            int(ultima.fuente),
+            int(ultima.id),
         )
 
     return ResultadoBusquedaSalida(items=items, siguiente_cursor=siguiente_cursor)
