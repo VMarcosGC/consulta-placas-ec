@@ -5,10 +5,12 @@ placa, plan light/premium) y `PublicacionReferenciada` (anuncios raspados de por
 externos). El feed público las mezcla en tres niveles: premium destacados arriba, luego
 light, y referenciados al pie.
 
-Cobro: publicar/ascender a **premium** debita `TOKENS_PUBLICACION_PREMIUM` tokens. Si el
-saldo no alcanza → **402 Payment Required** (excepción acordada al contrato 422 de §10.2,
-por ser un flujo de pago, igual que el desbloqueo de perfil). Solo toca la BD propia
-(nunca invoca scraping, §10.2).
+**Monetización suspendida (§1.0.3): TODO el flujo del market es gratis.** `premium` hoy
+es solo "destacado" y elegible para el sello de verificación; no cuesta nada. Los costos
+en tokens quedan como constantes en **0** (env-overridables) para reactivar el cobro sin
+tocar la lógica: el débito sigue cableado y atómico, `debitar_tokens(0)` es un no-op.
+Dónde y cuánto se cobra se decide cuando el producto esté operando con usuarios reales.
+Solo toca la BD propia (nunca invoca scraping, §10.2).
 """
 
 import base64
@@ -71,12 +73,13 @@ from src.modules.marketplace.services import cloudinary
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
 
-# Tokens que cuesta destacar una publicación como premium. Configurable.
-TOKENS_PUBLICACION_PREMIUM = int(os.getenv("TOKENS_PUBLICACION_PREMIUM", "3"))
-# Tokens que cuesta SOLICITAR la verificación "Verificado por la plataforma" (revisión
-# humana + validaciones). Separado del premium: destacar (3) ≠ verificar (100).
-# Alineado con el producto `verificacion_marketplace` del catálogo (1 token ≈ USD 0.04).
-TOKENS_VERIFICACION_MARKETPLACE = int(os.getenv("TOKENS_VERIFICACION_MARKETPLACE", "100"))
+# Costo en tokens de destacar una publicación como premium.
+# Monetización suspendida (§1.0.3) → 0. La constante y el débito quedan cableados: subir
+# este valor (o el env var) reactiva el cobro sin más cambios.
+TOKENS_PUBLICACION_PREMIUM = int(os.getenv("TOKENS_PUBLICACION_PREMIUM", "0"))
+# Costo en tokens de SOLICITAR la verificación "Verificado por la plataforma" (revisión
+# humana + validaciones). Monetización suspendida (§1.0.3) → 0. Mismo criterio que arriba.
+TOKENS_VERIFICACION_MARKETPLACE = int(os.getenv("TOKENS_VERIFICACION_MARKETPLACE", "0"))
 
 # Cuántos anuncios referenciados se traen al feed (para no inflar la respuesta).
 LIMITE_REFERENCIADAS_FEED = 30
@@ -220,15 +223,14 @@ def crear_publicacion(
     sesion: Session = Depends(obtener_sesion),
     usuario: Usuario = Depends(usuario_actual),
 ):
-    """Crea la publicación como **BORRADOR** (M2.8). No cobra nada todavía.
+    """Crea la publicación como **BORRADOR** (M2.8).
 
     El borrador solo lo ve su dueño: no sale en el feed ni por la URL pública (404). El
     vendedor arma la ficha y las fotos con calma y luego lo publica con
-    `PATCH .../{id}` enviando `estado: activa`, que valida el umbral de ficha y **ahí sí**
-    cobra el premium.
+    `PATCH .../{id}` enviando `estado: activa`, que valida el umbral de ficha.
 
-    Por qué el cobro se movió a la activación: antes se debitaba al crear, así que un
-    borrador abandonado dejaba al usuario sin tokens por un anuncio que nadie vio.
+    Monetización suspendida (§1.0.3): premium no cuesta nada. El punto de cobro (la
+    activación) queda cableado en `actualizar_publicacion` para cuando se reactive.
     """
     # Validar propiedad del vehículo vinculado (si se envió).
     if datos.vehiculo_id is not None:
@@ -329,12 +331,13 @@ def actualizar_publicacion(
     a premium.
 
     **Transición `borrador → activa` (M2.8):** exige que la ficha llegue a
-    `UMBRAL_FICHA_PUBLICACION` (422 si no) y es el momento en que se **cobra el premium**.
-    No se puede volver a `borrador` desde otro estado: gracias a eso el cobro es
-    exactamente-una-vez y re-activar tras una pausa nunca vuelve a debitar.
+    `UMBRAL_FICHA_PUBLICACION` (422 si no). No se puede volver a `borrador` desde otro
+    estado: gracias a eso el punto de cobro es exactamente-una-vez y re-activar tras una
+    pausa nunca vuelve a debitar.
 
-    Bajar de premium a light no reembolsa y quita el destacado. Subir a premium cobra
-    `TOKENS_PUBLICACION_PREMIUM` (402 si no alcanza).
+    Monetización suspendida (§1.0.3): subir a premium es gratis y solo activa el destacado;
+    bajar a light lo quita. El débito (`TOKENS_PUBLICACION_PREMIUM`, hoy 0) y su rama 402
+    quedan cableados en `_cobrar_premium` para cuando se reactive.
     """
     pub = _mi_publicacion(sesion, publicacion_id, usuario)
 
@@ -407,8 +410,9 @@ def solicitar_verificacion(
     - Solo el dueño (404 si no es suya).
     - Solo premium (422 si es light: primero hay que destacarla).
     - Si ya está `pendiente` o `verificado` → idempotente (no recobra).
-    - Cobra `TOKENS_VERIFICACION_MARKETPLACE`; **402** si no alcanza. Deja la publicación
-      en `pendiente` → entra a la cola admin (`/admin/verificaciones`).
+    - Deja la publicación en `pendiente` → entra a la cola admin (`/admin/verificaciones`).
+    - Monetización suspendida (§1.0.3): gratis. El débito (`TOKENS_VERIFICACION_MARKETPLACE`,
+      hoy 0) y su rama 402 quedan cableados para cuando se reactive.
     """
     pub = _mi_publicacion(sesion, publicacion_id, usuario)
     if pub.plan != PlanPublicacion.PREMIUM.value:

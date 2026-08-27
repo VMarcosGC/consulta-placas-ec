@@ -9,6 +9,7 @@
 Solo toca la BD propia; nunca invoca scraping.
 """
 
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -31,10 +32,9 @@ from src.modules.tokens.service import debitar_tokens, SaldoInsuficiente
 router = APIRouter(tags=["compartir"])
 
 # Costo en tokens de generar un enlace de compra-venta.
-# MVP: 0 (gratis) para no poner fricción a la captación de usuarios; el mecanismo
-# de débito ya queda cableado y atómico. Subir esta constante activa el cobro sin
-# más cambios. Ver reglas de negocio 10.3 (CLAUDE.md).
-COSTO_COMPARTIR_TOKENS = 0
+# Monetización suspendida (§1.0.3) → 0 (gratis). El mecanismo de débito queda cableado y
+# atómico; subir esta constante reactiva el cobro sin más cambios. Ver §10.3.
+COSTO_COMPARTIR_TOKENS = int(os.getenv("COSTO_COMPARTIR_TOKENS", "0"))
 
 
 @router.post(
@@ -54,8 +54,11 @@ def crear_enlace_compartido(
             sesion, vehiculo.usuario, COSTO_COMPARTIR_TOKENS, motivo="compartir_enlace"
         )
     except SaldoInsuficiente as e:
+        # Flujo de pago con tokens → 402, no 422 (excepción de contrato §10.2, igual que
+        # el desbloqueo de perfil y el premium del marketplace). Latente mientras el
+        # costo sea 0; correcto cuando se reactive el cobro.
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e)
         )
 
     enlace = EnlaceCompartido(

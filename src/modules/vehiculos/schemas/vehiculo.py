@@ -152,34 +152,8 @@ class VehiculoSalidaPublica(_VehiculoBase):
     """Vista mínima: sin VIN/motor/chasis. Para listados anónimos o resúmenes."""
     pass
 
-
-class VehiculoSalidaMarketplace(_VehiculoBase):
-    """Vista pública del Marketplace (regla 10.6).
-
-    Nunca expone el VIN completo (solo país de origen, nivel `oculto`) ni el
-    nombre del dueño. Publica características del auto, precio, url de contacto y
-    un indicador de cuán documentado está el historial (conteo de mantenimientos).
-    """
-    precio_venta_usd: Decimal
-    url_externa: str | None
-    vin: IdentificadorOfuscado
-    total_mantenimientos: int
-
-    @classmethod
-    def desde_modelo(cls, vehiculo) -> "VehiculoSalidaMarketplace":
-        return cls(
-            id=vehiculo.id,
-            placa=vehiculo.placa,
-            marca=vehiculo.marca,
-            modelo=vehiculo.modelo,
-            anio=vehiculo.anio,
-            color=vehiculo.color,
-            transmision=vehiculo.transmision,
-            tipo_motor=vehiculo.tipo_motor,
-            ciudad_registro=vehiculo.ciudad_registro,
-            creado_en=vehiculo.creado_en,
-            precio_venta_usd=vehiculo.precio_venta_usd,
-            url_externa=vehiculo.url_externa,
-            vin=IdentificadorOfuscado(**ofuscar_vin(vehiculo.vin, nivel="oculto")),
-            total_mantenimientos=len(vehiculo.mantenimientos),
-        )
+# `VehiculoSalidaMarketplace` (y el endpoint `GET /marketplace` sobre `Vehiculo.en_venta`)
+# se retiraron: el market vive en `PublicacionInterna`/`PublicacionReferenciada` con
+# `GET /marketplace/feed` y `/marketplace/buscar`. Las columnas `en_venta`/
+# `precio_venta_usd`/`url_externa` de `Vehiculo` quedan en el modelo (sin migración de
+# borrado) pero ya no alimentan ningún listado público.

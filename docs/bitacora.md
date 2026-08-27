@@ -21,6 +21,57 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-27 — Cierre, ola 1: fuera todo precio y costo del market
+
+**Repos:** backend `consulta_placas_ec` (rama `chore/cierre-market-sin-precios`) +
+frontend `consulta-placas-web` (agente `dev-frontend`). Primera tanda del plan de cierre
+que salió de la auditoría del 2026-08-27. **Sin merge todavía.**
+
+**Decisión de Marcos.** La monetización se suspende **en la superficie del producto**, no
+solo en la documentación: nada de precios, costos, tokens ni "paga para…" visible. El
+foco es el market; la consulta por placa y "dónde colocar costos" se retoman más adelante.
+Origen: `AGENTS.md §1.0.3` decía "todos los precios están en 0" mientras el código de
+market cobraba 3–100 tokens y `/precios` vendía paquetes — contradicción doc ↔ código.
+
+### Backend (hecho, verificado)
+
+- `TOKENS_PUBLICACION_PREMIUM`, `TOKENS_VERIFICACION_MARKETPLACE` (`publicaciones.py`) y
+  `COSTO_COMPARTIR_TOKENS` (`compartidos.py`) → **0**, env-overridables. Con
+  `debitar_tokens(0)` como no-op, publicar premium / solicitar verificación / compartir
+  quedan gratis sin tocar la lógica: el débito sigue cableado y atómico, subir el valor
+  reactiva el cobro. Docstrings corregidos (ya no afirman "cobra N tokens").
+- `compartidos.py`: `SaldoInsuficiente` → **402** (era 422). Cierra **TASK-005**: es un
+  flujo de pago, va con la excepción de contrato de §10.2. Latente mientras el costo sea 0.
+- **Se retiró el endpoint legacy `GET /marketplace`** (`routers/marketplace.py`, sobre
+  `Vehiculo.en_venta`/`precio_venta_usd`). Estaba huérfano: el frontend usa
+  `/marketplace/feed` y `/marketplace/buscar` (`PublicacionInterna`/`Referenciada`).
+  También se quitó `VehiculoSalidaMarketplace` (su único consumidor). Las columnas
+  `en_venta`/`precio_venta_usd`/`url_externa` de `Vehiculo` quedan en el modelo (sin
+  migración de borrado); ya no alimentan ningún listado.
+- **Sin migración** (`alembic heads` = `0025`, cabeza única). La tabla `productos_consulta`
+  **no se tocó**: sigue con tokens > 0 en BD, dormida y sin UI que la alcance. Se pondrá
+  en 0 (migración) cuando se retome la consulta por placa. Anotado en `AGENTS.md §1.0.3`.
+
+**Verificación:** `import main` → **69 rutas** (antes 70; −1 por el endpoint retirado);
+`GET /marketplace` exacto ya no existe (comprobado sobre `app.routes`); `alembic heads` →
+`0025`; `python -m unittest discover tests` → **142 tests OK**.
+
+### Frontend (en curso — agente `dev-frontend`)
+
+Quitar `/precios` y sus entradas de nav; eliminar `TokenBadge` y todo "N tokens / recarga";
+plan premium y "solicitar verificación" presentados como gratis; retirar la sección de
+microdesbloqueos de la consulta por placa (la consulta sigue, gratis); limpiar los 4
+errores de lint `set-state-in-effect` preexistentes. Verificación pedida: `tsc --noEmit`
+limpio, `npm run lint` = 0, `npm run build` OK.
+
+**Pendientes de esta ola**
+- Merge de ambos repos tras revisar el frontend.
+- `AGENTS.md §1.0.3` ya refleja el estado aplicado; regenerar `proyecto-snapshot.md`
+  (está de 2026-06-01) queda para el cierre de la ola.
+- La deuda del catálogo `productos_consulta` (tokens > 0 en BD) queda anotada, no urgente.
+
+---
+
 ## 2026-08-26 — TASK-017 fase 2: dos rutas que solo existían si sabías la URL
 
 **Repo:** frontend `consulta-placas-web`, commits `d7d5f6d`, `dc421c4`, `eef7498`.

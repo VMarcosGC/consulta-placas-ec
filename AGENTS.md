@@ -79,7 +79,22 @@ compone datos que un segundo cliente tendría que reimplementar (§4).
 ### 1.0.3 Monetización: suspendida, no eliminada
 
 El mecanismo de tokens permanece implementado y funcional (`debitar_tokens`,
-catálogo versionado, idempotencia por UK) pero **todos los precios están en 0**.
+catálogo versionado, idempotencia por UK) pero **todos los precios están en 0** y
+**las superficies de precio/costo salieron de la UI** (decisión de Marcos,
+2026-08-27: "nada de precios ni costos hasta que la app opere con usuarios reales").
+
+Estado aplicado (2026-08-27, ciclo de cierre):
+
+- `TOKENS_PUBLICACION_PREMIUM`, `TOKENS_VERIFICACION_MARKETPLACE` y
+  `COSTO_COMPARTIR_TOKENS` → **0** (env-overridables). Publicar premium, solicitar
+  verificación y compartir son gratis; `debitar_tokens(0)` es un no-op y las ramas
+  402 quedan cableadas pero inalcanzables.
+- Frontend: `/precios`, `TokenBadge`, la sección de microdesbloqueos y todo copy de
+  "cuesta N tokens" / "recarga" **se retiraron** de `consulta-placas-web`.
+- **Deuda conocida, no urgente:** la tabla `productos_consulta` (catálogo de
+  microdesbloqueos de la consulta por placa) sigue con valores de token > 0 en BD.
+  Queda dormida y sin UI que la alcance; se pone en 0 (migración) cuando se retome
+  el tema de la consulta por placa y de "dónde colocar costos".
 
 Reglas mientras dure el ciclo:
 
