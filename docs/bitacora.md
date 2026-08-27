@@ -51,12 +51,68 @@ tests OK** (142 + 2: `test_enviar_ciudad_null_la_vacia`, `test_enviar_kilometraj
 ambos comprueban que el `null` explícito vacía **y** hace `commit`, distinto de omitir).
 Sin migración (`alembic heads` = `0025`).
 
-**Frontend (agente `dev-frontend`, en curso):** wrapper `actualizarPublicacion` en
-`api.ts`, tipo `PublicacionActualizar` en el mirror, y formulario "Editar datos" por
-publicación en `mis-publicaciones` (título, descripción, ciudad, kilometraje, precio) que
-envía solo los campos tocados y usa "Sin especificar" / vacío → `null` para borrar.
+**Frontend (agente `dev-frontend`, commit `09cac9a` en `consulta-placas-web`):** wrapper
+`actualizarPublicacion` en `api.ts` (`publicarBorrador` pasa a delegar en él, body
+byte-idéntico); tipo `PublicacionActualizar` en el mirror (los 4 opcionales `?: T | null`,
+`precio_usd` `?: number` sin null); formulario inline "Editar datos" por publicación en
+`mis-publicaciones`, mismo contenedor y `inputCls` que `FichaEditor`, envía solo los
+campos que cambiaron respecto del snapshot ("campos sucios"), vaciar un opcional viaja
+como `null`. Validación suave en cliente para dar copy es-EC en vez del 422 crudo.
+`tsc`/`lint`/`build` verdes.
 
-**Pendiente de la ola:** frontend del formulario; después, el carril del comprador.
+**Pendiente de la ola:** el carril del comprador (abajo).
+
+---
+
+## 2026-08-27 — Cierre, ola 2 (comprador): el ciclo no muere sin contacto
+
+**Repo:** frontend `consulta-placas-web`, rama `chore/cierre-ola2`, commits `abbbdea` y
+`3dddb13`. Backend **no se tocó**: el carril del comprador ya estaba construido (MC1
+portada curada, MC2 búsqueda por cursor, TASK-011 contacto). El trabajo fue cerrar dos
+puntas sueltas y aplicar dos decisiones de producto de Marcos.
+
+### Decisiones de Marcos (2026-08-27)
+
+1. **Contacto: se queda en 1 paso.** El botón "Ver teléfono" → número + WhatsApp sigue
+   igual. El "primer contacto interno → luego teléfono" de la visión es una funcionalidad
+   nueva (tabla + bandeja del vendedor), no una limpieza de cierre: se retoma en un ciclo
+   posterior con datos de uso reales (era la decisión M5 original — "chat interno queda
+   para después de validar demanda").
+2. **En el detalle, el contacto va DESPUÉS de la evidencia.** El bloque de revelación del
+   teléfono baja al final, tras ficha técnica + datos oficiales. Arriba, en la fila de
+   CTAs del encabezado, un botón compacto **"Contactar al vendedor"** que ancla
+   (`#contacto-vendedor`, scroll suave nativo, `scroll-mt-24` por el header sticky) a esa
+   sección. Reemplaza en parte la decisión M2.7 ("acciones sin scroll en celular"): la
+   acción **sigue** visible sin scroll, pero como ancla, no como el bloque completo. El
+   dueño (`esMia`) no ve el ancla; abajo tiene su preview "Así lo verán los compradores".
+   `ContactoVendedor.tsx` no se tocó. Commit `3dddb13`.
+
+### El hueco que rompía el final del ciclo (commit `abbbdea`)
+
+Un vendedor podía completar todo el flujo de publicar y dejar su anuncio **activo** sin
+que nada le dijera que necesita cargar un teléfono. Resultado: el comprador pulsa "Ver
+teléfono" → **409** → el ciclo comprador↔vendedor muere ahí. `mi-perfil-vendedor` solo se
+alcanzaba desde el menú de la cuenta.
+
+- **`mis-publicaciones`** resuelve el perfil de vendedor junto al listado (`Promise.all`,
+  patrón lint-safe intacto) y muestra un aviso **solo** cuando hay ≥ 1 anuncio `activa` y
+  el perfil no tiene `telefono`. Fallo de red / sesión vencida → no se avisa (no molestar
+  sobre algo no verificado). El aviso se deriva de `pubs`, así que aparece en vivo al
+  publicar un borrador.
+- **Wizard de publicar:** tras publicar con éxito, si falta el teléfono, un paso de cierre
+  corto ("Tu anuncio ya está publicado / agrega tu número") con dos salidas; **no
+  bloquea** — el anuncio ya está activo. El chequeo vive en el handler, no en un efecto.
+- **`AvisoContactoVendedor`** pasó de auto-fetch con 4 estados a presentacional; la página
+  decide si se monta. Se perdieron el banner de confirmación ("los compradores te ven
+  como X") y el de reintento — esa info sigue en `mi-perfil-vendedor` y `MenuCuenta`.
+  Token `--marca` (invitación, no error; `DISENO.md §2` reserva `--atencion` para estado
+  del vehículo).
+
+**Verificación (frontend):** `npx tsc --noEmit` limpio · `npm run lint` **0 errores** ·
+`npm run build` OK (17 rutas, `/marketplace/[id]` sigue dinámica).
+
+**Pendiente de la ola:** `scripts/estado.py` (TASK-007), y el merge de `chore/cierre-ola2`
+en ambos repos.
 
 **Repos:** backend `consulta_placas_ec` (rama `chore/cierre-market-sin-precios`) +
 frontend `consulta-placas-web` (agente `dev-frontend`). Primera tanda del plan de cierre
