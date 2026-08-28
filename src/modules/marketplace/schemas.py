@@ -834,6 +834,10 @@ class PublicacionDetalleSalida(PublicacionInternaSalida):
 
     ficha: FichaSalida | None = None
     fotos: list[FotoSalida] = Field(default_factory=list)
+    # ID del vendedor (opaco), SOLO en el detalle: el comprador lo necesita para dejarle
+    # una calificación (`/marketplace/vendedores/{id}/calificar`). No es PII — ni teléfono
+    # ni nombre; el resto de la identidad del vendedor sigue sin serializarse.
+    vendedor_id: int | None = None
 
     @classmethod
     def desde_modelo(
@@ -845,6 +849,7 @@ class PublicacionDetalleSalida(PublicacionInternaSalida):
             **base,
             ficha=FichaSalida.desde_modelo(p.ficha),
             fotos=[FotoSalida.model_validate(f) for f in p.fotos],
+            vendedor_id=p.vendedor_id,
         )
 
 
@@ -1031,3 +1036,39 @@ class ContactoVendedorSalida(BaseModel):
     telefono: str
     nombre_publico: str | None
     whatsapp_url: str
+
+
+# ════════════════ Calificaciones (comprador → vendedor) ════════════════
+
+
+class CalificacionCrear(BaseModel):
+    estrellas: int = Field(ge=1, le=5)
+    comentario: str | None = Field(default=None, max_length=1000)
+    # Contexto: desde qué anuncio se calificó. Opcional, no cambia la unicidad.
+    publicacion_id: int | None = None
+
+
+class CalificacionSalida(BaseModel):
+    """Una calificación pública. El autor se muestra por su primer nombre o
+    'Un comprador' — nunca el email ni el id."""
+
+    estrellas: int
+    comentario: str | None
+    autor: str
+    creado_en: datetime
+
+
+class ResumenCalificaciones(BaseModel):
+    """Promedio y conteo. `promedio` es `None` cuando no hay ninguna (línea base: no se
+    muestra una nota baja, simplemente no hay nota)."""
+
+    promedio: float | None = None
+    total: int = 0
+
+
+class CalificacionesVendedorSalida(BaseModel):
+    resumen: ResumenCalificaciones
+    items: list[CalificacionSalida] = Field(default_factory=list)
+    # La calificación que dejó ESTE usuario (si hay sesión y ya calificó), para
+    # prellenar el formulario. `None` para anónimos o quien aún no calificó.
+    mia: CalificacionSalida | None = None
