@@ -19,6 +19,7 @@ from src.modules.vehiculos.models.dueno_historico import DuenoHistorico  # noqa:
 from src.modules.vehiculos.models.kilometraje_lectura import KilometrajeLectura  # noqa: F401
 from src.modules.vehiculos.models.mantenimiento import Mantenimiento  # noqa: F401
 from src.modules.vehiculos.models.vehiculo_favorito import VehiculoFavorito  # noqa: F401
+from src.modules.vehiculos.models.gasto import GastoVehiculo  # noqa: F401
 
 # consulta
 from src.modules.consulta.models.consulta import Consulta  # noqa: F401
