@@ -287,6 +287,14 @@ class ResumenMantenimientos(BaseModel):
     ultimo_kilometraje: int | None = None
 
 
+class SelloMecanica(BaseModel):
+    """Sello "revisado por mecánica" de una publicación (migración 0028)."""
+
+    nombre: str
+    ciudad: str
+    certificado_en: datetime
+
+
 class PublicacionInternaSalida(BaseModel):
     """Vista pública de una publicación interna. Sin VIN ni nombre del dueño."""
 
@@ -348,6 +356,10 @@ class PublicacionInternaSalida(BaseModel):
     semanas_publicada: int = 0
     vigente: bool = True
     puede_renovar: bool = False
+    # Sello "revisado por mecánica" (migración 0028). `None` = sin sello. Lo activa el
+    # vendedor canjeando un código que le dio la mecánica. Es distinto de `verificado`
+    # (sello de la plataforma, §10.6): este nombra a la mecánica y la fecha.
+    sello_mecanica: "SelloMecanica | None" = None
     # "Me gusta" público = cuántos usuarios tienen esta PLACA en favoritos. No hay tabla
     # nueva: se cuenta sobre `vehiculos_favoritos`. En el feed, más "me gusta" empuja la
     # publicación hacia arriba dentro de su nivel (relevancia). El router pasa el conteo;
@@ -415,6 +427,16 @@ class PublicacionInternaSalida(BaseModel):
                 and not publicacion_vigente(p.renovada_en or p.creado_en)
             ),
             total_favoritos=total_favoritos,
+            sello_mecanica=(
+                SelloMecanica(
+                    nombre=p.mecanica_nombre,
+                    ciudad=p.mecanica_ciudad,
+                    certificado_en=p.certificado_mecanica_en,
+                )
+                if getattr(p, "mecanica_nombre", None)
+                and getattr(p, "certificado_mecanica_en", None)
+                else None
+            ),
         )
 
 
@@ -1072,3 +1094,33 @@ class CalificacionesVendedorSalida(BaseModel):
     # La calificación que dejó ESTE usuario (si hay sesión y ya calificó), para
     # prellenar el formulario. `None` para anónimos o quien aún no calificó.
     mia: CalificacionSalida | None = None
+
+
+# ════════════════ Sello "revisado por mecánica" (códigos, migración 0028) ════════════════
+
+
+class CodigosCertificacionCrear(BaseModel):
+    """Un admin genera N códigos para una mecánica (la plataforma decide a quién)."""
+
+    mecanica_nombre: str = Field(min_length=2, max_length=120)
+    mecanica_ciudad: str = Field(min_length=2, max_length=80)
+    cantidad: int = Field(default=1, ge=1, le=50)
+    dias_validez: int = Field(default=30, ge=1, le=90)
+
+
+class CodigoCertificacionSalida(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo: str
+    mecanica_nombre: str
+    mecanica_ciudad: str
+    creado_en: datetime
+    expira_en: datetime
+    usado_en: datetime | None = None
+    usado_publicacion_id: int | None = None
+
+
+class CertificarConCodigo(BaseModel):
+    """El vendedor canjea el código que le dio la mecánica en SU publicación."""
+
+    codigo: str = Field(min_length=4, max_length=24)

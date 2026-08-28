@@ -185,6 +185,44 @@ class ContactoRevelado(Base):
     )
 
 
+class CodigoCertificacion(Base):
+    """Código de un solo uso que una MECÁNICA le da al vendedor para poner el sello
+    "revisado por mecánica" en su publicación (migración 0028).
+
+    Para que el sello NO se desvalorice:
+    - Los códigos los crea un ADMIN (la plataforma decide qué mecánicas los reciben);
+      en la etapa 2 las mecánicas con cuenta los emitirán solas.
+    - `codigo` único, se canjea UNA vez (`usado_en` / `usado_publicacion_id`).
+    - `expira_en`: si no se canjea a tiempo, no sirve.
+    - El sello guarda el NOMBRE de la mecánica y la FECHA: es específico y rastreable,
+      no un "verificado" genérico.
+    """
+
+    __tablename__ = "codigos_certificacion"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    codigo: Mapped[str] = mapped_column(String(24), unique=True, nullable=False, index=True)
+    mecanica_nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    mecanica_ciudad: Mapped[str] = mapped_column(String(80), nullable=False)
+    emitido_por_usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expira_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    usado_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    usado_publicacion_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("publicaciones_internas.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
 class Calificacion(Base):
     """Calificación de un COMPRADOR a un VENDEDOR (1..5 estrellas + comentario).
 
@@ -372,6 +410,15 @@ class PublicacionInterna(Base):
     # NULL = todavía no se cobró (o es light, o es un premium anterior a M2.8 que ya
     # se cobró al crearse: como ya está activa, nunca vuelve a pasar por el cobro).
     premium_cobrado_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Sello "revisado por mecánica" (migración 0028). Se activa canjeando un
+    # `CodigoCertificacion` que la mecánica le entrega al vendedor tras la revisión.
+    # Guarda el NOMBRE y la CIUDAD de la mecánica (no un FK: la mecánica no tiene cuenta
+    # en la etapa 1) + la fecha. Los tres van juntos: o hay sello o no. NULL = sin sello.
+    mecanica_nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    mecanica_ciudad: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    certificado_mecanica_en: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     destacado: Mapped[bool] = mapped_column(
