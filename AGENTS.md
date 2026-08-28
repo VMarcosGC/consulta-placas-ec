@@ -70,7 +70,7 @@ Definido el 2026-08-04. Todo lo que no esté aquí está fuera de alcance.
 | Cobro y pasarela de pago | fuera | tener una versión estable y usuarios reales |
 | Fuentes con captcha (SRI, FGE) | fuera | que se justifique el costo de resolver captcha o exista convenio de API oficial |
 | Cuentas de patio e ingesta masiva | etapa 2 | que el flujo de particulares funcione con usuarios reales |
-| Feed tipo reels | fuera | — |
+| ~~Feed tipo reels~~ | **DENTRO desde 2026-08-27** | Marcos lo repuso: el marketplace debe poder recorrerse "a modo de reels de Instagram". Vive en `/marketplace/reel` (entrada "▶ Ver como reel" desde `/marketplace`); reusa `GET /marketplace/buscar` con cursor keyset (el endpoint ya se había diseñado para esto). No agrega backend. |
 | App móvil | fuera | que el marketplace web tenga uso real de particulares |
 
 La API debe ser autosuficiente para un cliente que no sea el web: el frontend no

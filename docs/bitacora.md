@@ -21,6 +21,51 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-27 — Distribución geográfica, detalle del anuncio, reel y zona de publicidad
+
+**Repos:** backend `consulta_placas_ec` (`main`, merge `feat/distribucion-geografica`) ·
+frontend `consulta-placas-web` (`main`, varios commits).
+
+**Qué se hizo**
+
+1. **Distribución por provincia/región + filtro geográfico.** `geografia.py` mapea las
+   12 ciudades del catálogo a (provincia, región). `GET /marketplace/distribucion`
+   cuenta publicaciones activas por región/provincia (derivado de `ciudad`).
+   `/marketplace/buscar` gana `provincia` y `region` (se intersecan; 422 fuera de
+   catálogo). Portada: bloque **"¿Dónde están los autos?"** con enlaces al marketplace
+   filtrado; `<select>` de provincia + pills removibles. Sin mapa SVG (peso en gama
+   baja). +10 tests (169 OK).
+2. **Detalle del anuncio: galería nueva + ficha plana.** `GaleriaAnuncio.tsx`: foto
+   principal + miniaturas, **panel por foto** (según `foto.bloque` muestra el resumen
+   de ese bloque de la ficha al lado), y **visor a pantalla completa con zoom** (tap
+   1x↔2.5x, rueda 1x–4x, arrastre, swipe/flechas, Esc). `FichaTecnica` pasa a PLANA
+   (encabezado por bloque + lista a dos columnas, sin `BentoCard`); mismos campos,
+   menos "recuadro". Helpers `filas*` + `BLOQUES_FICHA` en `lib/ficha.ts` como fuente
+   única.
+3. **Marketplace en modo REEL** (`/marketplace/reel`). Un auto por pantalla, scroll
+   vertical con snap, estilo feed. Reusa `GET /marketplace/buscar` con cursor
+   (IntersectionObserver para paginar). ♡ favorito, "Ver detalle" despliega un
+   vistazo + enlace al anuncio completo. Entrada "▶ Ver como reel" en `/marketplace`.
+   **Revierte `AGENTS.md §1.0.2`** ("Feed tipo reels — fuera"): Marcos lo repuso; el
+   doc quedó actualizado. No agrega backend.
+4. **Zona de publicidad de la portada.** `PublicidadHome.tsx` + `config/publicidad.ts`.
+   Si `PUBLICIDAD_HOME === null` no se renderiza (no invasiva). Cuando hay pauta: una
+   tarjeta etiquetada "Publicidad", enlace `sponsored` en pestaña nueva.
+
+**Verificación**
+- Backend: `python -m unittest discover tests` → 169 OK.
+- Frontend: `tsc` + `next build` OK en cada commit. Archivos fuente tocados lintean
+  limpio (el `npm run lint` global sigue con ruido de `.claude/worktrees/*/.next`).
+- Sin comprobación visual en navegador (el navegador embebido no respondió).
+
+**Pendientes**
+- Ver en pantalla: "Grafito" claro/oscuro, el bloque de distribución, el visor con
+  zoom, el reel.
+- Reel v2: traer la ficha completa al expandir (hoy el "detalle ampliado" es el
+  enlace al anuncio); dedupe de premium destacadas si molesta.
+
+---
+
 ## 2026-08-27 — "Grafito": paleta casi monocroma + modo oscuro, y antigüedad de publicaciones
 
 **Repos:** frontend `consulta-placas-web` (rama `main`, varios commits) · backend
