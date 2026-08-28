@@ -106,6 +106,9 @@ N_CON_FICHA = 65
 N_PREMIUM = 20
 # Cuántas de las premium quedan "verificado por la plataforma".
 N_VERIFICADAS = 6
+# Cuántas llevan el sello "revisado por mecánica" (migración 0028). Simula el ejercicio
+# del código de un solo uso que la mecánica le entrega al vendedor: acá se aplica directo.
+N_CON_SELLO_MECANICA = 12
 
 # Semilla fija: la misma corrida produce las mismas placas y datos → idempotencia real.
 SEMILLA = 20260827
@@ -184,6 +187,16 @@ PESOS_CIUDAD = [26, 24, 11, 8, 7, 4, 4, 5, 4, 3, 2.5, 2]
 SELLOS_TITULO = [
     "único dueño", "full extras", "poco kilometraje", "recién importado",
     "mantenimiento al día", "precio conversable",
+]
+
+# Mecánicas ficticias para el sello "revisado por mecánica". (nombre, ciudad).
+MECANICAS_SELLO = [
+    ("Tecnicentro Andrade", "Quito"),
+    ("Mecánica Total Vera", "Guayaquil"),
+    ("AutoDiagnóstico Cedeño", "Manta"),
+    ("Taller El Motorista", "Cuenca"),
+    ("Servifrenos Loja", "Loja"),
+    ("MultiMarcas Guerrero", "Ambato"),
 ]
 
 APERTURAS = [
@@ -478,6 +491,9 @@ def _construir_specs() -> list[dict]:
     premium_idx = set(rng.sample(range(N_PUBLICACIONES), N_PREMIUM))
     verificadas_idx = set(rng.sample(sorted(premium_idx), N_VERIFICADAS))
     ficha_idx = set(rng.sample(range(N_PUBLICACIONES), N_CON_FICHA))
+    # El sello de mecánica solo tiene sentido en anuncios con ficha (la revisión
+    # respalda lo declarado): se eligen de entre esos.
+    sello_idx = set(rng.sample(sorted(ficha_idx), N_CON_SELLO_MECANICA))
 
     usadas: set[str] = set()
     specs: list[dict] = []
@@ -534,6 +550,15 @@ def _construir_specs() -> list[dict]:
             objetivo = 0.18 if b < 0.20 else (0.50 if b < 0.65 else 0.90)
             ficha = _construir_ficha(rng, seg, objetivo)
 
+        # Sello "revisado por mecánica": nombre + ciudad de una mecánica ficticia y una
+        # fecha posterior a la publicación (la revisión ocurre con el auto ya en venta).
+        mecanica_nombre = mecanica_ciudad = certificado_mecanica_en = None
+        if idx in sello_idx:
+            mecanica_nombre, mecanica_ciudad = rng.choice(MECANICAS_SELLO)
+            certificado_mecanica_en = min(
+                ahora, creado_en + timedelta(days=rng.randint(1, 14))
+            )
+
         fotos = _fotos_para(idx, rng)
 
         specs.append({
@@ -555,6 +580,9 @@ def _construir_specs() -> list[dict]:
             ),
             "verificado_en": verificado_en,
             "creado_en": creado_en,
+            "mecanica_nombre": mecanica_nombre,
+            "mecanica_ciudad": mecanica_ciudad,
+            "certificado_mecanica_en": certificado_mecanica_en,
             "ficha": ficha,
             "fotos": fotos,
         })
@@ -643,6 +671,7 @@ def sembrar(sesion: Session) -> dict:
         ))
 
     pubs_creadas = pubs_existentes = fichas_creadas = fotos_creadas = 0
+    sellos_creados = 0
 
     for spec in specs:
         pid = id_por_placa.get(spec["placa"])
@@ -667,11 +696,29 @@ def sembrar(sesion: Session) -> dict:
                     verificado_en=spec["verificado_en"],
                     destacado=spec["destacado"],
                     creado_en=spec["creado_en"],
+                    mecanica_nombre=spec["mecanica_nombre"],
+                    mecanica_ciudad=spec["mecanica_ciudad"],
+                    certificado_mecanica_en=spec["certificado_mecanica_en"],
                 ).returning(_T_PUB.c.id)
             ).scalar_one()
             pubs_creadas += 1
+            if spec["mecanica_nombre"]:
+                sellos_creados += 1
         else:
             pubs_existentes += 1
+            # Top-up idempotente: si la fila ya existía sin sello y a este spec le
+            # toca uno, se agrega (no pisa un sello puesto a mano).
+            if spec["mecanica_nombre"]:
+                n = sesion.execute(
+                    update(_T_PUB)
+                    .where(_T_PUB.c.id == pid, _T_PUB.c.mecanica_nombre.is_(None))
+                    .values(
+                        mecanica_nombre=spec["mecanica_nombre"],
+                        mecanica_ciudad=spec["mecanica_ciudad"],
+                        certificado_mecanica_en=spec["certificado_mecanica_en"],
+                    )
+                ).rowcount
+                sellos_creados += n
 
         # Ficha y fotos: se crean si la publicación es nueva o si le faltan (p. ej.
         # alguien borró sólo las fotos y se vuelve a correr el seed).
@@ -703,6 +750,7 @@ def sembrar(sesion: Session) -> dict:
         "pubs_existentes": pubs_existentes,
         "fichas_creadas": fichas_creadas,
         "fotos_creadas": fotos_creadas,
+        "sellos_creados": sellos_creados,
         "total_demo": total_demo,
         "total_tabla": total_tabla,
     }
@@ -815,6 +863,7 @@ def main(argv: list[str]) -> int:
         print(f"  Publicaciones que ya existían .... {r['pubs_existentes']}")
         print(f"  Fichas técnicas creadas .......... {r['fichas_creadas']}")
         print(f"  Fotos creadas ................... {r['fotos_creadas']}")
+        print(f"  Sellos de mecánica aplicados ..... {r['sellos_creados']}")
         print()
         print(f"  publicaciones_internas de la demo . {r['total_demo']}")
         print(f"  publicaciones_internas EN TOTAL ... {r['total_tabla']}")

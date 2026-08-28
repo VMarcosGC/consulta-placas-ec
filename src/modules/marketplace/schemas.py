@@ -328,6 +328,9 @@ class PublicacionInternaSalida(BaseModel):
     precio_usd: Decimal
     plan: PlanPublicacion
     estado: EstadoPublicacion
+    # Fecha en que el anuncio pasó a `vendida` (migración 0031). `None` salvo que
+    # `estado == vendida`. El frontend arma con esto el "resumen de vendidos".
+    vendido_en: datetime | None = None
     estado_verificacion: EstadoVerificacion
     destacado: bool
     verificado: bool = False
@@ -398,6 +401,7 @@ class PublicacionInternaSalida(BaseModel):
             precio_usd=p.precio_usd,
             plan=PlanPublicacion(p.plan),
             estado=EstadoPublicacion(p.estado),
+            vendido_en=getattr(p, "vendido_en", None),
             estado_verificacion=EstadoVerificacion(p.estado_verificacion),
             destacado=p.destacado,
             verificado=p.estado_verificacion == EstadoVerificacion.VERIFICADO.value,

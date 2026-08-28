@@ -475,6 +475,12 @@ class PublicacionInterna(Base):
     certificado_mecanica_en: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Momento en que el anuncio pasó a `vendida` (migración 0031). Lo pone el endpoint
+    # de estado al entrar a `vendida` y lo limpia al salir (volver a publicar). NULL =
+    # no está vendida. Alimenta el "resumen de vendidos" en mis-publicaciones.
+    vendido_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     destacado: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )

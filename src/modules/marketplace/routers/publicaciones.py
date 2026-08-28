@@ -175,6 +175,14 @@ def _aplicar_transicion_estado(
             )
         _exigir_umbral_ficha(pub)
 
+    # `vendido_en` (migración 0031): se sella al entrar a `vendida` y se limpia al
+    # salir (volver a publicar / pausar). Solo se re-sella si venía de otro estado,
+    # para no pisar la fecha original con cada guardado.
+    if nuevo == EstadoPublicacion.VENDIDA and actual != EstadoPublicacion.VENDIDA.value:
+        pub.vendido_en = datetime.now(timezone.utc)
+    elif nuevo != EstadoPublicacion.VENDIDA and actual == EstadoPublicacion.VENDIDA.value:
+        pub.vendido_en = None
+
     pub.estado = nuevo.value
 
 
