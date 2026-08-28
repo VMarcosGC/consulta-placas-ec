@@ -315,6 +315,17 @@ erDiagram
         timestamptz creado_en
     }
 
+    gastos_vehiculo {
+        bigint id PK
+        bigint vehiculo_id FK
+        string tipo
+        numeric monto_usd
+        date fecha
+        int kilometraje
+        string nota
+        timestamptz creado_en
+    }
+
     enlaces_compartidos {
         bigint id PK
         bigint vehiculo_id FK
@@ -345,6 +356,7 @@ erDiagram
     vehiculos ||--o{ duenos_historico : registra
     vehiculos ||--o{ kilometraje_lecturas : acumula
     vehiculos ||--o{ mantenimientos : recibe
+    vehiculos ||--o{ gastos_vehiculo : acumula
     vehiculos ||--o{ enlaces_compartidos : genera
 ```
 
@@ -357,6 +369,7 @@ erDiagram
 - `vehiculos.transmision/tipo_motor/ciudad_registro`, `usuarios.saldo_tokens` y `transacciones_tokens` → agregados en migración `0004` (Fase 3 — perfil + billetera).
 - `vehiculos_favoritos` → migración `0005`; placa como `String` (no FK), única por usuario+placa.
 - `mantenimientos` → migración `0006`; `fecha` y `kilometraje_relacionado` monotónicos.
+- `gastos_vehiculo` → migración `0032` (garaje — control de gastos). `tipo` catálogo cerrado validado en Pydantic; el resumen (total, promedio mensual, desglose) lo deriva `GET /vehiculos/{id}/gastos`. El plan de cuidado (`GET /vehiculos/{id}/plan-cuidado`) es por reglas, sin tabla.
 - `vehiculos.en_venta/precio_venta_usd/url_externa` → migración `0007` (Fase 4 — Marketplace). Un auto se lista en `GET /marketplace` solo si `en_venta` y `precio_venta_usd > 0`.
 - `enlaces_compartidos` → migración `0008` (Fase 4 — token de compra-venta). `token` único (UK), TTL ≤ 7 días vía `fecha_expiracion`, `scope` JSONB opt-in. `GET /compartido/{token}` devuelve `VehiculoSalidaCompartida` (ofuscado).
 - El campo `vehiculos_favoritos.placa` no es FK a propósito (se puede seguir una placa inexistente).
