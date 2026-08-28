@@ -287,6 +287,14 @@ class ResumenMantenimientos(BaseModel):
     ultimo_kilometraje: int | None = None
 
 
+class SelloMecanica(BaseModel):
+    """Sello "revisado por mecánica" de una publicación (migración 0028)."""
+
+    nombre: str
+    ciudad: str
+    certificado_en: datetime
+
+
 class PublicacionInternaSalida(BaseModel):
     """Vista pública de una publicación interna. Sin VIN ni nombre del dueño."""
 
@@ -348,6 +356,10 @@ class PublicacionInternaSalida(BaseModel):
     semanas_publicada: int = 0
     vigente: bool = True
     puede_renovar: bool = False
+    # Sello "revisado por mecánica" (migración 0028). `None` = sin sello. Lo activa el
+    # vendedor canjeando un código que le dio la mecánica. Es distinto de `verificado`
+    # (sello de la plataforma, §10.6): este nombra a la mecánica y la fecha.
+    sello_mecanica: "SelloMecanica | None" = None
     # "Me gusta" público = cuántos usuarios tienen esta PLACA en favoritos. No hay tabla
     # nueva: se cuenta sobre `vehiculos_favoritos`. En el feed, más "me gusta" empuja la
     # publicación hacia arriba dentro de su nivel (relevancia). El router pasa el conteo;
@@ -415,6 +427,16 @@ class PublicacionInternaSalida(BaseModel):
                 and not publicacion_vigente(p.renovada_en or p.creado_en)
             ),
             total_favoritos=total_favoritos,
+            sello_mecanica=(
+                SelloMecanica(
+                    nombre=p.mecanica_nombre,
+                    ciudad=p.mecanica_ciudad,
+                    certificado_en=p.certificado_mecanica_en,
+                )
+                if getattr(p, "mecanica_nombre", None)
+                and getattr(p, "certificado_mecanica_en", None)
+                else None
+            ),
         )
 
 
@@ -834,6 +856,10 @@ class PublicacionDetalleSalida(PublicacionInternaSalida):
 
     ficha: FichaSalida | None = None
     fotos: list[FotoSalida] = Field(default_factory=list)
+    # ID del vendedor (opaco), SOLO en el detalle: el comprador lo necesita para dejarle
+    # una calificación (`/marketplace/vendedores/{id}/calificar`). No es PII — ni teléfono
+    # ni nombre; el resto de la identidad del vendedor sigue sin serializarse.
+    vendedor_id: int | None = None
 
     @classmethod
     def desde_modelo(
@@ -845,6 +871,7 @@ class PublicacionDetalleSalida(PublicacionInternaSalida):
             **base,
             ficha=FichaSalida.desde_modelo(p.ficha),
             fotos=[FotoSalida.model_validate(f) for f in p.fotos],
+            vendedor_id=p.vendedor_id,
         )
 
 
@@ -1031,3 +1058,69 @@ class ContactoVendedorSalida(BaseModel):
     telefono: str
     nombre_publico: str | None
     whatsapp_url: str
+
+
+# ════════════════ Calificaciones (comprador → vendedor) ════════════════
+
+
+class CalificacionCrear(BaseModel):
+    estrellas: int = Field(ge=1, le=5)
+    comentario: str | None = Field(default=None, max_length=1000)
+    # Contexto: desde qué anuncio se calificó. Opcional, no cambia la unicidad.
+    publicacion_id: int | None = None
+
+
+class CalificacionSalida(BaseModel):
+    """Una calificación pública. El autor se muestra por su primer nombre o
+    'Un comprador' — nunca el email ni el id."""
+
+    estrellas: int
+    comentario: str | None
+    autor: str
+    creado_en: datetime
+
+
+class ResumenCalificaciones(BaseModel):
+    """Promedio y conteo. `promedio` es `None` cuando no hay ninguna (línea base: no se
+    muestra una nota baja, simplemente no hay nota)."""
+
+    promedio: float | None = None
+    total: int = 0
+
+
+class CalificacionesVendedorSalida(BaseModel):
+    resumen: ResumenCalificaciones
+    items: list[CalificacionSalida] = Field(default_factory=list)
+    # La calificación que dejó ESTE usuario (si hay sesión y ya calificó), para
+    # prellenar el formulario. `None` para anónimos o quien aún no calificó.
+    mia: CalificacionSalida | None = None
+
+
+# ════════════════ Sello "revisado por mecánica" (códigos, migración 0028) ════════════════
+
+
+class CodigosCertificacionCrear(BaseModel):
+    """Un admin genera N códigos para una mecánica (la plataforma decide a quién)."""
+
+    mecanica_nombre: str = Field(min_length=2, max_length=120)
+    mecanica_ciudad: str = Field(min_length=2, max_length=80)
+    cantidad: int = Field(default=1, ge=1, le=50)
+    dias_validez: int = Field(default=30, ge=1, le=90)
+
+
+class CodigoCertificacionSalida(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo: str
+    mecanica_nombre: str
+    mecanica_ciudad: str
+    creado_en: datetime
+    expira_en: datetime
+    usado_en: datetime | None = None
+    usado_publicacion_id: int | None = None
+
+
+class CertificarConCodigo(BaseModel):
+    """El vendedor canjea el código que le dio la mecánica en SU publicación."""
+
+    codigo: str = Field(min_length=4, max_length=24)

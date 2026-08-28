@@ -185,6 +185,101 @@ class ContactoRevelado(Base):
     )
 
 
+class CodigoCertificacion(Base):
+    """Código de un solo uso que una MECÁNICA le da al vendedor para poner el sello
+    "revisado por mecánica" en su publicación (migración 0028).
+
+    Para que el sello NO se desvalorice:
+    - Los códigos los crea un ADMIN (la plataforma decide qué mecánicas los reciben);
+      en la etapa 2 las mecánicas con cuenta los emitirán solas.
+    - `codigo` único, se canjea UNA vez (`usado_en` / `usado_publicacion_id`).
+    - `expira_en`: si no se canjea a tiempo, no sirve.
+    - El sello guarda el NOMBRE de la mecánica y la FECHA: es específico y rastreable,
+      no un "verificado" genérico.
+    """
+
+    __tablename__ = "codigos_certificacion"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    codigo: Mapped[str] = mapped_column(String(24), unique=True, nullable=False, index=True)
+    mecanica_nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    mecanica_ciudad: Mapped[str] = mapped_column(String(80), nullable=False)
+    emitido_por_usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expira_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    usado_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    usado_publicacion_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("publicaciones_internas.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+class Calificacion(Base):
+    """Calificación de un COMPRADOR a un VENDEDOR (1..5 estrellas + comentario).
+
+    Solo esta dirección por ahora: el contacto es anónimo (`ContactoRevelado` no guarda
+    quién pidió el número), así que un vendedor no puede identificar ni calificar a un
+    comprador. Cuando exista un flujo de contacto que identifique al comprador se agrega
+    la dirección inversa.
+
+    `publicacion_interna_id` es solo CONTEXTO (desde qué anuncio se calificó); no cambia
+    la unicidad. UK `(autor_usuario_id, vendedor_id)` → una calificación por comprador
+    por vendedor; volver a calificar la ACTUALIZA (upsert), no acumula.
+    """
+
+    __tablename__ = "calificaciones"
+    __table_args__ = (
+        UniqueConstraint(
+            "autor_usuario_id", "vendedor_id", name="uq_calificaciones_autor_vendedor"
+        ),
+        CheckConstraint(
+            "estrellas BETWEEN 1 AND 5", name="ck_calificaciones_estrellas_rango"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    autor_usuario_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    vendedor_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("vendedores.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    publicacion_interna_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("publicaciones_internas.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    estrellas: Mapped[int] = mapped_column(Integer, nullable=False)
+    comentario: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    autor: Mapped["Usuario"] = relationship("Usuario")  # noqa: F821
+    vendedor: Mapped["Vendedor"] = relationship("Vendedor")
+
+
 class EnlaceCompartido(Base):
     """Enlace temporal de solo lectura sobre un vehículo, para mostrarle el
     historial a un comprador interesado sin que necesite cuenta (Fase 4).
@@ -315,6 +410,15 @@ class PublicacionInterna(Base):
     # NULL = todavía no se cobró (o es light, o es un premium anterior a M2.8 que ya
     # se cobró al crearse: como ya está activa, nunca vuelve a pasar por el cobro).
     premium_cobrado_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Sello "revisado por mecánica" (migración 0028). Se activa canjeando un
+    # `CodigoCertificacion` que la mecánica le entrega al vendedor tras la revisión.
+    # Guarda el NOMBRE y la CIUDAD de la mecánica (no un FK: la mecánica no tiene cuenta
+    # en la etapa 1) + la fecha. Los tres van juntos: o hay sello o no. NULL = sin sello.
+    mecanica_nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    mecanica_ciudad: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    certificado_mecanica_en: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     destacado: Mapped[bool] = mapped_column(
