@@ -44,6 +44,7 @@ def crear_servicio(
         telefono=(datos.telefono or None),
         whatsapp=(datos.whatsapp or None),
         direccion=(datos.direccion or None),
+        horario=(datos.horario or None),
         url_externa=(datos.url_externa or None),
         aportado_por_usuario_id=usuario.id,
     )

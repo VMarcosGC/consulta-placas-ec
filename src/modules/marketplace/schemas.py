@@ -1151,6 +1151,7 @@ class ServicioCrear(BaseModel):
     telefono: str | None = Field(default=None, max_length=20)
     whatsapp: str | None = Field(default=None, max_length=20)
     direccion: str | None = Field(default=None, max_length=200)
+    horario: str | None = Field(default=None, max_length=120)
     url_externa: str | None = Field(default=None, max_length=500)
 
     @field_validator("provincia")
@@ -1178,6 +1179,7 @@ class ServicioSalida(BaseModel):
     telefono: str | None
     whatsapp: str | None
     direccion: str | None
+    horario: str | None
     url_externa: str | None
     certificado: bool
     estado_moderacion: EstadoModeracion

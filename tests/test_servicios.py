@@ -76,6 +76,11 @@ class SchemaTests(unittest.TestCase):
         s = ServicioCrear(**BASE)
         self.assertEqual(s.categoria, "mecanica")
 
+    def test_horario_es_texto_libre_opcional(self):
+        self.assertIsNone(ServicioCrear(**BASE).horario)
+        s = ServicioCrear(**{**BASE, "horario": "Lun a Vie 8:00-18:00"})
+        self.assertEqual(s.horario, "Lun a Vie 8:00-18:00")
+
 
 class EndpointTests(unittest.TestCase):
     def setUp(self):

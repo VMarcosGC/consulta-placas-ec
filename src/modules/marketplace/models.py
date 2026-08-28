@@ -208,6 +208,9 @@ class Servicio(Base):
     telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
     whatsapp: Mapped[str | None] = mapped_column(String(20), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Texto libre ("Lun a Vie 8:00–18:00, Sáb 8:00–13:00"). Sin estructura: cada
+    # negocio lo escribe a su manera y el frontend solo lo muestra.
+    horario: Mapped[str | None] = mapped_column(String(120), nullable=True)
     url_externa: Mapped[str | None] = mapped_column(String(500), nullable=True)
     certificado: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
