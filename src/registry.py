@@ -40,5 +40,6 @@ from src.modules.marketplace.models import (  # noqa: F401
     FotoPublicacion,
     PublicacionInterna,
     PublicacionReferenciada,
+    Servicio,
     Vendedor,
 )

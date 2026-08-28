@@ -185,6 +185,57 @@ class ContactoRevelado(Base):
     )
 
 
+class Servicio(Base):
+    """Negocio del directorio de servicios automotrices (taller, lavadero, luces,
+    accesorios, mecánica certificada…). Lo propone un usuario; entra `pendiente` y un
+    admin lo aprueba antes de que aparezca en el directorio público — mismo patrón que
+    `PublicacionReferenciada`.
+
+    `categoria` y `provincia` son catálogos cerrados VALIDADOS EN PYDANTIC (no en la BD),
+    igual que la ficha técnica: la BD guarda String para evolucionar sin migración.
+    `certificado` solo lo pone un admin (mecánica cuyas credenciales revisó la
+    plataforma) — que no se ponga solo desde el alta.
+    """
+
+    __tablename__ = "servicios"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    categoria: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    provincia: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    ciudad: Mapped[str] = mapped_column(String(80), nullable=False)
+    descripcion: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    whatsapp: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    direccion: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    url_externa: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    certificado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    estado_moderacion: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=EstadoModeracion.PENDIENTE.value,
+        default=EstadoModeracion.PENDIENTE.value,
+        index=True,
+    )
+    activo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
+    )
+    aportado_por_usuario_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class CodigoCertificacion(Base):
     """Código de un solo uso que una MECÁNICA le da al vendedor para poner el sello
     "revisado por mecánica" en su publicación (migración 0028).

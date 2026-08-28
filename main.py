@@ -30,6 +30,7 @@ from src.modules.marketplace.routers.compartidos import router as compartidos_ro
 from src.modules.marketplace.routers.vendedor import router as vendedor_router
 from src.modules.marketplace.routers.calificaciones import router as calificaciones_router
 from src.modules.marketplace.routers.certificacion import router as certificacion_router
+from src.modules.marketplace.routers.servicios import router as servicios_router
 
 app = FastAPI(title="Consulta de Placas Ecuador")
 
@@ -61,3 +62,4 @@ app.include_router(compartidos_router)
 app.include_router(vendedor_router)
 app.include_router(calificaciones_router)
 app.include_router(certificacion_router)
+app.include_router(servicios_router)

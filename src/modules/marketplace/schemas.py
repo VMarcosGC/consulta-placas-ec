@@ -1124,3 +1124,76 @@ class CertificarConCodigo(BaseModel):
     """El vendedor canjea el código que le dio la mecánica en SU publicación."""
 
     codigo: str = Field(min_length=4, max_length=24)
+
+
+# ════════════════ Directorio de servicios automotrices (migración 0029) ════════════════
+
+CategoriaServicio = Literal[
+    "mecanica",
+    "mecanica_certificada",
+    "centro_servicio",
+    "lavadero",
+    "luces",
+    "accesorios",
+    "otro",
+]
+
+
+class ServicioCrear(BaseModel):
+    """Alta de un negocio. Entra `pendiente`; un admin lo aprueba. `certificado` NO se
+    acepta del cliente (solo un admin lo marca)."""
+
+    nombre: str = Field(min_length=2, max_length=120)
+    categoria: CategoriaServicio
+    provincia: str = Field(min_length=2, max_length=80)
+    ciudad: str = Field(min_length=2, max_length=80)
+    descripcion: str | None = Field(default=None, max_length=1000)
+    telefono: str | None = Field(default=None, max_length=20)
+    whatsapp: str | None = Field(default=None, max_length=20)
+    direccion: str | None = Field(default=None, max_length=200)
+    url_externa: str | None = Field(default=None, max_length=500)
+
+    @field_validator("provincia")
+    @classmethod
+    def _provincia_valida(cls, v: str) -> str:
+        # Import local para no crear un ciclo (geografia no importa schemas).
+        from src.modules.marketplace import geografia
+
+        if v not in geografia.PROVINCIAS:
+            raise ValueError(
+                f"Provincia no válida. Opciones: {list(geografia.PROVINCIAS)}."
+            )
+        return v
+
+
+class ServicioSalida(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nombre: str
+    categoria: CategoriaServicio
+    provincia: str
+    ciudad: str
+    descripcion: str | None
+    telefono: str | None
+    whatsapp: str | None
+    direccion: str | None
+    url_externa: str | None
+    certificado: bool
+    estado_moderacion: EstadoModeracion
+    activo: bool
+    creado_en: datetime
+
+
+class ModeracionServicio(BaseModel):
+    """Decisión de un admin: aprobar o rechazar (terminal). Opcional `certificado`."""
+
+    decision: EstadoModeracion
+    certificado: bool | None = None
+
+    @field_validator("decision")
+    @classmethod
+    def _terminal(cls, v: EstadoModeracion) -> EstadoModeracion:
+        if v == EstadoModeracion.PENDIENTE:
+            raise ValueError("La decisión debe ser 'aprobada' o 'rechazada'.")
+        return v
