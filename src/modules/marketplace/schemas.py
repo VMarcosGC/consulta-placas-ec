@@ -611,9 +611,14 @@ Combustible = Literal["gasolina", "diesel", "hibrido", "electrico", "glp"]
 Transmision = Literal["manual", "automatica", "cvt", "semiautomatica"]
 Traccion = Literal["4x2", "4x4", "awd"]
 EstadoComponente = Literal["excelente", "bueno", "regular", "requiere_atencion"]
+# "Tipo de vehículo" del filtro del comprador. Va de livianos a pesados: los
+# comerciales (volqueta, tanquero, tractor, cabezal, trailer, maquinaria) se sumaron
+# el 2026-08-27 a pedido de Marcos. Es un `Literal` en JSONB (bloque `carroceria`),
+# así que ampliarlo NO requiere migración; solo que el frontend tenga etiqueta e ícono.
 TipoCarroceria = Literal[
-    "sedan", "suv", "hatchback", "camioneta", "coupe", "furgoneta", "bus", "camion",
-    "moto", "otro",
+    "sedan", "suv", "hatchback", "camioneta", "coupe", "furgoneta", "van",
+    "bus", "buseta", "camion", "volqueta", "tanquero", "tractor", "cabezal",
+    "trailer", "maquinaria", "moto", "otro",
 ]
 EstadoPintura = Literal["original", "retoques", "repintado_parcial", "repintado_total"]
 MaterialAsientos = Literal["tela", "cuero", "cuerina", "mixto"]
