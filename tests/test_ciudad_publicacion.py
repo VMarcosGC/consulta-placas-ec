@@ -58,9 +58,13 @@ def _sesion_falsa(resultados_execute):
     sesion = Mock()
 
     def _resultado(r):
+        filas = r if isinstance(r, list) else [r]
         return Mock(
             scalar_one_or_none=Mock(return_value=r),
-            scalars=Mock(return_value=Mock(all=Mock(return_value=r if isinstance(r, list) else [r]))),
+            # `.all()` directo (selects multi-columna, ej. el conteo de favoritos) y
+            # `.scalars().all()` (listados de entidades).
+            all=Mock(return_value=filas),
+            scalars=Mock(return_value=Mock(all=Mock(return_value=filas))),
         )
 
     sesion.execute.side_effect = [_resultado(r) for r in resultados_execute]
@@ -292,7 +296,7 @@ class CiudadEnLasVistasPublicasTests(unittest.TestCase):
 
     def test_el_feed_publico_expone_la_ciudad(self):
         pub = _publicacion(ciudad="Guayaquil", estado=EstadoPublicacion.ACTIVA.value)
-        self._con_sesion([[pub], []])  # internas activas, referenciadas
+        self._con_sesion([[pub], [], []])  # internas activas · favoritos · referenciadas
 
         respuesta = self.cliente.get("/marketplace/feed")
 
@@ -301,7 +305,7 @@ class CiudadEnLasVistasPublicasTests(unittest.TestCase):
 
     def test_el_detalle_publico_expone_la_ciudad(self):
         pub = _publicacion(ciudad="Loja", estado=EstadoPublicacion.ACTIVA.value)
-        self._con_sesion([pub])
+        self._con_sesion([pub, []])  # publicación · favoritos por placa
 
         respuesta = self.cliente.get("/marketplace/publicaciones/10")
 

@@ -348,11 +348,21 @@ class PublicacionInternaSalida(BaseModel):
     semanas_publicada: int = 0
     vigente: bool = True
     puede_renovar: bool = False
+    # "Me gusta" público = cuántos usuarios tienen esta PLACA en favoritos. No hay tabla
+    # nueva: se cuenta sobre `vehiculos_favoritos`. En el feed, más "me gusta" empuja la
+    # publicación hacia arriba dentro de su nivel (relevancia). El router pasa el conteo;
+    # 0 por defecto (una publicación recién salida, o los tests que no lo calculan).
+    total_favoritos: int = 0
 
     @classmethod
-    def desde_modelo(cls, p: PublicacionInterna) -> "PublicacionInternaSalida":
+    def desde_modelo(
+        cls, p: PublicacionInterna, total_favoritos: int = 0
+    ) -> "PublicacionInternaSalida":
         """Deriva características y, si es premium, el resumen de mantenimientos del
-        vehículo vinculado (que el router debe cargar con selectinload)."""
+        vehículo vinculado (que el router debe cargar con selectinload).
+
+        `total_favoritos` = "me gusta" de esta placa; lo calcula el router en lote
+        (una sola query agrupada) y lo pasa acá para no hacer N+1."""
         veh = p.vehiculo
         es_premium = p.plan == PlanPublicacion.PREMIUM.value
         ficha = p.ficha  # el router la carga con selectinload donde hay listados
@@ -404,6 +414,7 @@ class PublicacionInternaSalida(BaseModel):
                 p.estado == EstadoPublicacion.ACTIVA.value
                 and not publicacion_vigente(p.renovada_en or p.creado_en)
             ),
+            total_favoritos=total_favoritos,
         )
 
 
@@ -825,8 +836,10 @@ class PublicacionDetalleSalida(PublicacionInternaSalida):
     fotos: list[FotoSalida] = Field(default_factory=list)
 
     @classmethod
-    def desde_modelo(cls, p: PublicacionInterna) -> "PublicacionDetalleSalida":
-        base = PublicacionInternaSalida.desde_modelo(p).model_dump()
+    def desde_modelo(
+        cls, p: PublicacionInterna, total_favoritos: int = 0
+    ) -> "PublicacionDetalleSalida":
+        base = PublicacionInternaSalida.desde_modelo(p, total_favoritos).model_dump()
         # `p.fotos` viene ordenado por `orden` asc (order_by del relationship).
         return cls(
             **base,

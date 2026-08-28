@@ -54,9 +54,11 @@ def _sesion_falsa(resultados_execute):
     sesion = Mock()
 
     def _resultado(r):
+        filas = r if isinstance(r, list) else [r]
         return Mock(
             scalar_one_or_none=Mock(return_value=r),
-            scalars=Mock(return_value=Mock(all=Mock(return_value=r if isinstance(r, list) else [r]))),
+            all=Mock(return_value=filas),
+            scalars=Mock(return_value=Mock(all=Mock(return_value=filas))),
         )
 
     sesion.execute.side_effect = [_resultado(r) for r in resultados_execute]
@@ -333,7 +335,7 @@ class KilometrajeEnLasVistasPublicasTests(unittest.TestCase):
 
     def test_el_feed_publico_expone_el_kilometraje(self):
         pub = _publicacion(kilometraje=87_500, estado=EstadoPublicacion.ACTIVA.value)
-        self._con_sesion([[pub], []])  # internas activas, referenciadas
+        self._con_sesion([[pub], [], []])  # internas · favoritos · referenciadas
 
         respuesta = self.cliente.get("/marketplace/feed")
 
@@ -342,7 +344,7 @@ class KilometrajeEnLasVistasPublicasTests(unittest.TestCase):
 
     def test_el_detalle_publico_expone_el_kilometraje(self):
         pub = _publicacion(kilometraje=87_500, estado=EstadoPublicacion.ACTIVA.value)
-        self._con_sesion([pub])
+        self._con_sesion([pub, []])  # publicación · favoritos por placa
 
         respuesta = self.cliente.get("/marketplace/publicaciones/10")
 
@@ -353,7 +355,7 @@ class KilometrajeEnLasVistasPublicasTests(unittest.TestCase):
         """NULL es el estado normal de las filas anteriores a la migración 0024: un GET
         público no puede volverse 500 por un campo que nadie llenó (§10.2)."""
         pub = _publicacion(kilometraje=None, estado=EstadoPublicacion.ACTIVA.value)
-        self._con_sesion([[pub], []])
+        self._con_sesion([[pub], [], []])
 
         respuesta = self.cliente.get("/marketplace/feed")
 

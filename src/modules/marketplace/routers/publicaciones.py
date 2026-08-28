@@ -32,6 +32,7 @@ from src.modules.auth.dependencies import (
 from src.modules.auth.models import Usuario
 from src.modules.tokens.service import debitar_tokens, SaldoInsuficiente
 from src.modules.vehiculos.models.vehiculo import Vehiculo
+from src.modules.vehiculos.models.vehiculo_favorito import VehiculoFavorito
 from src.modules.marketplace.models import (
     ContactoRevelado,
     EstadoModeracion,
@@ -194,6 +195,20 @@ def _vehiculo_del_usuario(sesion: Session, vehiculo_id: int, usuario: Usuario) -
             detail="Vehículo no encontrado en tu garage",
         )
     return veh
+
+
+def _favoritos_por_placa(sesion: Session, placas: list[str]) -> dict[str, int]:
+    """"Me gusta" público = cuántos usuarios tienen esa PLACA en favoritos. Una sola
+    query agrupada (sin N+1). Placas sin favoritos no aparecen → el `.get(placa, 0)`
+    del llamador las trata como 0."""
+    if not placas:
+        return {}
+    filas = sesion.execute(
+        select(VehiculoFavorito.placa, func.count())
+        .where(VehiculoFavorito.placa.in_(placas))
+        .group_by(VehiculoFavorito.placa)
+    ).all()
+    return {placa: n for placa, n in filas}
 
 
 def _mi_publicacion(sesion: Session, publicacion_id: int, usuario: Usuario) -> PublicacionInterna:
@@ -504,10 +519,11 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
     Solo lista publicaciones internas `activa`. Eager-load del vehículo+mantenimientos
     (selectinload) para derivar los argumentos premium sin N+1.
 
-    Dentro de cada nivel, los anuncios que perdieron vigencia (`vigente=False`: N
-    semanas sin renovar) caen AL FINAL. El sort es estable, así que la recencia manda
-    dentro de cada grupo. No se ocultan: siguen visibles, solo dejan de competir por
-    la parte de arriba (decisión 2026-08-27, depuración de data vieja).
+    Dentro de cada nivel, primero manda la RELEVANCIA (más "me gusta" = más arriba) y
+    después la recencia; y los anuncios que perdieron vigencia (`vigente=False`: N
+    semanas sin renovar) caen AL FINAL. Los sorts son estables y se aplican de menos a
+    más prioritario. No se ocultan los rezagados: siguen visibles, solo dejan de
+    competir por la parte de arriba (decisión 2026-08-27).
     """
     activas = (
         select(PublicacionInterna)
@@ -520,20 +536,23 @@ def feed_marketplace(sesion: Session = Depends(obtener_sesion)):
         .order_by(PublicacionInterna.creado_en.desc())
     )
     internas = sesion.execute(activas).scalars().all()
+    favs = _favoritos_por_placa(sesion, [p.placa for p in internas])
 
     premium = [
-        PublicacionInternaSalida.desde_modelo(p)
+        PublicacionInternaSalida.desde_modelo(p, favs.get(p.placa, 0))
         for p in internas
         if p.plan == PlanPublicacion.PREMIUM.value
     ]
     estandar = [
-        PublicacionInternaSalida.desde_modelo(p)
+        PublicacionInternaSalida.desde_modelo(p, favs.get(p.placa, 0))
         for p in internas
         if p.plan != PlanPublicacion.PREMIUM.value
     ]
-    # Rezagadas al final de su nivel (sort estable: no reordena dentro del grupo).
-    premium.sort(key=lambda s: not s.vigente)
-    estandar.sort(key=lambda s: not s.vigente)
+    # Sorts estables, del menos al más prioritario: recencia (ya viene del query) →
+    # más "me gusta" arriba → rezagadas al final.
+    for lista in (premium, estandar):
+        lista.sort(key=lambda s: -s.total_favoritos)
+        lista.sort(key=lambda s: not s.vigente)
 
     referenciadas = (
         sesion.execute(
@@ -936,6 +955,9 @@ def buscar_publicaciones(
             .all()
         )
         mapa_internas = {p.id: p for p in internas}
+    favs_busqueda = _favoritos_por_placa(
+        sesion, [p.placa for p in mapa_internas.values()]
+    )
 
     mapa_ref: dict[int, PublicacionReferenciada] = {}
     if ids_ref:
@@ -959,7 +981,9 @@ def buscar_publicaciones(
             items.append(
                 ItemBusqueda(
                     tipo_publicacion="interna",
-                    interna=PublicacionInternaSalida.desde_modelo(pub),
+                    interna=PublicacionInternaSalida.desde_modelo(
+                        pub, favs_busqueda.get(pub.placa, 0)
+                    ),
                 )
             )
         else:
@@ -1396,4 +1420,5 @@ def detalle_publicacion(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Publicación no encontrada"
         )
-    return PublicacionDetalleSalida.desde_modelo(pub)
+    favs = _favoritos_por_placa(sesion, [pub.placa])
+    return PublicacionDetalleSalida.desde_modelo(pub, favs.get(pub.placa, 0))

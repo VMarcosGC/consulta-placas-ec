@@ -49,11 +49,11 @@ def _sesion_falsa(resultados_execute):
     sesion = Mock()
 
     def _resultado(r):
+        filas = r if isinstance(r, list) else [r]
         return Mock(
             scalar_one_or_none=Mock(return_value=r),
-            scalars=Mock(
-                return_value=Mock(all=Mock(return_value=r if isinstance(r, list) else [r]))
-            ),
+            all=Mock(return_value=filas),
+            scalars=Mock(return_value=Mock(all=Mock(return_value=filas))),
         )
 
     sesion.execute.side_effect = [_resultado(r) for r in resultados_execute]
@@ -154,10 +154,11 @@ class FeedDegradaLasRezagadasTests(unittest.TestCase):
         vieja.id = 1
         nueva = _publicacion(semanas_sin_renovar=0)
         nueva.id = 2
-        # El feed trae [internas activas] y luego [referenciadas]. La query las ordena
-        # por creado_en desc; acá la vieja llega primero para probar que el sort la baja.
+        # El feed hace 3 queries: [internas activas], [favoritos por placa], [referenciadas].
+        # La query de internas ordena por creado_en desc; acá la vieja llega primero para
+        # probar que el sort la baja.
         main.app.dependency_overrides[obtener_sesion] = lambda: _sesion_falsa(
-            [[vieja, nueva], []]
+            [[vieja, nueva], [], []]
         )
 
         respuesta = self.cliente.get("/marketplace/feed")
