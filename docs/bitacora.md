@@ -21,6 +21,68 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-28 — Servicios por bloques, "vendido" con resumen, y garaje con cuidado + gastos
+
+**Repos:** backend `consulta_placas_ec` (`main`, migraciones 0030–0032) ·
+frontend `consulta-placas-web` (`main`, varios commits).
+
+**Qué se hizo**
+
+1. **Directorio de servicios, iteración 2.** `/servicios` pasa a DOS niveles: bloques
+   por categoría (con conteo) → al tocar uno, la lista de esa categoría. Cada servicio
+   es un acordeón: resumen + dirección, horario y teléfono + apartado **"Agenda tu
+   cita"** (servicio de la plataforma, aún no disponible). Mezcla los negocios
+   aprobados del backend (`GET /marketplace/servicios`) con la demo (~84) y, si el
+   backend falla, queda la demo. Alta de negocio: **formulario propio** (requiere
+   sesión) → `crearServicio()` entra `pendiente`; el wa.me pasa a vía secundaria.
+   Backend: campo `horario` (texto libre) en `servicios` — **migración 0030**.
+2. **Inicio compacto + favoritos fuera del market + Servicios en la barra móvil.**
+   "¿Qué quieres hacer?" pasa a grilla **2×2** en celular (era 1 columna a pantalla
+   completa). Se quitó el bloque "♥ Tus favoritos" del feed de `/marketplace`: los
+   guardados viven **solo** en `/intereses`. `BarraNavegacionMovil` gana una cuarta
+   entrada, **Servicios** (antes solo Inicio / Marketplace / Publicar).
+3. **"Vendido": dónde va + resumen.** Marcar un anuncio como `vendida` ya existía;
+   faltaba la fecha y la ubicación en la UI. **Migración 0031**: `vendido_en` en
+   `publicaciones_internas`, sellada al entrar a `vendida` y limpiada al salir
+   (`_aplicar_transicion_estado`). `mis-publicaciones`: fila de resumen por estado,
+   botón "Marcar como vendido" en cada anuncio activo/pausado, y **panel "🎉
+   Vendidos"** aparte con la fecha de venta y "Volver a publicar". El seed demo
+   (`seed_demo.py`) aplica el **sello "revisado por mecánica"** a 12 publicaciones
+   con ficha (nombre + ciudad de una mecánica ficticia + fecha), con top-up
+   idempotente.
+4. **Garaje: control del vehículo (`/mi-garage/[id]`).** Página nueva por vehículo:
+   - **Plan de cuidado** — `GET /vehiculos/{id}/plan-cuidado`: 13 reglas genéricas
+     (aceite 5.000 km/6 meses, frenos, líquido de frenos, distribución, matrícula
+     anual…) cruzadas con los `mantenimientos` registrados → estado por ítem (al día
+     / pronto / vencido / sin datos). Km de referencia = mayor dato conocido (última
+     lectura o último mantenimiento). `fuente: "reglas"` + `nota_ia` dejan lugar al
+     plan con IA. Función pura en `services/plan_cuidado.py`.
+   - **Últimos mantenimientos** — se surface el listado (antes el garaje no lo
+     mostraba) + alta inline; al guardar se recalcula el plan.
+   - **Control de gastos** — **migración 0032**, tabla `gastos_vehiculo`
+     (combustible, mantenimiento, seguro, matrícula, peajes, multas, repuestos,
+     lavado, otro). `POST/GET/DELETE /vehiculos/{id}/gastos`; el GET devuelve
+     listado + `resumen` derivado (total, promedio mensual, desglose por tipo) y la
+     suma de `costo` de los mantenimientos (total combinado, sin doble registro).
+
+**Verificación**
+- Backend: `python -m unittest discover tests` → **219 OK** (+20: `test_servicios`
+  ampliado, `test_publicacion_vendido_en`, `test_gastos_vehiculo`, `test_plan_cuidado`).
+- Frontend: `tsc --noEmit` + `eslint "src/**/*"` + `next build` → limpio.
+- Sin comprobación visual en navegador (el navegador embebido sigue sin responder).
+
+**Pendientes / notas**
+- Migraciones 0030–0032 **sin aplicar a Neon desde acá** (el clasificador bloquea
+  `alembic upgrade head`): las aplica Render en el deploy (`CMD` del Dockerfile) o
+  Marcos en local.
+- `seed_demo.py` con el sello **no se corrió** (toca Neon): correrlo tras desplegar.
+- Item 6 (rates de servicios) sigue diferido: reusar el patrón de `calificaciones`
+  cuando los servicios tengan uso real.
+- Plan de cuidado con IA (según modelo/año/estado): pendiente; el contrato
+  (`fuente`, `nota_ia`) ya lo contempla.
+
+---
+
 ## 2026-08-27 — Distribución geográfica, detalle del anuncio, reel y zona de publicidad
 
 **Repos:** backend `consulta_placas_ec` (`main`, merge `feat/distribucion-geografica`) ·
