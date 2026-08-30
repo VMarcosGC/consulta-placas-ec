@@ -21,6 +21,33 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-30 — Carga de 20 referencias externas (SUV Facebook Marketplace, Quito)
+
+**Repo:** backend `consulta_placas_ec` (`main`, commit `ba39647`).
+
+**Qué se hizo.** Marcos pasó `matriz_20_suv_marketplace_quito.xlsx` (20 SUV de FB
+Marketplace, Quito, USD 13.300–17.900, armada por Codex el 2026-08-30) para cargarlos
+"como externos". Se creó `scripts/importar_referencias_fb.py`: importador idempotente
+(clave `url_externa`) que inserta a `publicaciones_referenciadas` por SQLAlchemy Core,
+con los 20 registros horneados. Cada uno pasa la misma validación
+`PublicacionReferenciadaCrear` que el endpoint. Flags: `--aprobar` (feed directo) /
+`--aportante EMAIL` (default `mrkitov@gmail.com`) / `--borrar`.
+
+**Ejecución (prod Neon).** `python -m scripts.importar_referencias_fb --aprobar` →
+**20 creadas**, `estado_moderacion=aprobada`, `activa=True`, `usuario_id=5`
+(mrkitov@gmail.com). Ya visibles en el feed y en "Mis referencias" de esa cuenta.
+
+**Notas.**
+- Las URLs de foto de `fbcdn.net` vienen firmadas y caducan en pocos días; al expirar
+  la tarjeta cae al placeholder "Sin fotos". Para fotos permanentes habría que
+  resubirlas a Cloudinary.
+- Deshacer: `python -m scripts.importar_referencias_fb --borrar` (borra exactamente
+  esas 20 por URL).
+- `openpyxl` se instaló en la venv solo para extraer el xlsx; NO es dependencia del
+  proyecto ni del script (los datos van horneados).
+
+---
+
 ## 2026-08-28 — Servicios por bloques, "vendido" con resumen, y garaje con cuidado + gastos
 
 **Repos:** backend `consulta_placas_ec` (`main`, migraciones 0030–0032) ·
