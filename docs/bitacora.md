@@ -64,11 +64,27 @@ frontend `consulta-placas-web` (`main`, varios commits).
      lavado, otro). `POST/GET/DELETE /vehiculos/{id}/gastos`; el GET devuelve
      listado + `resumen` derivado (total, promedio mensual, desglose por tipo) y la
      suma de `costo` de los mantenimientos (total combinado, sin doble registro).
+5. **Feed estilo FB Marketplace (solo frontend, commit `52eda62`).**
+   - **Leyenda de tiempo flotante** (`LeyendaTiempoScroll`): "Hoy / Ayer / Esta
+     semana / Este mes / <Mes Año>" mientras te desplazas, se desvanece al parar. Lee
+     `[data-fecha]` que ahora emiten las `ListingCard` (por `creado_en`); en
+     `/marketplace` escucha window, en `/marketplace/reel` su contenedor.
+   - **El scroll del feed ya no se pierde al volver del detalle**
+     (`lib/feedScroll.ts`): foto en `sessionStorage` (1 ranura, TTL 30 min, clave =
+     querystring) del feed curado + estado de búsqueda paginado + scrollY. Al
+     remontar `/marketplace` con la misma clave se rehidrata, se saltan los refetch
+     iniciales y se restaura el scroll.
+   - **Servicios ordenados por cercanía**: `/servicios` pide la ubicación del
+     navegador (con caída a elegir ciudad); con un origen, la lista de la categoría
+     se ordena por distancia y cada negocio muestra "📍 ~N km · ~M min". Sin
+     coordenadas por negocio todavía: centroide de la ciudad / capital de provincia
+     (`lib/geolocalizacion.ts`, haversine + 12 ciudades). Marcado como aproximado.
 
 **Verificación**
 - Backend: `python -m unittest discover tests` → **219 OK** (+20: `test_servicios`
   ampliado, `test_publicacion_vendido_en`, `test_gastos_vehiculo`, `test_plan_cuidado`).
-- Frontend: `tsc --noEmit` + `eslint "src/**/*"` + `next build` → limpio.
+- Frontend: `tsc --noEmit` + `eslint "src/**/*"` + `next build` → limpio (dos rondas:
+  garaje/vendido y feed FB).
 - Sin comprobación visual en navegador (el navegador embebido sigue sin responder).
 
 **Pendientes / notas**
@@ -80,6 +96,9 @@ frontend `consulta-placas-web` (`main`, varios commits).
   cuando los servicios tengan uso real.
 - Plan de cuidado con IA (según modelo/año/estado): pendiente; el contrato
   (`fuente`, `nota_ia`) ya lo contempla.
+- Servicios por cercanía usa centroide de ciudad. Para distancias reales haría falta
+  `latitud`/`longitud` por negocio (migración + campo en el form de alta): pendiente,
+  no urgente.
 
 ---
 
