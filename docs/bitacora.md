@@ -21,6 +21,56 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-30 (3) — Pasada visual + Puntos de encuentro seguros + fix de hidratación
+
+**Repos:** backend `consulta_placas_ec` (`main`, migración 0033, commit `6f7855d`) ·
+frontend `consulta-placas-web` (`main`, commit `7ae0987`).
+
+**Pasada visual (frontend).** Marcos pidió que la web se sienta "calmada y con
+atracción" y que "los colores hagan juego en cada zona". El sistema "Grafito" ya es
+casi monocromo por diseño; el ruido venía de los **emoji de color** (🔧🛡️💡✨🫧🏭🔍🚗
+📢🛠️) usados como iconos de sección/categoría. Se creó `Iconos.tsx` (15 SVG
+monocromos, `currentColor`, mismo trazo que la barra móvil) y se reemplazaron en:
+tarjetas del inicio, categorías de `/servicios` (+ su eco en `/intereses`) y el
+buscador del marketplace. Resultado revisado en navegador (claro + oscuro): la
+página lee como un solo sistema. Además `DistribucionGeografica` reintenta el fetch
+2× con backoff — antes un cold start de Render ocultaba el mapa de la portada hasta
+recargar.
+
+**Puntos de encuentro seguros (feature nueva, migración 0033).** Ver entrada
+detallada del commit `6f7855d`: catálogo curado (6 puntos de Quito, sembrados),
+`presencias_punto` (el vendedor anuncia que lleva una publicación suya a un punto en
+una fecha/franja), matriz pública de "qué autos van a estar acá". `tiene_seguridad`
+queda declarado (hoy `false`) para sumar seguridad privada/policial sin migración.
+Endpoints públicos + del dueño + admin; 18 tests (237 OK). Frontend:
+`/puntos-encuentro` (lista + "tus anuncios"), `/puntos-encuentro/[id]` (detalle +
+form "voy a llevar mi auto"); accesos desde nav, footer y un banner en
+`/marketplace`.
+
+**Fix de hidratación del feed (regresión).** La restauración de scroll del
+`2026-08-28` leía el snapshot de `sessionStorage` en un inicializador de `useState`
+→ server lo veía `null`, cliente un objeto → mismatch de hidratación (reventaba la
+línea de stats del marketplace en dev, y en prod regeneraba el árbol). Ahora el
+snapshot se lee/aplica en un efecto post-montaje con los fetch iniciales esperando a
+`restauracionLista`; el render de hidratación vuelve a coincidir server/cliente.
+
+**Verificación.**
+- Backend: `python -m unittest discover tests` → **237 OK** (skipped=6).
+- Frontend: `tsc --noEmit` + `eslint "src/**/*"` + `next build` limpios.
+- Navegador (dev server contra el backend de Render): inicio, `/servicios`,
+  `/marketplace`, `/puntos-encuentro` y `/puntos-encuentro/1` revisados en claro y
+  oscuro.
+
+**Pendientes / notas.**
+- Aviso de dev de Next 16 "`<script>` cannot be a child of `<html>`" por el script
+  no-flash del tema: **pre-existente**, no es regresión. `suppressHydrationWarning`
+  está puesto y la app renderiza bien; `next/script beforeInteractive` y un `<head>`
+  literal no lo evitan en el root layout de App Router. Se deja como está.
+- La consulta por placa sigue en stand-by; los avisos de `getServerSnapshot should
+  be cached` del `Header` son pre-existentes.
+
+---
+
 ## 2026-08-30 (2) — Bug de prod: sello de mecánica nunca aparecía + 81 fantasma en el seed
 
 **Repo:** backend `consulta_placas_ec` (`main`, commit `c35a5ca`).
