@@ -21,6 +21,45 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-30 (2) — Bug de prod: sello de mecánica nunca aparecía + 81 fantasma en el seed
+
+**Repo:** backend `consulta_placas_ec` (`main`, commit `c35a5ca`).
+
+**Qué pasó.** Marcos reportó "algo no está bien" con el sello de mecánica: revisando
+el feed en vivo, **ninguna** de las 103 publicaciones traía `sello_mecanica` (se
+verificó con `curl` contra `/marketplace/feed`). Causa: la corrida de `seed_demo.py`
+del cierre anterior nunca se había ejecutado contra Neon (quedó pendiente en la
+bitácora del 2026-08-28). Al correrla ahora para aplicar el top-up de sellos, el
+script reportó "81 creadas / 19 ya existían" en vez de "0 creadas / 100 ya
+existían" — **bug real**: `sello_idx`, `rng.choice(MECANICAS_SELLO)` y el jitter de
+`certificado_mecanica_en` tomaban números del MISMO `random.Random(SEMILLA)` que ya
+definía marca/modelo/año/precio/km/placa de las 100 specs; insertar esos draws
+corrió toda la secuencia y cada spec terminó con una placa distinta a la sembrada →
+el script dejó de reconocer lo existente y creó **81 publicaciones fantasma
+duplicadas** en prod (100 → 181 en la cuenta demo).
+
+**Remediación (misma sesión).**
+1. Fix en `scripts/seed_demo.py`: `rng_sello = random.Random(SEMILLA + 1)`,
+   independiente de `rng`, para todo el sello de mecánica.
+2. `python -m scripts.seed_demo --borrar` → limpió las 181 publicaciones fantasma
+   (+ 121 fichas, 398 fotos) de la cuenta `demo-seed@carstore.local`.
+3. `python -m scripts.seed_demo` (ya con el fix) → resembró limpio: **100
+   publicaciones, 65 fichas, 12 con sello de mecánica**. Segunda corrida confirma
+   idempotencia real: "creadas: 0 / ya existían: 100 / sellos aplicados: 0".
+4. Verificado en vivo: `GET /marketplace/feed` devuelve 12 publicaciones con
+   `sello_mecanica`, y `/marketplace/461` en el navegador muestra el pill verde
+   "🔧 Revisado por Tecnicentro Andrade" arriba del precio, tal como se diseñó
+   (aval de una mecánica sobre la ficha del vehículo, no sobre el vendedor ni el
+   servicio).
+
+**Lección.** Cuando un seed determinista identifica filas por un valor que él mismo
+genera con RNG (acá la placa), CUALQUIER campo nuevo que agregue randomness debe
+usar un `Random` separado — nunca el mismo stream, así se inserte "después" en el
+código: el orden de ejecución en el loop es lo que importa, no el orden en el
+archivo.
+
+---
+
 ## 2026-08-30 — Carga de 20 referencias externas (SUV Facebook Marketplace, Quito)
 
 **Repo:** backend `consulta_placas_ec` (`main`, commit `ba39647`).
