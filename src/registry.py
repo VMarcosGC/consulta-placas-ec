@@ -33,6 +33,7 @@ from src.modules.consulta.models.desbloqueos import (  # noqa: F401
 # marketplace
 from src.modules.marketplace.models import (  # noqa: F401
     Calificacion,
+    CitaServicio,
     CodigoCertificacion,
     ContactoRevelado,
     EnlaceCompartido,

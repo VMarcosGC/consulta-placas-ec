@@ -96,6 +96,23 @@ class EstadoPresencia(str, enum.Enum):
     CANCELADA = "cancelada"
 
 
+class EstadoCita(str, enum.Enum):
+    """Ciclo de vida de una cita de agendamiento en un servicio del directorio.
+
+    `solicitada` la crea el cliente. El negocio responde: `confirmada`, `rechazada`
+    o `reprogramada` (ofreciendo otra fecha/franja, que el cliente acepta pasando a
+    `confirmada` o rechaza cancelando). `cancelada` la pone el cliente; `cumplida` el
+    negocio cuando la cita ya ocurrió.
+    """
+
+    SOLICITADA = "solicitada"
+    CONFIRMADA = "confirmada"
+    REPROGRAMADA = "reprogramada"
+    RECHAZADA = "rechazada"
+    CANCELADA = "cancelada"
+    CUMPLIDA = "cumplida"
+
+
 class TipoVendedor(str, enum.Enum):
     """Naturaleza del vendedor detrás de una publicación (AGENTS §1.0.4).
 
@@ -240,6 +257,12 @@ class Servicio(Base):
     horario: Mapped[str | None] = mapped_column(String(120), nullable=True)
     url_externa: Mapped[str | None] = mapped_column(String(500), nullable=True)
     certificado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    # El negocio opta por recibir solicitudes de cita (agendamiento, migración 0034).
+    # A diferencia de `certificado`, esto SÍ lo declara el propio negocio en el alta:
+    # no es una señal de confianza, es una preferencia operativa.
+    acepta_agendamiento: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )
     estado_moderacion: Mapped[str] = mapped_column(
@@ -817,3 +840,51 @@ class PresenciaPunto(Base):
     punto: Mapped["PuntoEncuentro"] = relationship(back_populates="presencias")
     publicacion: Mapped["PublicacionInterna"] = relationship()
     usuario: Mapped["Usuario"] = relationship()  # noqa: F821
+
+
+class CitaServicio(Base):
+    """Una solicitud de cita de un cliente a un negocio del directorio de servicios
+    (migración 0034). Solo se crea contra un `Servicio` que tenga
+    `acepta_agendamiento=True`.
+
+    Vive en la BD propia (§10.2), gratis (§1.0.3). El "negocio" que la gestiona es el
+    usuario que aportó el `Servicio` (`aportado_por_usuario_id`); si es NULL, solo un
+    admin puede responderla. `fecha_propuesta`/`franja_propuesta` guardan la
+    contraoferta del negocio al reprogramar.
+    """
+
+    __tablename__ = "citas_servicio"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    servicio_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("servicios.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    solicitante_usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    nombre_contacto: Mapped[str] = mapped_column(String(120), nullable=False)
+    telefono_contacto: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    vehiculo: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    motivo: Mapped[str] = mapped_column(String(20), nullable=False)
+    fecha: Mapped[date] = mapped_column(Date, nullable=False)
+    franja: Mapped[str] = mapped_column(String(16), nullable=False)
+    nota: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    estado: Mapped[str] = mapped_column(
+        String(16), nullable=False,
+        server_default=EstadoCita.SOLICITADA.value,
+        default=EstadoCita.SOLICITADA.value,
+    )
+    respuesta_negocio: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    fecha_propuesta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    franja_propuesta: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    servicio: Mapped["Servicio"] = relationship()
+    solicitante: Mapped["Usuario"] = relationship()  # noqa: F821

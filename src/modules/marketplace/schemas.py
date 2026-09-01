@@ -18,6 +18,7 @@ from src.core.ofuscacion import ofuscar_identificador
 from src.core.validators import validar_placa
 from src.modules.vehiculos.schemas.vehiculo import VehiculoSalidaCompartida
 from src.modules.marketplace.models import (
+    EstadoCita,
     EstadoModeracion,
     EstadoPresencia,
     EstadoPublicacion,
@@ -1159,6 +1160,8 @@ class ServicioCrear(BaseModel):
     direccion: str | None = Field(default=None, max_length=200)
     horario: str | None = Field(default=None, max_length=120)
     url_externa: str | None = Field(default=None, max_length=500)
+    # Preferencia operativa que el negocio SÍ declara solo (no es un sello de confianza).
+    acepta_agendamiento: bool = False
 
     @field_validator("provincia")
     @classmethod
@@ -1188,9 +1191,17 @@ class ServicioSalida(BaseModel):
     horario: str | None
     url_externa: str | None
     certificado: bool
+    acepta_agendamiento: bool = False
     estado_moderacion: EstadoModeracion
     activo: bool
     creado_en: datetime
+
+    @field_validator("acepta_agendamiento", mode="before")
+    @classmethod
+    def _agenda_no_nula(cls, v: object) -> bool:
+        # La columna es NOT NULL DEFAULT false; solo un objeto ORM armado a mano (tests)
+        # llega con `None` antes del flush. Se normaliza a False.
+        return bool(v)
 
 
 class ModeracionServicio(BaseModel):
@@ -1366,3 +1377,100 @@ class MiPresenciaSalida(BaseModel):
     nota: str | None
     creado_en: datetime
     vehiculo: VehiculoEnPresencia
+
+
+# ════════════════ Agendamiento de citas para servicios (migración 0034) ════════════════
+# La plataforma ofrece agendamiento: el negocio opta (`acepta_agendamiento`), el
+# cliente pide una cita y el negocio la confirma / reprograma / rechaza.
+
+MotivoCita = Literal[
+    "mantenimiento",
+    "revision",
+    "diagnostico",
+    "lavado",
+    "accesorios",
+    "otro",
+]
+FranjaAgenda = Literal["manana", "tarde", "noche", "todo_el_dia"]
+
+MOTIVO_CITA_LEGIBLE: dict[str, str] = {
+    "mantenimiento": "Mantenimiento",
+    "revision": "Revisión general",
+    "diagnostico": "Diagnóstico / falla",
+    "lavado": "Lavado / detailing",
+    "accesorios": "Accesorios / instalación",
+    "otro": "Otro",
+}
+
+
+class CitaCrear(BaseModel):
+    """El cliente pide una cita en un servicio que acepta agendamiento."""
+
+    nombre_contacto: str = Field(min_length=2, max_length=120)
+    telefono_contacto: str | None = Field(default=None, max_length=20)
+    vehiculo: str | None = Field(default=None, max_length=120)
+    motivo: MotivoCita
+    fecha: date
+    franja: FranjaAgenda
+    nota: str | None = Field(default=None, max_length=400)
+
+    @field_validator("fecha")
+    @classmethod
+    def _no_en_el_pasado(cls, v: date) -> date:
+        if v < date.today():
+            raise ValueError("La fecha no puede ser anterior a hoy.")
+        return v
+
+
+class CitaActualizar(BaseModel):
+    """El cliente reprograma su cita (mientras esté `solicitada`), la cancela, o
+    acepta la contraoferta del negocio (`estado: confirmada`)."""
+
+    fecha: date | None = None
+    franja: FranjaAgenda | None = None
+    nota: str | None = Field(default=None, max_length=400)
+    estado: Literal["cancelada", "confirmada"] | None = None
+
+    @field_validator("fecha")
+    @classmethod
+    def _no_en_el_pasado(cls, v: date | None) -> date | None:
+        if v is not None and v < date.today():
+            raise ValueError("La fecha no puede ser anterior a hoy.")
+        return v
+
+
+class RespuestaNegocio(BaseModel):
+    """El negocio responde una cita solicitada."""
+
+    decision: Literal["confirmada", "rechazada", "reprogramada", "cumplida"]
+    respuesta: str | None = Field(default=None, max_length=400)
+    fecha_propuesta: date | None = None
+    franja_propuesta: FranjaAgenda | None = None
+
+    @field_validator("fecha_propuesta")
+    @classmethod
+    def _propuesta_no_en_el_pasado(cls, v: date | None) -> date | None:
+        if v is not None and v < date.today():
+            raise ValueError("La fecha propuesta no puede ser anterior a hoy.")
+        return v
+
+
+class CitaSalida(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    servicio_id: int
+    servicio_nombre: str | None = None
+    servicio_ciudad: str | None = None
+    nombre_contacto: str
+    telefono_contacto: str | None
+    vehiculo: str | None
+    motivo: MotivoCita
+    fecha: date
+    franja: FranjaAgenda
+    nota: str | None
+    estado: EstadoCita
+    respuesta_negocio: str | None
+    fecha_propuesta: date | None
+    franja_propuesta: FranjaAgenda | None
+    creado_en: datetime

@@ -46,6 +46,7 @@ def crear_servicio(
         direccion=(datos.direccion or None),
         horario=(datos.horario or None),
         url_externa=(datos.url_externa or None),
+        acepta_agendamiento=datos.acepta_agendamiento,
         aportado_por_usuario_id=usuario.id,
     )
     sesion.add(s)
