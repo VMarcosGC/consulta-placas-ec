@@ -21,6 +21,50 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-08-30 (4) — Datos demo en puntos, agendamiento de servicios, widget de chat
+
+**Repos:** backend `consulta_placas_ec` (`main`, migración 0034, commits `b1803d7`,
+`fd58501`) · frontend `consulta-placas-web` (`main`, commits `16f6fa1`, `b20fced`).
+
+**1. Presencias demo en los puntos de encuentro.** `scripts/seed_puntos_encuentro.py`
+anuncia 22 publicaciones activas de la cuenta demo repartidas entre los 6 puntos de
+Quito (fechas próximas, franjas variadas). Corrido contra Neon; 3–5 autos por punto,
+verificado en el feed.
+
+**2. Agendamiento de citas para servicios (migración 0034).** "La plataforma
+disponibiliza el agendamiento; el otro lado es ir con los negocios y ofrecérselo."
+- `servicios.acepta_agendamiento` (lo declara el propio negocio en el alta) + tabla
+  `citas_servicio`. Flujo: cliente pide (`POST /servicios/{id}/citas`, 422 si el
+  negocio no acepta) → negocio confirma / reprograma (propone fecha/franja) / rechaza
+  / marca cumplida (`POST /citas/{id}/responder`, dueño del servicio o admin, 404 a
+  terceros) → cliente ve todo en `GET /citas/mias`, acepta la reprogramación o
+  cancela (`PATCH /citas/{id}`). Bandeja del negocio: `GET /citas/recibidas`.
+- Frontend: el bloque "Agenda tu cita" del detalle de `/servicios` es real (form
+  inline si el negocio acepta; copy honesto si no). Página `/servicios/agenda` con
+  los dos lados. Alta de negocio con checkbox `acepta_agendamiento` + copy del pitch.
+- `scripts/seed_agendamiento.py`: 8 negocios `aprobada` con agendamiento atribuidos
+  a `--dueno` (default mrkitov@gmail.com) + 4 citas demo. Corrido contra Neon;
+  verificado en `/marketplace/servicios`.
+- 15 tests nuevos (252 OK). Bug atrapado: agregar `acepta_agendamiento` a
+  `ServicioSalida` rompía 2 tests que arman `Servicio(...)` sin ese campo → validator
+  `mode="before"` que normaliza `None → False` (la columna es NOT NULL DEFAULT false;
+  solo un objeto ORM pre-flush llega con None).
+
+**3. Widget flotante de chat interno.** `ChatWidget` — botón abajo-derecha con punto
+verde "online" (comunica "plataforma activa", no presencia real). Al abrirlo: "Chat
+interno · En preparación" + las vías que sí funcionan hoy (teléfono del anuncio,
+puntos de encuentro, agendar una cita). Se oculta en el reel.
+
+**Verificación.**
+- Backend: `python -m unittest discover tests` → **252 OK** (skipped=6).
+- Frontend: `tsc --noEmit` + `eslint "src/**/*"` + `next build` limpios.
+- Navegador: `/servicios` (detalle con "Agenda tu cita"), `/puntos-encuentro`, el
+  widget de chat abierto — revisados en el dev server contra el backend de Render.
+- Migraciones 0033 y 0034 ya desplegadas en Render (auto-deploy); seeds corridos
+  contra Neon.
+
+---
+
 ## 2026-08-30 (3) — Pasada visual + Puntos de encuentro seguros + fix de hidratación
 
 **Repos:** backend `consulta_placas_ec` (`main`, migración 0033, commit `6f7855d`) ·
