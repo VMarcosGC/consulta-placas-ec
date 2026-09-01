@@ -486,14 +486,23 @@ def _fotos_para(idx: int, rng: random.Random) -> list[tuple[str, int, str | None
 def _construir_specs() -> list[dict]:
     """Las 100 publicaciones como dicts puros y deterministas (semilla fija)."""
     rng = random.Random(SEMILLA)
+    # RNG INDEPENDIENTE para todo lo del sello de mecánica. Es a propósito: el sello se
+    # agregó DESPUÉS de que `rng` ya definía marca/modelo/año/precio/km/ciudad/ficha/fotos
+    # de las 100 specs (identificadas por placa, que también sale de `rng`). Si el sello
+    # consumiera del mismo `rng` —como pasó en el primer intento—, corre el resto de la
+    # secuencia y cada spec cambia de placa: el script deja de reconocer las publicaciones
+    # ya sembradas ("ya existían") y crea 100 filas NUEVAS en vez de topear las viejas.
+    # Encontrado el 2026-08-30 al ver 81 publicaciones fantasma en prod tras un `--sello`
+    # mal cableado. `rng_sello` nunca toca `rng`: la secuencia principal queda intacta.
+    rng_sello = random.Random(SEMILLA + 1)
     ahora = datetime.now(timezone.utc)
 
     premium_idx = set(rng.sample(range(N_PUBLICACIONES), N_PREMIUM))
     verificadas_idx = set(rng.sample(sorted(premium_idx), N_VERIFICADAS))
     ficha_idx = set(rng.sample(range(N_PUBLICACIONES), N_CON_FICHA))
     # El sello de mecánica solo tiene sentido en anuncios con ficha (la revisión
-    # respalda lo declarado): se eligen de entre esos.
-    sello_idx = set(rng.sample(sorted(ficha_idx), N_CON_SELLO_MECANICA))
+    # respalda lo declarado): se eligen de entre esos. `rng_sello`, no `rng`.
+    sello_idx = set(rng_sello.sample(sorted(ficha_idx), N_CON_SELLO_MECANICA))
 
     usadas: set[str] = set()
     specs: list[dict] = []
@@ -552,11 +561,13 @@ def _construir_specs() -> list[dict]:
 
         # Sello "revisado por mecánica": nombre + ciudad de una mecánica ficticia y una
         # fecha posterior a la publicación (la revisión ocurre con el auto ya en venta).
+        # `rng_sello`, NUNCA `rng` (ver nota en `_construir_specs`): no debe alterar la
+        # cantidad de números que `rng` entrega en este `idx` ni en los siguientes.
         mecanica_nombre = mecanica_ciudad = certificado_mecanica_en = None
         if idx in sello_idx:
-            mecanica_nombre, mecanica_ciudad = rng.choice(MECANICAS_SELLO)
+            mecanica_nombre, mecanica_ciudad = rng_sello.choice(MECANICAS_SELLO)
             certificado_mecanica_en = min(
-                ahora, creado_en + timedelta(days=rng.randint(1, 14))
+                ahora, creado_en + timedelta(days=rng_sello.randint(1, 14))
             )
 
         fotos = _fotos_para(idx, rng)
