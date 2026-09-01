@@ -39,8 +39,10 @@ from src.modules.marketplace.models import (  # noqa: F401
     EstadoModeracion,
     FichaPublicacion,
     FotoPublicacion,
+    PresenciaPunto,
     PublicacionInterna,
     PublicacionReferenciada,
+    PuntoEncuentro,
     Servicio,
     Vendedor,
 )

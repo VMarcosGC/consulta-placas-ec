@@ -19,9 +19,11 @@ from src.core.validators import validar_placa
 from src.modules.vehiculos.schemas.vehiculo import VehiculoSalidaCompartida
 from src.modules.marketplace.models import (
     EstadoModeracion,
+    EstadoPresencia,
     EstadoPublicacion,
     EstadoVerificacion,
     FichaPublicacion,
+    FranjaPresencia,
     PlanPublicacion,
     PublicacionInterna,
     TipoVendedor,
@@ -1203,3 +1205,164 @@ class ModeracionServicio(BaseModel):
         if v == EstadoModeracion.PENDIENTE:
             raise ValueError("La decisión debe ser 'aprobada' o 'rechazada'.")
         return v
+
+
+# ════════════════ Puntos de encuentro seguros (migración 0033) ════════════════
+# Un catálogo de lugares curados (admin) donde comprador y vendedor se ven en
+# persona. Un vendedor anuncia que va a llevar UNA publicación suya a un punto en
+# una fecha/franja; el comprador ve, por punto, qué autos van a estar ahí.
+
+FRANJAS_LEGIBLES: dict[str, str] = {
+    "manana": "Mañana",
+    "tarde": "Tarde",
+    "noche": "Noche",
+    "todo_el_dia": "Todo el día",
+}
+
+
+class PuntoEncuentroCrear(BaseModel):
+    """Alta de un punto de encuentro. Solo admin."""
+
+    nombre: str = Field(min_length=3, max_length=120)
+    ciudad: str = Field(default="Quito", max_length=80)
+    sector: str | None = Field(default=None, max_length=120)
+    direccion: str = Field(min_length=3, max_length=200)
+    referencia: str | None = Field(default=None, max_length=300)
+    latitud: Decimal | None = Field(default=None, ge=-90, le=90)
+    longitud: Decimal | None = Field(default=None, ge=-180, le=180)
+    horario: str | None = Field(default=None, max_length=120)
+    tiene_seguridad: bool = False
+    notas: str | None = Field(default=None, max_length=500)
+    orden: int = 0
+
+
+class PuntoEncuentroActualizar(BaseModel):
+    """Edición parcial de un punto de encuentro. Solo admin."""
+
+    nombre: str | None = Field(default=None, min_length=3, max_length=120)
+    sector: str | None = Field(default=None, max_length=120)
+    direccion: str | None = Field(default=None, min_length=3, max_length=200)
+    referencia: str | None = Field(default=None, max_length=300)
+    latitud: Decimal | None = Field(default=None, ge=-90, le=90)
+    longitud: Decimal | None = Field(default=None, ge=-180, le=180)
+    horario: str | None = Field(default=None, max_length=120)
+    tiene_seguridad: bool | None = None
+    notas: str | None = Field(default=None, max_length=500)
+    activo: bool | None = None
+    orden: int | None = None
+
+
+class PuntoEncuentroSalida(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nombre: str
+    ciudad: str
+    sector: str | None
+    direccion: str
+    referencia: str | None
+    latitud: Decimal | None
+    longitud: Decimal | None
+    horario: str | None
+    tiene_seguridad: bool
+    notas: str | None
+    activo: bool
+    orden: int
+    # Cuántas presencias `anunciada` (fecha >= hoy) tiene este punto ahora mismo.
+    # Lo calcula el router en lote; 0 por defecto para no romper construcciones a mano.
+    presencias_activas: int = 0
+
+
+class VehiculoEnPresencia(BaseModel):
+    """Resumen del auto anunciado — se lee de la publicación en vivo (no se
+    duplica): si el precio cambia o el anuncio se borra, el punto refleja eso."""
+
+    publicacion_id: int
+    placa: str
+    titulo: str | None
+    marca: str | None
+    modelo: str | None
+    anio: int | None
+    precio_usd: Decimal
+    foto_portada: str | None
+
+
+class PresenciaCrear(BaseModel):
+    """El vendedor anuncia que va a llevar `publicacion_id` a este punto."""
+
+    publicacion_id: int
+    fecha: date
+    franja: FranjaPresencia
+    nota: str | None = Field(default=None, max_length=300)
+
+    @field_validator("fecha")
+    @classmethod
+    def _no_en_el_pasado(cls, v: date) -> date:
+        if v < date.today():
+            raise ValueError("La fecha no puede ser anterior a hoy.")
+        return v
+
+
+class PresenciaActualizar(BaseModel):
+    """El vendedor reprograma o cierra su propia presencia."""
+
+    fecha: date | None = None
+    franja: FranjaPresencia | None = None
+    nota: str | None = Field(default=None, max_length=300)
+    estado: EstadoPresencia | None = None
+
+    @field_validator("estado")
+    @classmethod
+    def _estado_terminal(cls, v: EstadoPresencia | None) -> EstadoPresencia | None:
+        if v == EstadoPresencia.ANUNCIADA:
+            raise ValueError(
+                "No se puede volver a 'anunciada'. Crea una presencia nueva."
+            )
+        return v
+
+    @field_validator("fecha")
+    @classmethod
+    def _no_en_el_pasado(cls, v: date | None) -> date | None:
+        if v is not None and v < date.today():
+            raise ValueError("La fecha no puede ser anterior a hoy.")
+        return v
+
+
+class PresenciaSalida(BaseModel):
+    id: int
+    punto_id: int
+    fecha: date
+    franja: FranjaPresencia
+    estado: EstadoPresencia
+    nota: str | None
+    creado_en: datetime
+    vehiculo: VehiculoEnPresencia
+
+
+class PuntoEncuentroDetalleSalida(PuntoEncuentroSalida):
+    """Detalle público de un punto: sus datos + la matriz de autos anunciados."""
+
+    presencias: list[PresenciaSalida] = []
+
+
+class PuntoResumenSalida(BaseModel):
+    """Punto mínimo, para colgar de `MiPresenciaSalida` sin anidar todo el detalle."""
+
+    id: int
+    nombre: str
+    ciudad: str
+    sector: str | None
+
+
+class MiPresenciaSalida(BaseModel):
+    """Una presencia propia, con el punto y el auto resumidos (para 'Mis anuncios
+    en puntos de encuentro')."""
+
+    id: int
+    punto: PuntoResumenSalida
+    fecha: date
+    franja: FranjaPresencia
+    estado: EstadoPresencia
+    nota: str | None
+    creado_en: datetime
+    vehiculo: VehiculoEnPresencia

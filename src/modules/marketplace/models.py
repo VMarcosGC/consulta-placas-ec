@@ -1,8 +1,8 @@
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy import (
-    String, DateTime, BigInteger, Integer, Boolean, Numeric, ForeignKey,
+    String, Date, DateTime, BigInteger, Integer, Boolean, Numeric, ForeignKey,
     CheckConstraint, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -67,6 +67,33 @@ class EstadoModeracion(str, enum.Enum):
     PENDIENTE = "pendiente"
     APROBADA = "aprobada"
     RECHAZADA = "rechazada"
+
+
+class FranjaPresencia(str, enum.Enum):
+    """Momento del día en que el vendedor va a estar en el punto de encuentro.
+
+    Granularidad gruesa a propósito: alcanza para que el comprador sepa si puede
+    coincidir, sin pedirle al vendedor una hora exacta que después no cumple.
+    """
+
+    MANANA = "manana"
+    TARDE = "tarde"
+    NOCHE = "noche"
+    TODO_EL_DIA = "todo_el_dia"
+
+
+class EstadoPresencia(str, enum.Enum):
+    """Ciclo de vida de un anuncio de presencia en un punto de encuentro.
+
+    `anunciada` es el estado inicial. El vendedor la pasa a `finalizada` cuando ya
+    fue (se vendió o no), o la cancela (`cancelada`) si al final no puede ir. Ninguno
+    de los dos borra la fila — así el punto conserva su historial reciente aunque el
+    front solo muestre las `anunciada` vigentes.
+    """
+
+    ANUNCIADA = "anunciada"
+    FINALIZADA = "finalizada"
+    CANCELADA = "cancelada"
 
 
 class TipoVendedor(str, enum.Enum):
@@ -695,3 +722,98 @@ class PublicacionReferenciada(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class PuntoEncuentro(Base):
+    """Un lugar físico curado por la plataforma para negociar en persona (migración
+    0033). Empieza en Quito. `tiene_seguridad` queda declarado desde ya para sumar
+    seguridad privada o policial más adelante SIN migración — hoy es `False` en
+    todos: es un campo, no una promesa de convenio.
+
+    El catálogo lo administra un admin (`POST/PATCH /marketplace/puntos-encuentro`);
+    un vendedor NO puede crear puntos, solo anunciar presencia en los que ya existen.
+    """
+
+    __tablename__ = "puntos_encuentro"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    ciudad: Mapped[str] = mapped_column(String(80), nullable=False, server_default="Quito")
+    sector: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    direccion: Mapped[str] = mapped_column(String(200), nullable=False)
+    referencia: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    latitud: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    longitud: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    horario: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tiene_seguridad: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    notas: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    activo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
+    )
+    orden: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), default=0
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    presencias: Mapped[list["PresenciaPunto"]] = relationship(
+        back_populates="punto", cascade="all, delete-orphan"
+    )
+
+
+class PresenciaPunto(Base):
+    """Un vendedor anuncia que va a llevar UNA de sus publicaciones a un punto de
+    encuentro en una fecha/franja (migración 0033).
+
+    FK viva a `PublicacionInterna` (ON DELETE CASCADE): si se borra el anuncio, la
+    presencia desaparece con él — marca/modelo/precio/foto se leen de la
+    publicación al servir el detalle del punto, no se duplican acá (mismo criterio
+    que el sello de mecánica: un solo lugar de verdad, sin fotos que queden viejas).
+    La UK evita anunciar el mismo auto, en el mismo punto, el mismo día, dos veces.
+    """
+
+    __tablename__ = "presencias_punto"
+    __table_args__ = (
+        UniqueConstraint(
+            "punto_id", "publicacion_interna_id", "fecha",
+            name="uq_presencia_punto_publicacion_fecha",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    punto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("puntos_encuentro.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    publicacion_interna_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("publicaciones_internas.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    fecha: Mapped[date] = mapped_column(Date, nullable=False)
+    franja: Mapped[str] = mapped_column(String(16), nullable=False)
+    estado: Mapped[str] = mapped_column(
+        String(16), nullable=False,
+        server_default=EstadoPresencia.ANUNCIADA.value,
+        default=EstadoPresencia.ANUNCIADA.value,
+    )
+    nota: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    punto: Mapped["PuntoEncuentro"] = relationship(back_populates="presencias")
+    publicacion: Mapped["PublicacionInterna"] = relationship()
+    usuario: Mapped["Usuario"] = relationship()  # noqa: F821
