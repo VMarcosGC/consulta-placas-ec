@@ -49,10 +49,14 @@ EMAIL_DEMO = "demo-seed@carstore.local"
 DUENO_DEFAULT = "mrkitov@gmail.com"
 
 # (nombre, categoria, provincia, ciudad, horario)
+# La categoría "mecanica_certificada" se retiró de la web (Marcos, 2026-08-30): estos
+# negocios ahora entran como "mecanica". El sufijo "· Certificada" del NOMBRE se
+# conserva a propósito: `borrar()` identifica lo sembrado por nombre exacto, así que
+# cambiarlo dejaría huérfanas las filas ya cargadas en Neon.
 _NEGOCIOS = [
     ("Tecnicentro Andrade", "mecanica", "Pichincha", "Quito",
      "Lun a Vie 8:00–18:00 · Sáb 8:00–13:00"),
-    ("Mecánica Total Vera · Certificada", "mecanica_certificada", "Guayas", "Guayaquil",
+    ("Mecánica Total Vera · Certificada", "mecanica", "Guayas", "Guayaquil",
      "Lun a Sáb 8:30–17:30"),
     ("AutoService Cuenca", "centro_servicio", "Azuay", "Cuenca",
      "Lun a Vie 9:00–19:00"),
@@ -64,7 +68,7 @@ _NEGOCIOS = [
      "Lun a Sáb 10:00–19:00"),
     ("Servifrenos Loja", "mecanica", "Loja", "Loja",
      "Lun a Vie 8:00–17:00"),
-    ("MultiMarcas Guerrero · Certificada", "mecanica_certificada", "Pichincha", "Quito",
+    ("MultiMarcas Guerrero · Certificada", "mecanica", "Pichincha", "Quito",
      "Lun a Vie 8:00–18:00"),
 ]
 
@@ -138,7 +142,7 @@ def sembrar(sesion: Session, email_dueno: str) -> dict:
                 insert(_T_SERV).values(
                     nombre=nombre, categoria=cat, provincia=prov, ciudad=ciudad,
                     descripcion="Negocio de demostración para probar el agendamiento en línea.",
-                    horario=horario, certificado=cat == "mecanica_certificada",
+                    horario=horario, certificado=False,
                     acepta_agendamiento=True,
                     estado_moderacion=EstadoModeracion.APROBADA.value, activo=True,
                     aportado_por_usuario_id=dueno_id,
