@@ -21,6 +21,58 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-09-02 — Chat interno comprador↔vendedor, sello de mecánica flotante, análisis de agendamiento
+
+**Repos:** backend `consulta_placas_ec` (`main`, migración 0035, commits `d9b9b9d`,
+`e94a45e`) · frontend `consulta-placas-web` (`main`, commits `a2858fb`, `01c2e85`).
+
+**1. "Mecánica certificada" fuera de `/servicios`.** No hay un proceso real de
+certificación de talleres; la categoría prometía algo que no se cumple. Se quitó de
+`CATEGORIAS_SERVICIO`, `PLANTILLAS`, el chip "✓ Certificado", el alta y el copy. Los
+negocios que el backend traiga con `categoria = "mecanica_certificada"` se muestran
+bajo "Mecánica general" (`desdeApi` colapsa el valor; el contrato de la API no cambia).
+
+**2. El sello "revisado por mecánica" pasa a flotar sobre la foto del auto.** Antes era
+un chip en la cabecera del anuncio, lejos de la imagen. Ahora: `GaleriaAnuncio` →
+`SelloFlotante` (esquina sup-izq del detalle) y un overlay en `ListingCard` (esquina
+inf-der del feed). Es un aval del vehículo y se lee mejor pegado a su imagen.
+
+**3. Chat interno comprador↔vendedor + barrera del WhatsApp (migración 0035).**
+"Termina el chat en la web sin dar paso a WhatsApp si antes no se cumplió algún
+requisito de seguridad relacionado con verificación."
+- Tablas `conversaciones` (un hilo por publicación+comprador, contadores de no leídos
+  por lado, `contacto_habilitado_en`) + `mensajes` (texto plano, `rol_autor`
+  desnormalizado). Router `chat.py` bajo `/marketplace`.
+- **La barrera:** `POST /publicaciones/{id}/contacto` deja de ser público. Para ver el
+  WhatsApp del vendedor hace falta (a) sesión y (b) un hilo donde el vendedor ya
+  respondió (o tocó "Compartir mi WhatsApp"). Sin eso → 422 `chat_requerido` con el
+  `conversacion_id`. El dueño del anuncio se saltea la barrera. 422 `chat_bloqueado`
+  si el vendedor cerró el hilo.
+- Frontend: `PanelChat` (hilo reutilizable, polling 12 s), `/mensajes` (bandeja
+  maestro-detalle para ambos roles), `ContactoVendedor` reescrito (chat primero, botón
+  WhatsApp 🔒 hasta la respuesta), `ChatWidget` deja de ser "en preparación" (enlaza a
+  `/mensajes`, contador de no leídos).
+- Tests: 25 nuevos (`tests/test_chat.py`); `test_contacto_vendedor.py` actualizado a la
+  barrera. Suite backend **278 OK** (skipped=6). tsc + eslint + build frontend en verde.
+
+**4. Análisis de agendamiento (no es código).** Dos documentos en `docs/producto/`:
+- [`agendamiento_propuesta_servicio.md`](producto/agendamiento_propuesta_servicio.md):
+  ICP (talleres chicos de Quito), escenario simulado a 3 meses, dinámica, qué datos se
+  guardan, planes (Directorio gratis / Agenda USD 12 / Agenda Pro USD 25), herramientas
+  (WhatsApp Cloud API para recordatorios), costos y unit economics, esfuerzo (~12–16
+  días de dev + venta puerta a puerta), checklist de lo que falta para cobrar.
+- [`agendamiento_a_produccion.md`](producto/agendamiento_a_produccion.md): datos y
+  LOPDP, jobs programados (recordatorios, expiración, anonimización, rollups) en el
+  worker, almacenamiento (Neon Launch + PITR antes de abrir), dominio (`carstore.ec` +
+  `api.`), y la decisión móvil → **PWA primero, luego TWA en Google Play (USD 25),
+  App Store solo con tracción**. Checklist "listo para abrir a clientes reales".
+
+**Pendientes:** construir lo del doc de agendamiento (recordatorios WhatsApp + jobs,
+`no_show`, `configuracion_agenda`, métricas, alta real) cuando Marcos lo priorice.
+Migración 0035 la aplica Render en el próximo deploy.
+
+---
+
 ## 2026-08-30 (4) — Datos demo en puntos, agendamiento de servicios, widget de chat
 
 **Repos:** backend `consulta_placas_ec` (`main`, migración 0034, commits `b1803d7`,
