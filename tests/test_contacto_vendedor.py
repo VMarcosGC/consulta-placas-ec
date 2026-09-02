@@ -19,10 +19,12 @@ from sqlalchemy.exc import IntegrityError
 
 import main
 from src.core.database import obtener_sesion
-from src.modules.auth.dependencies import usuario_actual, usuario_actual_opcional
+from src.modules.auth.dependencies import usuario_actual
 from src.modules.auth.models import Usuario
 from src.modules.marketplace.models import (
     ContactoRevelado,
+    Conversacion,
+    EstadoConversacion,
     EstadoPublicacion,
     EstadoVerificacion,
     PlanPublicacion,
@@ -93,6 +95,24 @@ def _vendedor(telefono="593987654321"):
         telefono_verificado=False,
         creado_en=datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc),
     )
+
+
+def _conversacion(habilitado=True, comprador_id=99, estado=EstadoConversacion.ABIERTA.value):
+    """Hilo del comprador con el vendedor de la publicación 10. `habilitado` = el
+    vendedor ya respondió, así que la barrera del WhatsApp está levantada."""
+    c = Conversacion(
+        id=1,
+        publicacion_interna_id=10,
+        comprador_usuario_id=comprador_id,
+        vendedor_usuario_id=7,
+        estado=estado,
+        no_leidos_comprador=0,
+        no_leidos_vendedor=0,
+    )
+    c.contacto_habilitado_en = (
+        datetime(2026, 8, 4, 13, 0, tzinfo=timezone.utc) if habilitado else None
+    )
+    return c
 
 
 class NormalizacionTelefonoTests(unittest.TestCase):
@@ -286,10 +306,16 @@ class AltaEnganchaVendedorTests(unittest.TestCase):
 
 
 class ContactoPublicacionTests(unittest.TestCase):
-    """`POST /marketplace/publicaciones/{id}/contacto` — público, gratis, anónimo."""
+    """`POST /marketplace/publicaciones/{id}/contacto` — con sesión y tras el chat.
+
+    Barrera de seguridad (migración 0035): ya no es público. La cobertura del gateo
+    vive en `tests/test_chat.py::ContactoGateTests`; acá se cubren las ramas 404/409
+    y que el número solo sale con una conversación habilitada.
+    """
 
     def setUp(self):
         self.cliente = TestClient(main.app)
+        main.app.dependency_overrides[usuario_actual] = lambda: _usuario(id_=99, nombre="Compradora")
 
     def tearDown(self):
         main.app.dependency_overrides.clear()
@@ -298,7 +324,9 @@ class ContactoPublicacionTests(unittest.TestCase):
         main.app.dependency_overrides[obtener_sesion] = lambda: sesion
 
     def test_contacto_exitoso_devuelve_telefono_y_registra_una_revelacion(self):
-        sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
+        sesion = _sesion_falsa(
+            [_publicacion(vendedor_id=3), _vendedor(), _conversacion(habilitado=True)]
+        )
         self._con_sesion(sesion)
 
         respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
@@ -309,7 +337,7 @@ class ContactoPublicacionTests(unittest.TestCase):
         self.assertEqual(cuerpo["nombre_publico"], "Marcos G.")
         self.assertTrue(cuerpo["whatsapp_url"].startswith("https://wa.me/593987654321"))
 
-        # Exactamente UNA fila de ContactoRevelado, anónima y atada a la interna.
+        # Exactamente UNA fila de ContactoRevelado, atada a la interna.
         self.assertEqual(sesion.add.call_count, 1)
         registro = sesion.add.call_args.args[0]
         self.assertIsInstance(registro, ContactoRevelado)
@@ -317,14 +345,19 @@ class ContactoPublicacionTests(unittest.TestCase):
         self.assertIsNone(registro.publicacion_referenciada_id)
         sesion.commit.assert_called_once()
 
-    def test_sin_vendedor_enganchado_devuelve_409_y_no_busca_por_usuario(self):
-        """Sin fallback: `vendedor_id` NULL sale como 409, no se resuelve por cuenta.
+    def test_sin_conversacion_habilitada_da_422(self):
+        """El corazón de la barrera: sin chat respondido, no hay número."""
+        sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor(), None])
+        self._con_sesion(sesion)
 
-        La vía de respaldo por `usuario_id` se eliminó a propósito. Es equivalente solo
-        mientras la relación cuenta↔vendedor sea 1:1; en la etapa 2 devolvería un
-        vendedor arbitrario **en silencio**. Un 409 honesto es preferible a un teléfono
-        que podría no ser el del dueño de este anuncio.
-        """
+        respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
+
+        self.assertEqual(respuesta.status_code, 422)
+        self.assertEqual(respuesta.json()["detail"]["codigo"], "chat_requerido")
+        sesion.add.assert_not_called()
+
+    def test_sin_vendedor_enganchado_devuelve_409_y_no_busca_por_usuario(self):
+        """Sin fallback: `vendedor_id` NULL sale como 409, no se resuelve por cuenta."""
         sesion = _sesion_falsa([_publicacion(vendedor_id=None)])
         self._con_sesion(sesion)
 
@@ -363,37 +396,26 @@ class ContactoPublicacionTests(unittest.TestCase):
         self.assertEqual(respuesta.status_code, 404)
         sesion.add.assert_not_called()
 
-    def test_no_exige_autenticacion_ni_cobra_tokens(self):
-        """El contacto es público y libre (§1.0.3): sin `usuario_actual`, sin 402.
-
-        La auth es **opcional**: `usuario_actual_opcional` sí está entre las dependencias
-        (nunca lanza 401) y solo sirve para no contar al propio vendedor en la métrica.
-        Lo que no puede aparecer es `usuario_actual`, que exigiría sesión.
-        """
-        sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
-        self._con_sesion(sesion)
+    def test_ahora_exige_autenticacion(self):
+        """La barrera empieza por exigir cuenta: sin sesión, 401 (antes era público)."""
+        main.app.dependency_overrides.clear()
+        main.app.dependency_overrides[obtener_sesion] = lambda: Mock()
 
         respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
 
-        self.assertEqual(respuesta.status_code, 200)  # sin Authorization: no da 401
+        self.assertEqual(respuesta.status_code, 401)
         ruta = next(
             r
             for r in main.app.routes
             if getattr(r, "path", None) == "/marketplace/publicaciones/{publicacion_id}/contacto"
         )
         nombres_dependencias = {d.call.__name__ for d in ruta.dependant.dependencies}
-        self.assertNotIn("usuario_actual", nombres_dependencias)
-        self.assertIn("usuario_actual_opcional", nombres_dependencias)
+        self.assertIn("usuario_actual", nombres_dependencias)
 
 
 class ContactoNoCuentaAlVendedorTests(unittest.TestCase):
-    """El dueño del anuncio recibe el contacto, pero no ensucia la métrica de demanda.
-
-    `ContactoRevelado` existe para medir **demanda de compradores**. El vendedor abriendo
-    su propio anuncio no es demanda, y con un puñado de cuentas de prueba el autoconsumo
-    domina el número desde el primer día — es exactamente lo que pasó con los desbloqueos
-    por tokens, que resultaron ser todos del equipo y por eso no dicen nada.
-    """
+    """El dueño del anuncio ve su propio número, se saltea el chat y no ensucia la
+    métrica de demanda (`ContactoRevelado` mide compradores, no autoconsumo)."""
 
     def setUp(self):
         self.cliente = TestClient(main.app)
@@ -403,11 +425,12 @@ class ContactoNoCuentaAlVendedorTests(unittest.TestCase):
 
     def _con(self, sesion, usuario):
         main.app.dependency_overrides[obtener_sesion] = lambda: sesion
-        main.app.dependency_overrides[usuario_actual_opcional] = lambda: usuario
+        main.app.dependency_overrides[usuario_actual] = lambda: usuario
 
     def test_el_vendedor_recibe_el_contacto_pero_no_se_registra(self):
+        # id=7 == `_vendedor().usuario_id`: es el dueño, no pasa por el chat.
         sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
-        self._con(sesion, _usuario())  # id=7 == `_vendedor().usuario_id`
+        self._con(sesion, _usuario())
 
         respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
 
@@ -417,9 +440,11 @@ class ContactoNoCuentaAlVendedorTests(unittest.TestCase):
         sesion.add.assert_not_called()
         sesion.commit.assert_not_called()
 
-    def test_otro_usuario_autenticado_si_cuenta(self):
-        """Estar logueado no exime: solo se descuenta al vendedor de ESE anuncio."""
-        sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
+    def test_otro_usuario_con_chat_habilitado_si_cuenta(self):
+        """Un comprador (id≠7) con la conversación ya respondida: se registra la fila."""
+        sesion = _sesion_falsa(
+            [_publicacion(vendedor_id=3), _vendedor(), _conversacion(habilitado=True)]
+        )
         self._con(sesion, _usuario(id_=99, nombre="Compradora"))
 
         respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
@@ -428,16 +453,13 @@ class ContactoNoCuentaAlVendedorTests(unittest.TestCase):
         self.assertEqual(sesion.add.call_count, 1)
         self.assertIsInstance(sesion.add.call_args.args[0], ContactoRevelado)
 
-    def test_anonimo_sigue_registrando_igual_que_antes(self):
-        """Sin token, el comportamiento no cambia: es el caso mayoritario."""
-        sesion = _sesion_falsa([_publicacion(vendedor_id=3), _vendedor()])
-        self._con(sesion, None)
+    def test_anonimo_ahora_da_401(self):
+        """Sin token ya no se entrega el número: la barrera arranca en la sesión."""
+        main.app.dependency_overrides[obtener_sesion] = lambda: Mock()
 
         respuesta = self.cliente.post("/marketplace/publicaciones/10/contacto")
 
-        self.assertEqual(respuesta.status_code, 200)
-        self.assertEqual(sesion.add.call_count, 1)
-        sesion.commit.assert_called_once()
+        self.assertEqual(respuesta.status_code, 401)
 
 
 def _indice_ruta(path: str, metodo: str) -> int:

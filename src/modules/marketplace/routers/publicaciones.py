@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session, selectinload
 from src.core.database import obtener_sesion
 from src.modules.auth.dependencies import (
     usuario_actual,
-    usuario_actual_opcional,
     admin_actual,
 )
 from src.modules.auth.models import Usuario
@@ -35,6 +34,8 @@ from src.modules.vehiculos.models.vehiculo import Vehiculo
 from src.modules.vehiculos.models.vehiculo_favorito import VehiculoFavorito
 from src.modules.marketplace.models import (
     ContactoRevelado,
+    Conversacion,
+    EstadoConversacion,
     EstadoModeracion,
     EstadoPublicacion,
     EstadoVerificacion,
@@ -1302,9 +1303,14 @@ def eliminar_foto(
 # ──────────────── Contacto con el vendedor (TASK-001) ────────────────
 #
 # Cierra el circuito del marketplace: el comprador pide el número y se va a WhatsApp.
-# PÚBLICO (sin `usuario_actual`) y GRATIS (sin `debitar_tokens`): §1.0.3 dice que el
-# contacto es libre. El teléfono no viaja en el feed ni en el detalle — solo aquí, bajo
-# una acción explícita, que además es la barrera contra el scraping de números (§9).
+# GRATIS (sin `debitar_tokens`): §1.0.3 dice que el contacto es libre. El teléfono no
+# viaja en el feed ni en el detalle — solo aquí, bajo una acción explícita.
+#
+# BARRERA DE SEGURIDAD (Marcos, 2026-09-02): ya NO es público. Para ver el WhatsApp
+# del vendedor hace falta (a) sesión iniciada y (b) un hilo de chat interno en el que
+# el vendedor haya respondido o compartido su contacto (`Conversacion.
+# contacto_habilitado_en`). Así el número no se entrega a un anónimo ni a quien solo
+# escribió sin respuesta. El dueño del anuncio se saltea la barrera (ve su propio dato).
 #
 # Va declarado ANTES de la dinámica `GET /publicaciones/{publicacion_id}` del final (§5).
 
@@ -1335,26 +1341,25 @@ def _vendedor_de(sesion: Session, pub: PublicacionInterna) -> Vendedor | None:
 def revelar_contacto(
     publicacion_id: int,
     sesion: Session = Depends(obtener_sesion),
-    usuario: Usuario | None = Depends(usuario_actual_opcional),
+    usuario: Usuario = Depends(usuario_actual),
 ):
-    """Devuelve el contacto del vendedor y registra la revelación (métrica anónima).
+    """Devuelve el WhatsApp del vendedor, SOLO si ya hubo contacto por el chat interno.
 
+    - **401** si no hay sesión: la barrera empieza por exigir cuenta.
     - **404** si la publicación no existe o no es visible públicamente (borrador,
       pausada o vendida): indistinto, para no revelar qué ids existen.
     - **409** si el vendedor todavía no cargó un teléfono. Es "dato no disponible", no
       un fallo: se responde con copy que explica la alternativa, nunca un 500.
-    - Registra un `ContactoRevelado` **anónimo**: ni IP, ni user-agent, ni usuario (§9).
+    - **422 `chat_requerido`** si no existe un hilo con este vendedor donde él ya haya
+      respondido (o compartido su contacto). El cuerpo trae `conversacion_id` (o
+      `null`) para que la UI abra el chat.
+    - **422 `chat_bloqueado`** si el vendedor cerró ese hilo.
+    - Registra un `ContactoRevelado` (métrica de demanda) salvo que quien consulta sea
+      el propio vendedor.
 
-    **Auth opcional** (`usuario_actual_opcional`, nunca 401): el endpoint sigue siendo
-    público y sin token se comporta igual que antes. Si llega un Bearer válido y quien
-    consulta **es el propio vendedor**, se le devuelve el contacto pero **no se registra
-    la revelación**: `ContactoRevelado` mide *demanda de compradores*, y el vendedor
-    mirando su propio anuncio no es demanda. Con un puñado de cuentas de prueba, el
-    autoconsumo domina la métrica desde el primer día — es lo que ya pasó con los
-    desbloqueos por tokens, todos del equipo, que por eso no dicen nada.
-
-    Un token inválido o vencido no rompe nada: `usuario_actual_opcional` devuelve `None`
-    y el flujo cae en la rama anónima.
+    El dueño del anuncio se saltea la barrera: ve su propio número y no ensucia la
+    métrica (se compara contra el vendedor RESUELTO, que en la etapa 2 deja de
+    coincidir con `pub.usuario_id`).
     """
     pub = sesion.execute(
         select(PublicacionInterna).where(
@@ -1379,12 +1384,37 @@ def revelar_contacto(
             ),
         )
 
-    # El dueño del anuncio no cuenta como demanda: se le entrega el contacto igual, pero
-    # sin ensuciar la métrica. Se compara contra el vendedor RESUELTO (no contra
-    # `pub.usuario_id`), que es quien de verdad recibe los mensajes; en la etapa 2 esos
-    # dos dejan de coincidir.
-    es_el_vendedor = usuario is not None and vendedor.usuario_id == usuario.id
+    es_el_vendedor = vendedor.usuario_id == usuario.id
     if not es_el_vendedor:
+        conv = sesion.execute(
+            select(Conversacion).where(
+                and_(
+                    Conversacion.publicacion_interna_id == pub.id,
+                    Conversacion.comprador_usuario_id == usuario.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if conv is not None and conv.estado == EstadoConversacion.BLOQUEADA.value:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "codigo": "chat_bloqueado",
+                    "mensaje": "El vendedor cerró este chat.",
+                    "conversacion_id": conv.id,
+                },
+            )
+        if conv is None or conv.contacto_habilitado_en is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "codigo": "chat_requerido",
+                    "mensaje": (
+                        "Escríbele al vendedor por el chat de CarStore. Cuando te "
+                        "responda se habilita su WhatsApp."
+                    ),
+                    "conversacion_id": conv.id if conv is not None else None,
+                },
+            )
         sesion.add(ContactoRevelado(publicacion_interna_id=pub.id))
         sesion.commit()
 

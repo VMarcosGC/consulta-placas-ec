@@ -113,6 +113,28 @@ class EstadoCita(str, enum.Enum):
     CUMPLIDA = "cumplida"
 
 
+class EstadoConversacion(str, enum.Enum):
+    """Estado de un hilo de chat comprador↔vendedor (migración 0035).
+
+    `abierta` admite mensajes de ambos lados. `bloqueada` la pone SOLO el vendedor
+    para cortar a un comprador molesto: nadie puede volver a escribir, pero el hilo
+    queda visible como registro. `archivada` la oculta de la bandeja por defecto
+    sin borrar nada.
+    """
+
+    ABIERTA = "abierta"
+    BLOQUEADA = "bloqueada"
+    ARCHIVADA = "archivada"
+
+
+class RolConversacion(str, enum.Enum):
+    """Lado que escribió un mensaje. Se desnormaliza en `mensajes.rol_autor` para no
+    tener que comparar ids de usuario al pintar el hilo."""
+
+    COMPRADOR = "comprador"
+    VENDEDOR = "vendedor"
+
+
 class TipoVendedor(str, enum.Enum):
     """Naturaleza del vendedor detrás de una publicación (AGENTS §1.0.4).
 
@@ -888,3 +910,100 @@ class CitaServicio(Base):
 
     servicio: Mapped["Servicio"] = relationship()
     solicitante: Mapped["Usuario"] = relationship()  # noqa: F821
+
+
+class Conversacion(Base):
+    """Hilo de chat interno entre UN comprador y el vendedor de UNA publicación
+    (migración 0035). Un hilo por (publicación, comprador): la UK lo garantiza.
+
+    Sirve además como **barrera de seguridad para el WhatsApp del vendedor** (§9): el
+    endpoint `POST /publicaciones/{id}/contacto` solo entrega el teléfono cuando este
+    hilo existe y `contacto_habilitado_en` está seteado —lo que ocurre cuando el
+    vendedor respondió al menos una vez o lo compartió a mano—. Así el número no se
+    revela a un anónimo ni a quien solo escribió sin respuesta.
+
+    `vendedor_usuario_id` se desnormaliza desde el `Vendedor` de la publicación al
+    crear el hilo, para listar "mis conversaciones como vendedor" sin joins.
+    """
+
+    __tablename__ = "conversaciones"
+    __table_args__ = (
+        UniqueConstraint(
+            "publicacion_interna_id", "comprador_usuario_id",
+            name="uq_conversacion_publicacion_comprador",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    publicacion_interna_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("publicaciones_internas.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    comprador_usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    vendedor_usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    estado: Mapped[str] = mapped_column(
+        String(16), nullable=False,
+        server_default=EstadoConversacion.ABIERTA.value,
+        default=EstadoConversacion.ABIERTA.value,
+    )
+    # Momento en que el vendedor habilitó su contacto para este comprador (respondió
+    # o lo compartió explícitamente). NULL = todavía no se puede revelar el WhatsApp.
+    contacto_habilitado_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ultimo_mensaje_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    no_leidos_comprador: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), default=0
+    )
+    no_leidos_vendedor: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), default=0
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    publicacion: Mapped["PublicacionInterna"] = relationship()
+    comprador: Mapped["Usuario"] = relationship(foreign_keys=[comprador_usuario_id])  # noqa: F821
+    vendedor: Mapped["Usuario"] = relationship(foreign_keys=[vendedor_usuario_id])  # noqa: F821
+    mensajes: Mapped[list["Mensaje"]] = relationship(
+        back_populates="conversacion", cascade="all, delete-orphan",
+        order_by="Mensaje.id",
+    )
+
+
+class Mensaje(Base):
+    """Un mensaje dentro de una `Conversacion` (migración 0035). Texto plano, sin
+    adjuntos: el chat interno es para coordinar, no un canal de archivos."""
+
+    __tablename__ = "mensajes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    conversacion_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("conversaciones.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    autor_usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False
+    )
+    rol_autor: Mapped[str] = mapped_column(String(12), nullable=False)
+    cuerpo: Mapped[str] = mapped_column(String(2000), nullable=False)
+    leido_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    conversacion: Mapped["Conversacion"] = relationship(back_populates="mensajes")
+    autor: Mapped["Usuario"] = relationship()  # noqa: F821

@@ -35,6 +35,7 @@ from src.modules.marketplace.routers.certificacion import router as certificacio
 from src.modules.marketplace.routers.servicios import router as servicios_router
 from src.modules.marketplace.routers.puntos_encuentro import router as puntos_encuentro_router
 from src.modules.marketplace.routers.agendamiento import router as agendamiento_router
+from src.modules.marketplace.routers.chat import router as chat_router
 
 app = FastAPI(title="Consulta de Placas Ecuador")
 
@@ -71,3 +72,4 @@ app.include_router(certificacion_router)
 app.include_router(servicios_router)
 app.include_router(puntos_encuentro_router)
 app.include_router(agendamiento_router)
+app.include_router(chat_router)

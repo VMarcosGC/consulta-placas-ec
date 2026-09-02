@@ -19,6 +19,7 @@ from src.core.validators import validar_placa
 from src.modules.vehiculos.schemas.vehiculo import VehiculoSalidaCompartida
 from src.modules.marketplace.models import (
     EstadoCita,
+    EstadoConversacion,
     EstadoModeracion,
     EstadoPresencia,
     EstadoPublicacion,
@@ -27,6 +28,7 @@ from src.modules.marketplace.models import (
     FranjaPresencia,
     PlanPublicacion,
     PublicacionInterna,
+    RolConversacion,
     TipoVendedor,
 )
 
@@ -1474,3 +1476,84 @@ class CitaSalida(BaseModel):
     fecha_propuesta: date | None
     franja_propuesta: FranjaAgenda | None
     creado_en: datetime
+
+
+# ════════════════ Chat interno comprador↔vendedor (migración 0035) ════════════════
+
+
+class ConversacionCrear(BaseModel):
+    """Abre (o reusa) el hilo con el vendedor de una publicación. El primer mensaje
+    es opcional: la UI puede crear el hilo y después escribir."""
+
+    mensaje: str | None = Field(default=None, min_length=1, max_length=2000)
+
+    @field_validator("mensaje")
+    @classmethod
+    def _limpiar(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+
+class MensajeCrear(BaseModel):
+    cuerpo: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("cuerpo")
+    @classmethod
+    def _no_vacio(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("El mensaje no puede estar vacío.")
+        return v
+
+
+class EstadoConversacionPatch(BaseModel):
+    """Solo el vendedor puede `bloqueada`; cualquiera de los dos, `archivada` /
+    `abierta`."""
+
+    estado: Literal["abierta", "bloqueada", "archivada"]
+
+
+class MensajeSalida(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    rol_autor: RolConversacion
+    cuerpo: str
+    mio: bool = False
+    leido_en: datetime | None = None
+    creado_en: datetime
+
+
+class ConversacionResumenSalida(BaseModel):
+    """Item de la bandeja `GET /marketplace/conversaciones`."""
+
+    id: int
+    publicacion_id: int
+    publicacion_titulo: str
+    publicacion_foto: str | None
+    publicacion_precio: Decimal | None
+    contraparte_nombre: str
+    mi_rol: RolConversacion
+    estado: EstadoConversacion
+    contacto_habilitado: bool
+    no_leidos: int
+    ultimo_mensaje: str | None
+    ultimo_mensaje_en: datetime | None
+
+
+class ConversacionSalida(BaseModel):
+    """Hilo completo: metadatos + mensajes en orden."""
+
+    id: int
+    publicacion_id: int
+    publicacion_titulo: str
+    publicacion_foto: str | None
+    publicacion_precio: Decimal | None
+    contraparte_nombre: str
+    mi_rol: RolConversacion
+    estado: EstadoConversacion
+    contacto_habilitado: bool
+    puede_bloquear: bool
+    mensajes: list[MensajeSalida]
