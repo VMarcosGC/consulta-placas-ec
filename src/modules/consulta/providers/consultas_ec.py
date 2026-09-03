@@ -154,6 +154,13 @@ class ConsultasECProvider(ProveedorVehicular):
             motor=motor,
             vin=vin,
             titular=titular,
+            numero_propietarios=_a_int(
+                _primero(
+                    d, "numero_propietarios", "num_propietarios", "n_propietarios",
+                    "propietarios", "numero_duenos", "num_owners", "owners", "owner_count",
+                    "transferencias_totales",
+                )
+            ),
             multas=_primero(d, "multas", "infracciones", "fines") or [],
             valores_pendientes=_primero(d, "valores_pendientes", "total_a_pagar", "pending_amount"),
             costo_estimado_usd=self.costo if estado == ESTADO_OK else None,

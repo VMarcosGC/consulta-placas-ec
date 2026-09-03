@@ -188,16 +188,29 @@ al de comprar/vender; mezclarlo con el feed diluye ambos.
 
 ## 5. Cambios necesarios
 
-### 5.1 Backend (mínimo)
+### 5.1 Backend
 
 - **Migración `0036`:** `UPDATE productos_consulta SET tokens = 0, precio_referencial_usd = 0`
   para todos los códigos. Es la que AGENTS.md §1.0.3 dejó anotada como pendiente para
   "cuando se retome el tema de la consulta por placa". Deja las ramas de cobro cableadas
   pero inalcanzables (`debitar_tokens(0)` es no-op).
-- **`consultar_perfil`:** con sesión, revelar todos los productos activos (ya son gratis)
-  sin exigir un `POST /desbloquear` por bloque. Cambio acotado: `desbloqueados = {todos los
-  códigos activos} if usuario else set()`. Reversible cuando vuelva la monetización.
-- **No** se toca el pipeline de fuentes ni el catálogo. SRI/FGE siguen dormidos.
+- **`consultar_perfil` — gate por login, no tokens:** con sesión se revelan todos los
+  productos activos sin `POST /desbloquear` por bloque (`desbloqueados = {códigos activos}
+  if usuario else set()`) Y se **llama al proveedor** (`asegurar_datos_proveedor`, API
+  REST) para que los bloques ampliados tengan contenido. Reversible.
+- **`consultar_perfil` — n.º de dueños:** nuevo bloque `historial_propietarios`
+  (`numero_propietarios`), lo aporta el proveedor (`ResultadoVehicular.numero_propietarios`;
+  `mock` lo simula 1–4; `consultas_ec._mapear` lo lee defensivo). Se gatea junto a
+  `identificadores_tecnicos` (visible con sesión).
+- **`_ant_con_timeout` — saltar de sitio si ANT tarda:** ANT se envuelve en
+  `asyncio.wait_for(timeout=CONSULTA_TIMEOUT_ANT_SEGUNDOS)` (default 45 s). Si lo excede:
+  (a) se **encola ANT para el worker** (IP residencial, reintenta y llena la caché),
+  (b) se responde `en_proceso` para que el frontend siga polleando, y (c) para la **ficha
+  básica** (gratis) se **salta al proveedor** (API, sin captcha) como fuente alternativa —
+  solo con un proveedor real configurado (`mock` nunca entra por acá, §1.0.3). El
+  resultado se cachea → el siguiente poll ya no re-llama.
+- **No** se toca el pipeline de scraping de fuentes ni el catálogo. SRI/FGE siguen
+  dormidos.
 
 ### 5.2 Frontend
 
@@ -212,11 +225,16 @@ al de comprar/vender; mezclarlo con el feed diluye ambos.
 
 ### 5.3 Fuera de este cambio (siguiente iteración)
 
-- Probar **ANT "valores de matrícula"** desde el worker.
+- Probar **ANT "valores de matrícula"** desde el worker (2ª fuente para la vista básica,
+  reforzaría el salto de `_ant_con_timeout`).
 - Sumar **EMOV Cuenca** y **ATM Guayaquil** al worker (patrón AxisCloud/propio).
 - Integrar **Función Judicial eSATJE** como bloque "temas judiciales" (Fase 3).
-- Bloque **n.º de dueños** cuando el proveedor API confirme el contrato.
+- **Contrato real del proveedor** (`consultas_ec`): confirmar los nombres de campo de
+  `numero_propietarios` y ajustar `_mapear`. El bloque ya está cableado punta a punta con
+  `mock`.
 - Consentimiento explícito de "voy a comprar este auto" para Fase 3.
+- Considerar un **segundo proveedor** en `providers/` para que el salto por timeout tenga
+  a dónde ir aunque `consultas_ec` también falle (carrera entre proveedores).
 
 ---
 

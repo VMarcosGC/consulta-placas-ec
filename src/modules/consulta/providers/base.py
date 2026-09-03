@@ -50,6 +50,9 @@ class ResultadoVehicular:
     vin: str | None = None
     # Titular (PII): nombre crudo. Se valida/ofusca aguas abajo, NUNCA se expone crudo.
     titular: str | None = None
+    # Historial registral. `numero_propietarios` = cuántos dueños ha tenido la placa
+    # (transferencias + 1). Es un conteo, no PII: se expone tal cual tras el gateo.
+    numero_propietarios: int | None = None
     # Transaccional (informativo; las multas "oficiales" siguen viniendo del scraping).
     multas: list[dict] = field(default_factory=list)
     valores_pendientes: float | None = None

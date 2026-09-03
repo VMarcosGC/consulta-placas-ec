@@ -170,6 +170,26 @@ class Titular(BaseModel):
     )
 
 
+class HistorialPropietarios(BaseModel):
+    """N.º de dueños que ha tenido la placa (dato registral, no PII).
+
+    Lo aporta el PROVEEDOR vehicular (capa `providers/`). Se gatea junto con los
+    identificadores técnicos (`identificadores_tecnicos`): mientras la monetización
+    está suspendida (§1.0.3) alcanza con tener sesión para verlo.
+    """
+
+    bloqueado: bool = Field(
+        True, description="True si el conteo está oculto (no hay sesión / no desbloqueado)"
+    )
+    disponible: bool = Field(
+        False, description="True si el proveedor activo puede aportar el n.º de propietarios"
+    )
+    numero_propietarios: int | None = Field(
+        None, description="Cuántos dueños ha tenido la placa; solo si bloqueado=False"
+    )
+    mensaje: str | None = Field(None, description="Texto para el frontend (es-EC, tuteo)")
+
+
 class MultaItem(BaseModel):
     """Multa/citación/infracción combinada de las fuentes de tránsito (resumen)."""
 
@@ -313,6 +333,9 @@ class VehiculoConsolidadoResponse(BaseModel):
     datos_basicos: DatosBasicos = Field(default_factory=DatosBasicos)
     identificacion: Identificacion = Field(default_factory=Identificacion)
     titular: Titular = Field(default_factory=Titular)
+    historial_propietarios: HistorialPropietarios = Field(
+        default_factory=HistorialPropietarios
+    )
     valores_tributarios: ValoresTributarios | None = None
     multas_pendientes: list[MultaItem] = Field(default_factory=list)
     multas_detalle: list[MultaDetalle] = Field(

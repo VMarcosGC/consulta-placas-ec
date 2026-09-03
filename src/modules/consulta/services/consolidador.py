@@ -15,6 +15,7 @@ from src.modules.consulta.schemas import (
     DatosBasicos,
     EstadoFuente,
     EstadoFuenteItem,
+    HistorialPropietarios,
     Identificacion,
     MultaDetalle,
     MultaItem,
@@ -337,10 +338,12 @@ def consolidar_placa(
     # son GRATIS vía `consulta_publica_base` (0 tokens), así que no se gatea `datos_basicos`.
     # Un dato es "disponible" si ya está (scraping/proveedor cacheado) O si el proveedor
     # activo declara que PUEDE entregarlo (capacidad), sin tener que llamarlo en el preview.
+    n_propietarios = prov.get("numero_propietarios")
     identificadores_disponible = bool(
         identificacion.vin_ofuscado
         or identificacion.numero_motor_ofuscado
         or identificacion.numero_chasis_ofuscado
+        or n_propietarios is not None
     ) or ("identificadores_tecnicos" in proveedor_capacidades)
     titular_disponible = "titular_validado" in proveedor_capacidades
     multas_disponible = len(multas_detalle) > 0
@@ -362,6 +365,20 @@ def consolidar_placa(
         proveedor_datos,
         desbloqueado="titular_validado" in productos_desbloqueados,
         disponible=titular_disponible,
+    )
+
+    # ── Historial de propietarios (n.º de dueños): conteo, no PII ──
+    # Se gatea junto a los identificadores técnicos: con sesión (§1.0.3) se ve.
+    hist_desbloqueado = "identificadores_tecnicos" in productos_desbloqueados
+    historial_propietarios = HistorialPropietarios(
+        bloqueado=not hist_desbloqueado,
+        disponible=identificadores_disponible,
+        numero_propietarios=n_propietarios if hist_desbloqueado else None,
+        mensaje=(
+            "El proveedor de datos no informó el número de propietarios de esta placa."
+            if hist_desbloqueado and n_propietarios is None and identificadores_disponible
+            else None
+        ),
     )
 
     # ── Gateo de secciones según lo desbloqueado ──
@@ -394,6 +411,7 @@ def consolidar_placa(
         datos_basicos=datos_basicos,
         identificacion=identificacion,
         titular=titular,
+        historial_propietarios=historial_propietarios,
         valores_tributarios=valores_tributarios,
         multas_pendientes=multas_pendientes,
         multas_detalle=multas_detalle,

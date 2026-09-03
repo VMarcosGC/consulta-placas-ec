@@ -62,6 +62,7 @@ class MockProvider(ProveedorVehicular):
             motor=motor,
             vin=vin,
             titular=_NOMBRES[_h(placa, "titular") % len(_NOMBRES)],
+            numero_propietarios=1 + (_h(placa, "duenos") % 4),  # 1–4, estable por placa
             multas=[],
             valores_pendientes=None,
             costo_estimado_usd=Decimal("0.00"),  # el mock no cuesta

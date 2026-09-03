@@ -33,9 +33,11 @@ from src.modules.consulta.services.cola import encolar_scraping, fuente_en_error
 from src.modules.consulta.services.catalogo_fuentes import CATALOGO_FUENTES
 from src.modules.consulta.services.consolidador import consolidar_placa
 from src.modules.consulta.services.proveedor import (
+    asegurar_datos_proveedor,
     capacidades_proveedor,
     leer_proveedor_cacheado,
 )
+from src.modules.consulta.providers.selector import nombre_proveedor_activo
 from src.modules.consulta.schemas import VehiculoConsolidadoResponse
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,13 @@ SCRAPING_SINCRONO = os.getenv("SCRAPING_SINCRONO", "false").strip().lower() in (
     "1", "true", "yes", "si", "sí",
 )
 
+# Techo de espera para la fuente troncal (ANT) en la consulta consolidada. Si ANT no
+# responde en este tiempo, se deja `en_proceso` (se encola para el worker de IP
+# residencial y el frontend sigue polleando) y —para la ficha básica, que es gratis—
+# se SALTA al proveedor vehicular (API REST, sin captcha) como fuente alternativa.
+# Subir/bajar por env si ANT se pone lento. En modo síncrono (IP residencial) no aplica.
+CONSULTA_TIMEOUT_ANT_SEGUNDOS = float(os.getenv("CONSULTA_TIMEOUT_ANT_SEGUNDOS", "45"))
+
 # Fuentes que se scrapean con Playwright en modo síncrono (clave → función de servicio).
 # FGE NO está: su portal agregó hCaptcha → es `consulta_externa` (passthrough instantáneo).
 _FUENTES_SCRAPING_DIRECTO = {
@@ -86,6 +95,37 @@ async def _scrapear_con_cache_propia(identificador: str, fuente: str, fn_consult
         return fuente, await consultar_con_cache(sesion, identificador, fuente, fn_consultar)
     finally:
         sesion.close()
+
+
+async def _ant_con_timeout(sesion: Session, placa_limpia: str) -> dict:
+    """ANT directo, pero con techo de tiempo (`CONSULTA_TIMEOUT_ANT_SEGUNDOS`).
+
+    Si ANT lo excede: se encola para el worker (IP residencial, que reintenta y llena
+    la caché) y se devuelve `en_proceso` para que el frontend siga polleando. El caller
+    (`consultar_perfil`) además salta al proveedor para no dejar la ficha básica vacía.
+    """
+    try:
+        return await asyncio.wait_for(
+            consultar_con_cache(sesion, placa_limpia, "ANT", consultar_ant),
+            timeout=CONSULTA_TIMEOUT_ANT_SEGUNDOS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "ANT excedió %ss para %s → se encola y se responde en_proceso",
+            CONSULTA_TIMEOUT_ANT_SEGUNDOS, placa_limpia,
+        )
+        try:
+            encolar_scraping(sesion, placa_limpia, "ANT")
+        except Exception as e:
+            logger.warning("Encolado de ANT tras timeout falló para %s: %r", placa_limpia, e)
+            sesion.rollback()
+        return {
+            "fuente": "ANT",
+            "placa": placa_limpia,
+            "estado": ESTADO_EN_PROCESO,
+            "datos": None,
+            "error": "La consulta está tardando más de lo normal; seguimos intentando.",
+        }
 
 
 def _normalizar_identificador_worker(fuente: str, identificador: str) -> str:
@@ -274,8 +314,8 @@ async def _obtener_fuentes_placa(sesion: Session, placa_limpia: str) -> dict:
         resultado_amt = directos["AMT"]
         resultado_epmtsd = directos["EPMTSD"]
     else:
-        # Nube datacenter: ANT directo; AMT/EPMTSD vía worker híbrido (en_proceso).
-        resultado_ant = await consultar_con_cache(sesion, placa_limpia, "ANT", consultar_ant)
+        # Nube datacenter: ANT directo (con techo de tiempo); AMT/EPMTSD vía worker.
+        resultado_ant = await _ant_con_timeout(sesion, placa_limpia)
         resultado_amt = consultar_via_worker(sesion, placa_limpia, "AMT")
         resultado_epmtsd = consultar_via_worker(sesion, placa_limpia, "EPMTSD")
 
@@ -359,9 +399,29 @@ async def consultar_perfil(
         if solo_cache
         else await _obtener_fuentes_placa(sesion, placa_limpia)
     )
-    # Proveedor: NO se llama en el preview gratis. Solo se lee lo ya cacheado (de un
-    # desbloqueo previo) y las capacidades (para marcar las tarjetas disponibles).
-    proveedor_datos = leer_proveedor_cacheado(sesion, placa_limpia)
+    # Proveedor vehicular (API REST, sin captcha):
+    #  - `solo_cache` (mini del marketplace): NUNCA se llama, solo caché (§1.0.1).
+    #  - usuario con sesión en la consulta real: se ASEGURAN los datos (llama al proveedor
+    #    si no hay caché) — los bloques ampliados (identificadores, n.º de propietarios,
+    #    titular) los necesitan.
+    #  - anónimo: solo caché... SALVO que ANT no haya respondido a tiempo. En ese caso se
+    #    SALTA al proveedor como fuente alternativa para la ficha básica (que es gratis).
+    #    Solo con un proveedor real configurado (`mock` fabrica datos → nunca en este
+    #    camino; §1.0.3). El resultado se cachea, así el polling siguiente ya no re-llama.
+    if solo_cache:
+        proveedor_datos = leer_proveedor_cacheado(sesion, placa_limpia)
+    elif usuario:
+        proveedor_datos = await asegurar_datos_proveedor(sesion, placa_limpia)
+    else:
+        proveedor_datos = leer_proveedor_cacheado(sesion, placa_limpia)
+        ant_ok = (fuentes.get("ANT") or {}).get("estado") == "consulta_realizada"
+        if (
+            proveedor_datos is None
+            and not ant_ok
+            and nombre_proveedor_activo() != "mock"
+            and capacidades_proveedor()
+        ):
+            proveedor_datos = await asegurar_datos_proveedor(sesion, placa_limpia)
     return consolidar_placa(
         placa_limpia,
         fuentes,
