@@ -21,6 +21,32 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-09-03 (2) — Consulta: n.º de dueños + timeout de ANT con salto al proveedor
+
+**Repos:** backend (`main`, commit `027b204`) · frontend (`main`, commit `3b9c47a`).
+
+**1. Bloque "n.º de dueños".** `ResultadoVehicular.numero_propietarios` (conteo, no PII;
+`mock` simula 1–4, `consultas_ec._mapear` lo lee defensivo). Schema
+`HistorialPropietarios` + `VehiculoConsolidadoResponse.historial_propietarios`, gateado
+junto a `identificadores_tecnicos` (visible con sesión). El frontend lo pinta como
+"Propietarios · Dueños registrados: N" en el acordeón de identificación.
+
+**2. `consultar_perfil` con sesión llama al proveedor.** Antes el login revelaba solo
+los *flags* de gateo; ahora también `asegurar_datos_proveedor` (API REST) para que los
+bloques ampliados (identificadores, n.º de dueños, titular) tengan contenido.
+
+**3. La consulta básica tardaba demasiado → `_ant_con_timeout`.** ANT se envuelve en
+`asyncio.wait_for(CONSULTA_TIMEOUT_ANT_SEGUNDOS, default 45s)`. Al exceder: (a) se encola
+ANT para el worker de IP residencial, (b) se responde `en_proceso` (el frontend sigue
+polleando) y (c) para la ficha básica —que es gratis— se **salta al proveedor** vehicular
+(API, sin captcha) como fuente alternativa. Solo con un proveedor real configurado;
+`mock` nunca entra por este camino (§1.0.3). El resultado se cachea.
+
+**Tests:** +10 (`tests/test_consulta_solo_cache.py`). Suite **288 OK**. Frontend build en
+verde. Migración 0036 + esto lo aplica Render en el deploy.
+
+---
+
 ## 2026-09-03 — Consulta de datos como sección aislada (`/verificar`) + hub de dos puertas
 
 **Repos:** backend `consulta_placas_ec` (`main`, migración 0036, commit `09ec154`) ·
