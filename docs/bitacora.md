@@ -21,6 +21,47 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-09-03 — Consulta de datos como sección aislada (`/verificar`) + hub de dos puertas
+
+**Repos:** backend `consulta_placas_ec` (`main`, migración 0036, commit `09ec154`) ·
+frontend `consulta-placas-web` (`main`, commit `766db40`).
+
+**1. Análisis de fuentes y fases** —
+[`docs/producto/consulta_datos_fases.md`](producto/consulta_datos_fases.md): inventario
+de lo que ya teníamos (ANT/AMT/EPMTSD activas; SRI/FGE dormidas por captcha; capa de
+proveedores API con `consultas_ec` como POC), evaluación de nuevas webs (ANT "valores de
+matrícula", más GADs municipales — EMOV Cuenca, ATM Guayaquil —, Función Judicial eSATJE
+para "temas judiciales", Registro Civil / Policía / aseguradoras como aspiracionales por
+requerir convenio), y agrupación en **3 fases**: básico gratis sin cuenta → ampliado con
+login → compra segura con consentimiento.
+
+**2. Backend (migración 0036 + `consultar_perfil`).** Se retoma "el tema de la consulta
+por placa" que AGENTS.md §1.0.3 dejó anotado:
+- `productos_consulta` con **todos los precios en 0** (deuda anotada saldada). El cobro
+  queda cableado pero inalcanzable.
+- `GET /consultar/{placa}/perfil`: **con sesión se revelan todos los bloques activos** sin
+  `POST /desbloquear` por bloque; sin sesión, teaser. El gate pasa a ser **login**, no
+  tokens. Reversible cuando vuelva la monetización.
+
+**3. Frontend — `/verificar` aislado + hub.**
+- `/verificar` es una **superficie propia**: sin Header/Footer/barra móvil/chat
+  (`lib/rutas.ts` + `ChromeSlot` en `layout.tsx`). Barra mínima propia con wordmark +
+  volver + tema. `/verificar` = landing con el campo de placa; `/verificar/{placa}` =
+  resultado **en bloques** (reusa `PerfilVehiculo`, que al montar re-consulta con token
+  si hay sesión).
+- **`/` pasa a ser un hub** de dos puertas: "Verificar un vehículo" → `/verificar` ·
+  "Marketplace y servicios" → `/marketplace`, sobre los accesos directos y el mapa que ya
+  estaban.
+- `/consultar` y `/consultar/{placa}` → `permanentRedirect` a `/verificar` (SEO). Enlace
+  "Verificar placa" en la nav del Header.
+
+**Pendientes (siguiente iteración, en el doc):** probar ANT "valores de matrícula" desde
+el worker; sumar EMOV Cuenca / ATM Guayaquil; bloque "temas judiciales" con eSATJE;
+bloque "n.º de dueños" al confirmar el contrato del proveedor; consentimiento explícito
+para Fase 3. Migración 0036 la aplica Render en el próximo deploy.
+
+---
+
 ## 2026-09-02 — Chat interno comprador↔vendedor, sello de mecánica flotante, análisis de agendamiento
 
 **Repos:** backend `consulta_placas_ec` (`main`, migración 0035, commits `d9b9b9d`,
