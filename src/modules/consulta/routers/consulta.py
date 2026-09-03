@@ -15,10 +15,7 @@ from src.core.database import obtener_sesion, SessionLocal
 from src.core.validators import validar_placa, validar_cedula
 from src.modules.auth.dependencies import usuario_actual_opcional
 from src.modules.auth.models import Usuario
-from src.modules.consulta.services.desbloqueos import (
-    catalogo_activo,
-    productos_desbloqueados,
-)
+from src.modules.consulta.services.desbloqueos import catalogo_activo
 from src.modules.consulta.services.ant import consultar_ant
 from src.modules.consulta.services.amt import consultar_amt
 from src.modules.consulta.services.epmtsd import consultar_epmtsd
@@ -348,10 +345,15 @@ async def consultar_perfil(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    desbloqueados = (
-        productos_desbloqueados(sesion, usuario.id, placa_limpia) if usuario else set()
-    )
     catalogo = catalogo_activo(sesion)
+    # Monetización suspendida (§1.0.3 + migración 0036: todos los productos a 0 tokens).
+    # El gate es LOGIN, no tokens: con sesión se revelan TODOS los bloques activos sin
+    # exigir un `POST /desbloquear` por bloque. Sin sesión, todo va en teaser (Fase 1).
+    # Reversible cuando vuelva el cobro: volver a `productos_desbloqueados(sesion, ...)`.
+    if usuario:
+        desbloqueados = {p.codigo for p in catalogo}
+    else:
+        desbloqueados = set()
     fuentes = (
         await _obtener_fuentes_placa_solo_cache(sesion, placa_limpia)
         if solo_cache
