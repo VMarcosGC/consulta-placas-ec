@@ -21,6 +21,30 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-09-03 (3) — Análisis: asistente IA del vehículo en el garage (no se construye aún)
+
+**Repo:** backend (`main`, commit — docs). Solo documento, sin código.
+
+Marcos pidió, en Mi Garage → mantenimientos, un módulo donde "viva un agente" al que se
+le lanzan consultas **sobre ese auto** (cómo cambiar pastillas/limpiaparabrisas, qué pasa
+si no cambio el aceite, qué es urgente, cuánto dura un repuesto…), y dejó explícito:
+**"únicamente lo dejamos para analizar y crear más adelante"**.
+
+[`docs/producto/asistente_vehiculo_garage.md`](producto/asistente_vehiculo_garage.md):
+concepto (asistente acotado a UN vehículo, tarjeta en `mi-garage/[id]`, privado del
+dueño), tipos de consulta agrupados, el contexto del auto que **ya guardamos** (ficha,
+kilometraje, `mantenimientos`, `plan-cuidado`, `gastos`) y lo que faltaría (intervalos de
+fábrica por modelo), modelo recomendado (**Claude Sonnet 5**, con caché del contexto y
+respuestas cortas; ~USD 8–15/mes a 1.000 consultas), grounding en 3 capas (system prompt
+→ base propia de los ~15 modelos comunes en Ecuador → `web_search` acotado), seguridad
+dura (asesoría sobre frenos/dirección: disclaimers, nada peligroso, criterio conservador,
+acotado al dominio), esbozo de arquitectura (`POST /vehiculos/{id}/asistente` en el módulo
+`vehiculos`, `ANTHROPIC_API_KEY` como feature flag, rate limit por usuario, tablas de
+conversación opcionales) y 4 fases. Cierra la promesa del `nota_ia` de `plan_cuidado.py`
+(AGENTS.md Fase 3).
+
+---
+
 ## 2026-09-03 (2) — Consulta: n.º de dueños + timeout de ANT con salto al proveedor
 
 **Repos:** backend (`main`, commit `027b204`) · frontend (`main`, commit `3b9c47a`).
