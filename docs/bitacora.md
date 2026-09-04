@@ -21,6 +21,36 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-09-03 (4) — IA por pantallas: landing chooser + arreglo del "se queda pensando"
+
+**Repo:** frontend `consulta-placas-web` (`main`, commit `bf9dc47`). Sin backend.
+
+**1. Tres mundos separados** (Marcos: la landing tenía encima toda la nav del market y
+debajo las dos puertas — redundante):
+- **Landing (`/`)** — chooser limpio: barra mínima (`BarraLanding`: wordmark + tema +
+  iniciar sesión), dos puertas ("Consultar una placa" → `/verificar` · "Marketplace y
+  servicios" → `/marketplace`) + mapa de stock. **Sin el Header del marketplace.** Fuera
+  la grilla "Entra directo a" y la publicidad.
+- **Marketplace y todo lo demás** — Header con su nav, **sin "Verificar placa"** (otra
+  pantalla; se llega desde la landing, a la que apunta el logo).
+- **Verificar** — ya estaba aislado.
+- `lib/rutas.ts`: `esLanding` / `esRutaVerificar` / `sinChromeMarketplace`; `ChromeSlot`
+  oculta el chrome en landing y verificar.
+
+**2. "La consulta se queda pensando y solo muestra el nombre del auto".** El polling de
+`PerfilVehiculo` a las fuentes municipales (AMT/EPMTSD, worker residencial) era infinito:
+si el worker no responde, giraba para siempre y solo se veía la ficha de ANT.
+- `MAX_CICLOS_POLLING` (~32 s). Al agotarse con fuentes aún `en_proceso`,
+  `marcarFuentesVaradas` las marca `error_fuente` → la pantalla llega a un estado FINAL
+  ("sin dato municipal" + botón de reintento). "Reintentar" reabre la ventana.
+- `/verificar/{placa}`: el `fetch` del SSR se corta a los 25 s (no deja la pantalla en
+  blanco con el backend frío).
+
+Verificado en el navegador: landing limpia, market con su nav sin "Verificar placa", y la
+consulta llega a estado final en vez de girar. tsc + eslint + build en verde.
+
+---
+
 ## 2026-09-03 (3) — Análisis: asistente IA del vehículo en el garage (no se construye aún)
 
 **Repo:** backend (`main`, commit — docs). Solo documento, sin código.
