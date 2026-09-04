@@ -21,6 +21,23 @@ fecha · rama · qué se hizo · verificación · pendientes.
 
 ---
 
+## 2026-09-03 (5) — Servicios: buscador + vista de favoritos
+
+**Repo:** frontend `consulta-placas-web` (`main`, commit `3850865`). Sin backend.
+
+`/servicios` tenía solo navegación por bloques de categoría y el ♥ por tarjeta (que
+guarda en `localStorage`, ya existía). Se agregó:
+- **Buscador de texto** arriba de las categorías (nombre, ciudad, provincia,
+  descripción, tipo). Con término escrito, la vista pasa a una **lista plana** de
+  resultados con chip de categoría + distancia/orden por cercanía.
+- **Botón "♥ Favoritos (N)"**: muestra solo los guardados; compone con el buscador.
+  Le da a los favoritos una vista propia en `/servicios` (antes solo en `/intereses`).
+- "Limpiar" resetea ambos filtros.
+
+tsc + eslint + build en verde. Verificado en el navegador.
+
+---
+
 ## 2026-09-03 (4) — IA por pantallas: landing chooser + arreglo del "se queda pensando"
 
 **Repo:** frontend `consulta-placas-web` (`main`, commit `bf9dc47`). Sin backend.
